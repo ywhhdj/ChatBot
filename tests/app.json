@@ -1,0 +1,76 @@
+{
+  "system": {
+    "log": {
+      "enabled": true,
+      "level": "INFO",
+      "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+      "datefmt": "%Y-%m-%d %H:%M:%S",
+      "log_dir": "logs"
+    },
+    "network": {
+      "enabled": true,
+      "timeout": 10,
+      "retry_count": 3,
+      "delay": 1.0
+    }
+  },
+  "database": {
+    "sqlite": {
+      "enabled": false,
+      "db": "chatbot.db"
+    }
+  },
+  "model": {
+    "llm": {
+      "enabled": true,
+      "model_type": "openai",
+      "model": "gpt-5.1",
+      "API_KEY": "sk-202603031555cheshi",
+      "BASE_URL": "http://115.190.213.187:23817/v1"
+    },
+    "tts": {
+      "enabled": true,
+      "output_type": "mp3",
+      "BASE_URL": "http://127.0.0.1:9880",
+      "API_KEY": ""
+    }
+  },
+  "services": {
+    "obs": {
+      "enabled": true,
+      "ip": "192.168.183.1",
+      "password": "iS7aZQOpCzWEhfj6",
+      "port": 4455
+    },
+    "live2d": {
+      "enabled": true,
+      "model_path": "d:\\Project\\ChatBot\\resources\\models\\live2d\\∑ ≈£\\hiyori_pro_mic.model3.json",
+      "mediaPipeFace_model_path": "d:\\Project\\ChatBot\\resources\\models\\mediapipe\\face_landmarker.task",
+      "is_face_detected": true
+    },
+    "browser": {
+      "enabled": true,
+      "name": "chrome",
+      "headless": true,
+      "profile_dir": ""
+    },
+    "livestream": {
+      "enabled": false,
+      "bilibili": {
+        "enabled": true,
+        "url": "https://www.bilibili.com/video/BV12J4114768"
+      }
+    }
+  },
+  "web": {
+    "enabled": true,
+    "resources_path": "d:\\Project\\ChatBot\\resources\\static",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "root_path": "/",
+    "allow_origins": ["*"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  }
+}

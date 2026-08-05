@@ -1,0 +1,35 @@
+import { LogLevel } from "./typings/enums";
+
+export const DEFAULT_CONFIG: AppOptions = {
+  websocket: {
+    maxReconnectAttempts: 5,
+    reconnectInterval: 1000,
+  },
+  text: {
+    speed: 100,
+    volume: 100,
+  },
+  background: {
+    name: "黑夜",
+    duration: 0.5,
+    url: "/images/background/night.webp",
+    index: 0,
+  },
+  sound: {
+    audio: {
+      name: '夏·烟火',
+      url: '/audios/夏·烟火.mp3',
+      progress: 0,
+    }
+  },
+  logger: {
+    enabled: true,
+    minLevel: LogLevel.INFO,
+    exclude: {
+      enabled: false,
+      length: 100, // 排除的模式数量
+      patterns: [],// 排除的模式
+    },
+    mode: 'real-time',
+  }
+}

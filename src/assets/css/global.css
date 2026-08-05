@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+.glass-core {
+  /* 玻璃核心 */
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(2px) saturate(180%);
+  -webkit-backdrop-filter: blur(2px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  /* box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.8); */
+  transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+  border-radius: 0.5rem;
+}
+
+.transparent-glass {
+  overflow: hidden;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+
+.color-glass {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+      rgba(196, 155, 253, 0.045) 0%,
+      rgba(251, 193, 133, 0.035) 30%,
+      rgba(144, 224, 239, 0.055) 60%,
+      rgba(192, 132, 252, 0.040) 100%);
+  pointer-events: none;
+  z-index: 0;
+}

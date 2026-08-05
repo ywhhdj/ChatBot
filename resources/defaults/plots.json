@@ -1,0 +1,34 @@
+{
+  "$schema": "../schema/plots.schema.json",
+  "start": [],
+  "nodes": {
+    "node1": {
+      "id": "node1",
+      "type": "start",
+      "next": ["node2"],
+      "texts": ["This is a test", "with two lines"],
+      "options": [
+        {
+          "texts": ["Option 1"],
+          "next": ["node2"]
+        },
+        {
+          "texts": ["Option 2"],
+          "next": ["node3"]
+        }
+      ]
+    },
+    "node2": {
+      "id": "node2",
+      "type": "end",
+      "texts": ["End of the test"],
+      "next": ["node3"]
+    },
+    "node3": {
+      "id": "node3",
+      "type": "middle",
+      "texts": ["End of the test"],
+      "next": []
+    }
+  }
+}
