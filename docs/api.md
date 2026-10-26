@@ -1,575 +1,316 @@
-# ChatBot API 文档
+# ChatBot API 契约与源码差异
 
-> 版本：v1　·　Base URL：`http://127.0.0.1:8080`（由 `config.web.host/port` 决定）
-> 后端：FastAPI（独立线程 + 独立 asyncio loop，与 Qt 主线程解耦）
-> 所有 REST 路径统一挂载在 `/api` 前缀下，WebSocket 挂载在 `/ws`
-
----
+> 源码基线：dev，提交 c5e6343ec4b3913caaa04e5f6af2c34327213314。本文在不运行项目的情况下，根据控制器、统一响应、前端 service 和现有 API 文档交叉整理。
+>
+> 重要：本文件同时记录“资源逻辑契约”和“当前源码中需要确认的注册差异”。实际发布路径必须以 FastAPI app.routes/OpenAPI 导出结果为准。此文档变更不修改业务源码。
 
 ## 0. 通用约定
 
-### 0.1 统一响应信封
+### 0.1 REST 响应信封
 
-**所有** REST 接口返回同一结构：
+后端 ApiResponse 定义的标准字段如下：
 
-```jsonc
-{
-  "ok": true,             // 业务是否成功
-  "code": 200,              // 200=成功，非 200 见错误码表
-  "message": "ok",        // 可读信息，失败时为错误原因
-  "data": { },            // 业务数据，失败时为 null
-  "request_id": "9f1c…",  // 每次请求唯一，日志排障用
-  "ts": 1757000000.123    // 服务端时间戳（秒）
-}
-```
-
-失败的 HTTP 状态码仍为语义化状态码（400/404/500…），但 **body 同样是信封**，
-前端只需判 `ok` 即可，不必解析两套格式。
-
-### 0.2 错误码
-
-| code | HTTP | 含义 | 处理建议 |
-|---|---|---|---|
-| 0 | 200 | 成功 | — |
-| 1001 | 400 | 参数校验失败 | 检查字段类型/必填 |
-| 1002 | 404 | 资源不存在 | id 拼写或已被删除 |
-| 1003 | 409 | 状态冲突 | 如重复启动已运行的服务 |
-| 2001 | 503 | 依赖未初始化 | 如 LLM/TTS 未配置，先调 `/api/pipeline/.../switch` |
-| 2002 | 504 | 处理超时 | 推理/下载超时，可重试 |
-| 3001 | 500 | 内部异常 | 携带 `request_id` 查日志 |
-| 3002 | 503 | 主线程忙/不可用 | Qt 主线程未就绪，稍后重试 |
-
-### 0.3 请求 ID
-
-每个请求由中间件注入 `X-Request-ID`；客户端也可自带该 header，服务端沿用。
-响应中回传 `request_id`。
-
-### 0.4 异步长任务
-
-耗时操作（模型下载、OCR 初始化、技能执行、批量压缩）**不在请求线程内同步执行**，
-而是提交给任务调度器，返回 `TaskReference` 语义的 `task` 对象：
-
-```json
-{ 
-  "ok": true, 
-  "data": { 
-    "task_id": "t_7f3a",
-    "state": "pending" 
-  } 
-}
-```
-
-前端可轮询 `GET /api/task/{task_id}` 或订阅 WebSocket 的 `task.*` 事件。
-
-### 0.5 时间戳
-
-一律为 **Unix 秒（float）**，除非字段明确标注为 ISO 字符串。
-
----
-
-## 1. 系统 `/api/system`
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/system/health` | 健康检查（Web/调度器/主线程/记忆系统） |
-| GET | `/api/system/info` | 应用信息（版本、配置路径、数据目录） |
-| GET | `/api/system/stats` | 运行统计（日志、调度器、连接数、记忆） |
-| POST | `/api/system/gc` | 触发一次清理（记忆衰减 + 排空日志） |
-
-### GET `/api/system/health`
-
-```jsonc
+~~~json
 {
   "ok": true,
-  "data": {
-    "status": "healthy",          // healthy | degraded | unhealthy
-    "web":     { "ready": true,  "host": "127.0.0.1", "port": 8080 },
-    "scheduler": { "running": true, "pending": 0, "running_tasks": 2 },
-    "main_thread": { "ready": true, "queue": 0 },
-    "memory": { "ready": true, "records": 128 },
-    "services": { "total": 4, "running": 2 }
-  }
+  "code": 200,
+  "message": "ok",
+  "data": {},
+  "request_id": "16-char-id",
+  "ts": 1757000000.123
 }
-```
+~~~
 
-### GET `/api/system/stats`
+- 后端成功业务 code 当前为 200（见 modules/api/exceptions.py）。
+- 失败返回语义化 HTTP status，同时使用同构响应信封。
+- request_id 使用 X-Request-ID 传入/返回，并应用于日志关联。
+- 时间戳 ts 当前为 Unix 秒（float）。
+- 前端普通 Axios 分支使用 code === 200；src/api/http.ts 的桌面 bridge 分支使用 code === 0，与后端不一致，为 P0 差异。
 
-```jsonc
-{ "ok": true, "data": {
-  "uptime_sec": 3600.5,
-  "log":     { "total": 512, "by_level": { "INFO": 400, "ERROR": 3 }, "dropped": 0 },
-  "scheduler": { "submitted": 120, "done": 118, "failed": 1, "streams": 2 },
-  "websocket": { "connections": 2 },
-  "memory": { "records": 128, "compressed": 6, "tokens_estimate": 3400 }
-}}
-```
+### 0.2 错误码（以源码为准）
 
----
+| code | HTTP | 含义 | 客户端建议 |
+|---:|---:|---|---|
+| 200 | 200 | 成功 | 读取 data |
+| 1001 | 400 | 参数校验失败 | 修正输入 |
+| 1002 | 404 | 资源不存在 | 刷新资源或确认 ID |
+| 1003 | 409 | 状态冲突 | 查询当前状态后决定是否重试 |
+| 2001 | 503 | 依赖未初始化 | 配置/初始化依赖 |
+| 2002 | 504 | 处理超时 | 先查询任务状态；仅幂等操作可重试 |
+| 3001 | 500 | 内部异常 | 使用 request_id 排障 |
+| 3002 | 503 | 主线程忙或不可用 | 稍后重试 |
 
-## 2. 配置 `/api/config`
+不要把业务 code 和 HTTP status 混为一谈。所有调用端应使用相同成功 code 和 decoder。
 
-配置分 section：`web` `log` `network` `sqlite` `llm` `tts` `asr` `skills`。
+### 0.3 长任务
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/config` | 获取完整配置（`?section=` 取单个） |
-| PATCH | `/api/config/{section}` | 局部更新某个 section |
-| POST | `/api/config/reload` | 从文件重新加载 |
-| POST | `/api/config/save` | 持久化到文件（`{"file_path": "config.json"}`） |
-| GET | `/api/config/schema` | 字段说明（给设置页自动生成表单） |
+模型下载、初始化、PPT 生成或其他长操作应优先使用任务接口/异步提交端点，返回 task_id；通过 task 查询状态。任务取消对同步任务不保证强制终止。
 
-### GET `/api/config`
+## 1. 系统与配置
 
-```jsonc
-{ "ok": true, "data": {
-  "llm": { "enabled": true, "provider": "DeepSeek", "model": "deepseek-v4-flash",
-           "api_key": "sk-***", "base_url": "https://api.deepseek.com" },
-  "tts": { "provider": "GPTSoVITS", "base_url": "http://127.0.0.1:9880" },
-  "web": { "host": "127.0.0.1", "port": 8080 }
-}}
-```
-
-> 敏感字段（`api_key`）默认做掩码 `sk-***`；`?raw=true` 返回原值。
-
-### PATCH `/api/config/llm`
-
-请求：`{ "model": "deepseek-v4", "temperature": 0.8 }`（仅传要改的字段）
-响应：`{ "ok": true, "data": { "llm": {...更新后...} } }`
-
-### GET `/api/config/schema`
-
-```jsonc
-{ "ok": true, "data": {
-  "llm": [ { "name": "provider", "description": "LLM 供应商", "value": "DeepSeek" }, ... ]
-}}
-```
-
----
-
-## 3. 管道（适配器）`/api/pipeline`
-
-适配器类型：`llm` `tts` `asr` `ocr`。
+### System — 逻辑资源前缀 /api/system
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/pipeline/adapters` | 所有适配器配置与可选 provider |
-| GET | `/api/pipeline/adapters/{type}/providers` | 某类型的 provider 列表 |
-| GET | `/api/pipeline/adapters/{type}/providers/{name}` | 单个 provider 的完整配置 |
-| POST | `/api/pipeline/adapters/{type}/switch` | 切换 provider |
-| POST | `/api/pipeline/adapters/{type}/stop` | 关闭当前适配器 |
+| GET | /api/system/health | Web、调度器、主线程、记忆和服务健康状态 |
+| GET | /api/system/info | 版本、配置路径和数据目录信息 |
+| GET | /api/system/stats | uptime、日志、任务、连接和记忆统计 |
+| POST | /api/system/gc | 触发记忆衰减/清理及日志排空 |
+| GET | /api/system/ping | 轻量探测；具体注册需以 OpenAPI 为准 |
 
-### POST `/api/pipeline/adapters/llm/switch`
+健康检查不得触发模型加载、全量索引重建或全盘扫描。
 
-请求：
-```jsonc
-{ "provider": "DeepSeek", "config": { "api_key": "sk-xxx", "model": "deepseek-v4" } }
-```
-响应：
-```jsonc
-{ "ok": true, "data": {
-  "type": "llm", "name": "DeepSeek", "success": true, "config": { ... }
-}}
-```
-
-> 切换会先关闭旧适配器再初始化新的；`config` 留空则使用配置文件中的默认配置。
-> OCR 等需要下载模型的 provider，`init_provider_client` 会提交到调度器异步执行，
-> 接口立即返回，`/api/system/health` 可观察进度。
-
----
-
-## 4. 服务 `/api/service`
-
-服务是注册到 `ServiceManager` 的能力单元（OBS、Browser、Live2D、Music…）。
+### Config — 逻辑资源前缀 /api/config
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/service` | 服务列表（`?running_only=true` 过滤） |
-| GET | `/api/service/{id}` | 单个服务详情 |
-| GET | `/api/service/{id}/tools` | 该服务暴露的 LLM 工具定义 |
-| GET | `/api/service/tools` | 所有服务的工具定义（OpenAI function 格式） |
-| POST | `/api/service/{id}/start` | 启动服务 |
-| POST | `/api/service/{id}/stop` | 停止服务 |
-| GET | `/api/service/{id}/config` | 读取服务配置 |
-| PUT | `/api/service/{id}/config` | 更新服务配置 |
-| GET | `/api/service/{id}/ui` | UI 描述（给前端渲染控制面板） |
+| GET | /api/config | 读取配置；可按 section 查询 |
+| PATCH | /api/config/{section} | 局部更新配置 |
+| POST | /api/config/reload | 从配置文件重新加载 |
+| POST | /api/config/save | 持久化配置 |
+| GET | /api/config/schema | 获取配置字段描述 |
 
-### GET `/api/service`
+配置涉及密钥时默认遮蔽。当前相关接口可能支持 raw 参数，应按 SecurityAndAuditDesign.md 收紧；不要在 URL、日志或前端持久化明文凭据。
 
-```jsonc
-{ "ok": true, "data": {
-  "services": [
-    { "id": "obs", "name": "OBS", "description": "直播推流控制",
-      "state": "running", "main_thread": false }
-  ],
-  "total": 1
-}}
-```
+## 2. 管道、服务与技能
 
-`state` 取值：`stopped` `starting` `running` `stopping` `error`
-
-### POST `/api/service/obs/start`
-
-响应：`{ "ok": true, "data": { "id": "obs", "state": "running" } }`
-已运行时返回 `1003 状态冲突`。
-
----
-
-## 5. 日志 `/api/logger`
-
-实时日志走 WebSocket（事件 `log.*`），REST 只做查询与级别控制。
+### Pipeline — 逻辑资源前缀 /api/pipeline
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/logger/level` | 当前日志级别 |
-| PUT | `/api/logger/level` | 设置级别 `{ "level": "DEBUG" }` |
-| GET | `/api/logger/levels` | 可选级别列表 |
-| GET | `/api/logger/stats` | 统计（各级别条数、丢弃数） |
-| GET | `/api/logger/records` | 近期记录（`?limit=100&level=ERROR`） |
-| POST | `/api/logger/flush` | 强制落盘 |
+| GET | /api/pipeline/adapters | 列出 adapter 类型与 provider |
+| GET | /api/pipeline/adapters/{adapter}/providers | 列出某 adapter 的 provider |
+| GET | /api/pipeline/adapters/{adapter}/providers/{provider} | 读取 provider 配置 |
+| POST | /api/pipeline/adapters/{adapter}/switch | 切换 provider |
+| POST | /api/pipeline/adapters/{adapter}/stop | 停止当前 provider |
+| GET | /api/pipeline/configs | 读取各管道配置 |
 
-### GET `/api/logger/stats`
+provider 切换建议先初始化新实例并健康检查，成功后切换流量；不要让新 provider 初始化失败导致旧 provider 已不可用。
 
-```jsonc
-{ "ok": true, "data": {
-  "total": 512, "dropped": 0,
-  "by_level": { "DEBUG": 100, "INFO": 380, "WARNING": 29, "ERROR": 3 },
-  "queue": 0, "file_enabled": false
-}}
-```
-
----
-
-## 6. 通用接口 `/api`
-
-> 路由文件 `controllers/request.py`，变量 `req_router`。
+### Service — 逻辑资源前缀 /api/service
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/status` | 各能力就绪状态（LLM/TTS/ASR） |
-| GET | `/api/folder?type={type}` | 打开指定目录（images/roles） |
-| POST | `/api/chat` | 非流式对话 |
-| POST | `/api/chat/stream` | 流式对话（SSE） |
-| POST | `/api/tts` | 文本转语音（返回 base64） |
-| POST | `/api/asr` | 语音转文本（base64 音频） |
-| POST | `/api/command/run` | 直接执行命令文本（skill/service 命令） |
+| GET | /api/service | 服务列表 |
+| GET | /api/service/tools | 所有服务可用工具定义 |
+| GET | /api/service/{service_id} | 服务详情 |
+| GET | /api/service/{service_id}/tools | 单个服务工具定义 |
+| GET | /api/service/{service_id}/ui | 服务 UI 描述 |
+| POST | /api/service/{service_id}/start | 启动服务 |
+| POST | /api/service/{service_id}/stop | 停止服务 |
+| GET | /api/service/{service_id}/config | 读取服务配置 |
+| PUT | /api/service/{service_id}/config | 更新服务配置 |
+| PUT | /api/service/{service_id}/config/apply | 应用配置（具体字段以 DTO 为准） |
 
-### POST `/api/chat`
+服务状态包括 stopped/starting/running/stopping/error 一类状态；实际枚举以 DTO/manager 定义为准。
 
-请求：
-```jsonc
-{ "text": "今天天气怎么样", "source": "text", "session_id": "default",
-  "route": "pure_chat",           // 可选：pure_chat | tool_call | mixed，留空自动路由
-  "stream": false }
-```
-响应：
-```jsonc
-{ "ok": true, "data": {
-  "text": "今天晴天，26 度～",
-  "route": "pure_chat",
-  "character_id": "qingmei",
-  "mood": 17,
-  "commands_executed": [],
-  "tokens_estimate": 320,
-  "elapsed_ms": 820
-}}
-```
-
-### POST `/api/request/chat/stream`（SSE）
-
-`Content-Type: text/event-stream`，每个 chunk：
-```
-data: {"type":"chunk","text":"今天"}
-data: {"type":"chunk","text":"晴天"}
-data: {"type":"done","route":"pure_chat","character_id":"qingmei","mood":17}
-```
-
-> producer 运行在调度器 loop，**不占用 Web 线程**，因此流式期间其它 HTTP 请求不受影响。
-
-### POST `/api/request/tts`
-
-请求：`{ "text": "你好", "format": "mp3" }`
-响应：`{ "ok": true, "data": { "audio": "<base64>", "format": "mp3", "duration_hint_ms": 1200 } }`
-
-### POST `/api/request/asr`
-
-请求：`{ "audio": "<base64>", "format": "wav" }`
-响应：`{ "ok": true, "data": { "text": "你好" } }`
-
----
-
-## 7. 会话 `/api/session`
-
-会话 = 一轮轮对话的容器（`GameSaveManager`），与"存档槽"不同（后者是完整快照）。
+### Skill — 逻辑资源前缀 /api/skill
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/session` | 会话列表 |
-| POST | `/api/session` | 创建 `{ "name": "和绫的下午", "character_id": "qingmei" }` |
-| GET | `/api/session/{id}` | 会话详情 |
-| DELETE | `/api/session/{id}` | 删除 |
-| POST | `/api/session/{id}/switch` | 切换当前会话 |
-| GET | `/api/session/{id}/messages` | 消息列表（`?limit=50`） |
-| POST | `/api/session/{id}/messages` | 追加一条 `{ "role": "user", "content": "..." }` |
-| POST | `/api/session/flush` | 强制落盘（`{"session_id": "..."}` 可省略=全部） |
+| GET | /api/skill | 技能列表 |
+| GET | /api/skill/prompt | 给模型使用的技能提示内容 |
+| GET | /api/skill/{skill_id} | 技能详情 |
+| POST | /api/skill/reload | 重新扫描技能目录 |
+| POST | /api/skill/{skill_id}/activate | 启用技能 |
+| POST | /api/skill/{skill_id}/deactivate | 停用技能 |
+| POST | /api/skill/{skill_id}/execute | 执行技能 |
 
-### GET `/api/session/{id}/messages`
+执行技能必须通过后端权限、参数、资源限制和沙盒策略。项目既有说明指出 shell 类型当前不支持执行、JavaScript 类型未完整实现；未经过安全评审不得宣称为可安全执行能力。
 
-```jsonc
-{ "ok": true, "data": { "messages": [
-  { "role": "user", "content": "你好", "timestamp": 1756999999.0, "source": "text" }
-], "total": 1 }}
-```
+## 3. 对话、SSE 与语音
 
----
-
-## 8. 存档槽 `/api/save`
+### Request — 逻辑资源前缀 /api
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/save/slots` | 存档槽列表 |
-| POST | `/api/save/slots` | 新建 `{ "name": "第一章" }` |
-| GET | `/api/save/slots/{id}` | 存档详情 |
-| DELETE | `/api/save/slots/{id}` | 删除 |
-| POST | `/api/save/slots/{id}/toggle` | 切换当前存档（会加载内容） |
-| POST | `/api/save/slots/{id}/save` | 保存 |
-| POST | `/api/save/slots/{id}/load` | 加载 |
-| PUT | `/api/save/slots/{id}/section` | 更新分区 `{ "section": "characters", "data": {...} }` |
-| POST | `/api/save/slots/sync` | 把会话数据同步进当前存档 |
+| GET | /api/status | LLM/TTS/ASR 就绪状态 |
+| GET | /api/folder/{type} | 打开受支持的本地目录；必须限制目录类型 |
+| POST | /api/chat | 非流式对话 |
+| POST | /api/chat/stream | SSE 流式对话 |
+| POST | /api/tts | 文本转语音 |
+| POST | /api/asr | base64 音频转文字 |
+| POST | /api/progress-stream/{task_id} | 任务进度流；具体事件字段以实现为准 |
 
-`section` 可选：`characters` `ui` `chat_history` `achievements` `story`
+非流式对话的常用请求字段：text、source、session_id、route、stream。route 的逻辑枚举包含 pure_chat、tool_call、mixed；真实 DTO 为准。
 
----
+SSE 的概念事件：
+- chunk：一段增量文本。
+- done：最终状态与必要的 route/character metadata。
+- error：稳定错误码与 message。
 
-## 9. 角色 `/api/character`
+旧文档出现过 /api/request/chat/stream 的示例，但 request controller 的路径是 /chat/stream 且由 /api 前缀统一挂载。应将此作为路径笔误修正。实际 SSE 的终态/错误事件需由控制器实现核对，不可只靠示例推断。
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/character` | 角色列表 |
-| GET | `/api/character/current` | 当前角色 |
-| POST | `/api/character/{id}/switch` | 切换当前角色 |
-| POST | `/api/character` | 创建角色 |
-| PUT | `/api/character/{id}` | 更新角色属性 |
-| DELETE | `/api/character/{id}` | 删除角色 |
-| GET | `/api/character/{id}/state` | 运行时状态（心情/好感/消息数） |
-| POST | `/api/character/{id}/state` | 更新状态 `{ "mood": 17, "affection": 70 }` |
-| GET | `/api/character/presets` | 预设模板列表 |
+TTS/ASR 使用 base64 时必须限制请求体、音频时长、格式和解码资源；不在普通日志记录音频内容。
 
-### GET `/api/character/current`
+## 4. 会话与存档
 
-```jsonc
-{ "ok": true, "data": {
-  "id": "qingmei", "name": "小青", "title": "青梅竹马",
-  "attributes": { "personality": "开朗活泼…", "nickname_for_user": "哥哥",
-                  "affection_level": 65, "mood": "高兴", "catchphrases": ["诶嘿~"] },
-  "state": { "mood": 17, "affection": 65, "total_messages": 42,
-             "last_interaction": 1756999000.0 }
-}}
-```
-
----
-
-## 10. 记忆 `/api/memory`
+### Session — 逻辑资源前缀 /api/session
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/memory/layers` | 三层记忆（短期/长期/详细），供 prompt 注入 |
-| GET | `/api/memory/short` | 短期摘要 |
-| GET | `/api/memory/long` | 长期摘要（`?query=` 语义检索） |
-| POST | `/api/memory/search` | 语义检索 `{ "query": "...", "top_k": 8 }` |
-| GET | `/api/memory/compressed` | 压缩记忆列表 |
-| POST | `/api/memory/decay` | 手动触发衰减 |
-| POST | `/api/memory/flush` | 排空后台写入 |
-| DELETE | `/api/memory/{id}` | 删除单条记忆 |
-| GET | `/api/memory/stats` | 统计与容量 |
+| GET | /api/session | 会话列表 |
+| POST | /api/session | 新建会话 |
+| GET | /api/session/{session_id} | 会话详情 |
+| DELETE | /api/session/{session_id} | 删除会话/消息文件 |
+| POST | /api/session/{session_id}/switch | 切换当前会话 |
+| GET | /api/session/{session_id}/messages | 查询消息 |
+| POST | /api/session/{session_id}/messages | 追加消息，不触发模型推理 |
+| POST | /api/session/flush | 强制持久化会话 |
 
-### GET `/api/memory/layers?session_id=default&detail_top_k=8`
-
-```jsonc
-{ "ok": true, "data": {
-  "short_term": "用户说他喜欢吃苹果…",
-  "long_term": "用户住在深圳，从事后端开发…",
-  "detailed": [ { "id": "12", "content": "明天要去深圳出差", "score": 0.82 } ]
-}}
-```
-
-> 计算向量会走调度器；`detail_top_k=0` 可跳过详细层以降低延迟。
-
----
-
-## 11. 技能 `/api/skill`
+### Save — 目标逻辑资源前缀 /api/save
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/skill` | 技能列表（`?active_only=true`） |
-| GET | `/api/skill/{id}` | 技能详情 |
-| POST | `/api/skill/reload` | 重新扫描技能目录 |
-| POST | `/api/skill/{id}/activate` | 启用 |
-| POST | `/api/skill/{id}/deactivate` | 停用 |
-| POST | `/api/skill/{id}/execute` | 执行 `{ "params": {...} }` |
-| GET | `/api/skill/prompt` | 给 LLM 的技能提示词 |
+| GET | /api/save/slots | 存档槽列表 |
+| POST | /api/save/slots | 创建存档槽 |
+| GET | /api/save/slots/{slot_id} | 存档详情 |
+| DELETE | /api/save/slots/{slot_id} | 删除存档槽 |
+| POST | /api/save/slots/{slot_id}/toggle | 切换存档 |
+| POST | /api/save/slots/{slot_id}/save | 保存存档 |
+| POST | /api/save/slots/{slot_id}/load | 加载存档 |
+| PUT | /api/save/slots/{slot_id}/section | 更新某 section |
+| POST | /api/save/slots/sync | 会话数据同步入当前存档 |
+| POST | /api/save/slots/restore | 从存档恢复到会话（前端 service 已有调用；需核实当前控制器是否注册） |
 
-`exec_type`：`none` `python` `shell` `javascript`
-**`shell` 类型暂不支持执行**：会被识别、可见、可启用，但执行时返回 `2001 依赖未初始化`
-并附带 `reason: "shell 技能暂不支持执行"`。
+存档 section 以实际 DTO 为准；现有文档提到 characters、ui、chat_history、achievements、story。加载/删除为高影响操作，建议加入 manifest/hash 校验和恢复预演。
 
-命令文本格式：`skill --id weather --city 深圳`
-> 只认 `--id`；`--name` 为无效参数（技能名可重复，id 才唯一）。
+## 5. 角色与记忆
 
----
-
-## 12. 任务 `/api/task`
+### Character — 逻辑资源前缀 /api/character
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/task/{task_id}` | 查询任务状态与结果 |
-| POST | `/api/task/{task_id}/cancel` | 取消（尽力而为，同步任务无法强杀） |
+| GET | /api/character | 角色列表 |
+| GET | /api/character/presets | 角色预设 |
+| GET | /api/character/current | 当前角色 |
+| GET | /api/character/{character_id} | 角色详情 |
+| POST | /api/character | 创建角色 |
+| PUT | /api/character/{character_id} | 更新角色 |
+| DELETE | /api/character/{character_id} | 删除角色 |
+| POST | /api/character/{character_id}/switch | 切换角色 |
+| GET | /api/character/{character_id}/state | 查询角色运行时状态 |
+| POST | /api/character/{character_id}/state | 更新角色运行时状态 |
 
-```jsonc
-{ "ok": true, "data": {
-  "task_id": "t_7f3a", "state": "done",   // pending|running|done|failed|timeout
-  "result": { ... }, "error": null, "elapsed_ms": 1200
-}}
-```
+### Memory — 逻辑资源前缀 /api/memory
 
----
-
-## 13. WebSocket `/ws`
-
-连接：`ws://127.0.0.1:8080/ws?client_id=web-1`
-
-### 13.1 客户端 → 服务端
-
-```jsonc
-{ "type": "chat", "data": { "text": "你好", "session_id": "default" } }
-```
-
-| type | data | 说明 |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| `chat` | `{text, session_id, source, route}` | 发起对话（流式回推） |
-| `asr` | `{audio(base64), is_final}` | 语音转文字（流式） |
-| `tts` | `{text}` | 文本转语音（流式回推音频块） |
-| `command` | `{text}` | 执行命令文本 |
-| `subscribe` | `{events: ["log.*", "tts.*"]}` | 订阅事件（支持 `*` 通配） |
-| `unsubscribe` | `{events: [...]}` | 取消订阅 |
-| `ping` | — | 心跳，服务端回 `pong` |
-| `cancel` | `{request_id}` | 取消在途请求 |
+| GET | /api/memory/layers | 读取 short_term/long_term/detailed |
+| GET | /api/memory/short | 查询短期记忆摘要 |
+| GET | /api/memory/long | 查询长期记忆 |
+| POST | /api/memory/search | 语义/相关记忆搜索 |
+| GET | /api/memory/compressed | 查询压缩记忆 |
+| GET | /api/memory/stats | 统计记忆容量 |
+| POST | /api/memory/decay | 手动触发衰减 |
+| POST | /api/memory/flush | 等待后台记忆写入 |
+| DELETE | /api/memory/{memory_id} | 删除单条记忆 |
 
-### 13.2 服务端 → 客户端
+layers query 包括 session_id 与 detail_top_k；search request 需以 MemorySearchRequest DTO 核对 query、top_k 等字段。所有记忆 API 必须在存储查询前按 session 范围过滤。删除的向量、映射、压缩引用、缓存和快照恢复语义见 MemoryDesign.md。
 
-```jsonc
-{ "type": "chat.chunk", "data": { "text": "今" }, "request_id": "r_1", "ts": 1757000000.1 }
-```
+## 6. 任务、日志、审计与 PPT
 
-| type | data | 说明 |
+### Task — 逻辑资源前缀 /api/task
+
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| `connected` | `{client_id}` | 连接建立 |
-| `pong` | `{ts}` | 心跳应答 |
-| `chat.chunk` | `{text}` | 流式文本片段 |
-| `chat.done` | `{text, route, character_id, mood}` | 对话完成 |
-| `chat.error` | `{message, code}` | 对话失败 |
-| `tts.chunk` | `{audio(base64)}` | 音频块 |
-| `tts.done` | `{}` | 音频结束 |
-| `asr.partial` / `asr.done` | `{text}` | 识别中间/最终结果 |
-| `log` | `{level, message, source, ts}` | 日志推送（需订阅） |
-| `command.result` | `{ok, results, summary}` | 命令执行结果 |
-| `task.update` | `{task_id, state}` | 任务状态变化 |
-| `error` | `{message, code}` | 通用错误 |
+| GET | /api/task/{task_id} | 查询任务状态与结果 |
+| POST | /api/task/{task_id}/cancel | 请求取消任务 |
 
-### 13.3 心跳与超时
+任务状态以 Task DTO 为准；旧文档的 pending/running/done/failed/timeout 应检查是否还包含 cancelled 或其他终态。
 
-- 客户端应每 30s 发一次 `ping`
-- 服务端 90s 无心跳判定为死连接并清理
-- 单客户端在途请求上限 8，超过返回 `chat.error`（code `1003`）
+### Logger — 逻辑资源前缀 /api/logger
 
----
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /api/logger/level | 当前日志级别 |
+| PUT | /api/logger/level | 修改日志级别 |
+| GET | /api/logger/levels | 允许的日志级别 |
+| GET | /api/logger/stats | 日志统计 |
+| GET | /api/logger/records | 近期日志查询 |
+| POST | /api/logger/flush | 强制落盘 |
 
-## 14. Python SDK（前端调用）
+### Audit — 目标逻辑资源前缀 /api/audit
 
-SDK 位于 `modules/api/client/`，同时提供同步与异步两种客户端，
-供 PyQt 前端、脚本、测试使用。**前端不要直接用 requests 裸调**——SDK 已封装
-信封解包、错误转异常、超时与重试。
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /api/audit/tree | 服务/工具能力树 |
+| GET | /api/audit/tools | 扁平工具清单 |
 
-### 14.1 同步
+当前 audit controller 主要呈现可调用服务/工具能力，不代表具备完整的安全操作审计事件流。
 
-```python
-from modules.api.client import ApiClient
+### PPT — 逻辑资源前缀 /api/ppt
 
-c = ApiClient("http://127.0.0.1:8080", timeout=10.0)
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /api/ppt/templates | 模板列表 |
+| POST | /api/ppt/outline | 生成内容大纲 |
+| POST | /api/ppt/render | 同步渲染 PPT |
+| POST | /api/ppt/render/async | 提交后台生成任务 |
+| GET | /api/ppt/job/{task_id} | 查询生成任务 |
+| GET | /api/ppt/download/{file_name} | 下载已生成文件 |
 
-health = c.system.health()
-print(health.data["status"])
+文件下载需验证 basename、路径边界和文件存在性，不应接受可任意访问的绝对路径。
 
-cfg = c.config.get("llm").data
-c.config.patch("llm", {"model": "deepseek-v4"})
+### Device
 
-r = c.chat.chat("今天天气怎么样")
-print(r.data["text"])
+控制器集合会注册 device router，但设备接口的准确路径/方法需从实际 device 子目录控制器导出后再加入正式端点清单。
 
-for chunk in c.chat.chat_stream("讲个故事"):
-    print(chunk, end="", flush=True)
-```
+## 7. WebSocket 事件契约
 
-### 14.2 异步
+旧文档描述了 /ws、chat/asr/tts/command/subscribe/unsubscribe/ping/cancel 等消息。然而当前 websocket 路由注册函数使用 app.websocket("/")，不是在函数内部声明 /ws；因此实际 WebSocket URL 与旧文档有不一致风险。
 
-```python
-import asyncio
-from modules.api.client import AsyncApiClient
+待核对项：
+- server 初始化是否在其他位置重写/挂载 WebSocket 根路径。
+- 消息模型的 type/data 与 controller 实际接收的字段。
+- server → client 的 type 命名、终态和错误字段。
+- 每连接在途请求上限、心跳超时、事件订阅是否在实现中持续生效。
+- request_id/correlation_id 是否能区分多个同时进行的 stream。
 
-async def main():
-    async with AsyncApiClient("http://127.0.0.1:8080") as c:
-        r = await c.chat.chat("你好")
-        async for chunk in c.chat.chat_stream("讲个故事"):
-            print(chunk, end="")
-asyncio.run(main())
-```
+在确认实际注册结果前，不应承诺 /ws、/ws/ 或根路径中的任意一个是最终稳定路径。目标是把路径和事件 schema 明确化，并由测试覆盖。
 
-### 14.3 WebSocket
+## 8. Python SDK 与前端客户端
 
-```python
-from modules.api.client import ApiWebSocket
+- Python SDK 位于 modules/api/client（以当前目录存在状态为准）；推荐使用 SDK 统一超时、信封和错误处理，避免各处裸调请求。
+- Vue 前端调用集中在 src/api/services。
+- 前端 service/types 有自动生成痕迹；须统一契约来源、生成脚本和校验流程。
+- Web 与 Qt bridge 必须使用同一响应解包规则、同一错误码和同一 DTO。
 
-ws = ApiWebSocket("ws://127.0.0.1:8080/ws")
-ws.on("chat.chunk", lambda p: print(p["text"], end=""))
-ws.on("log", lambda p: print("[log]", p["message"]))
-ws.connect()               # 阻塞接收（内部线程）
-ws.send("chat", {"text": "你好"})
-ws.subscribe(["log.*"])
-```
+## 9. 安全和性能约束
 
-### 14.4 异常
+- 默认只绑定 loopback。远程访问必须显式启用认证和严格来源限制。
+- 秘密字段默认遮蔽；不要常态化开放 raw=true。
+- 对 chat、audio、文件、PPT 和工具请求限制 body size、超时、并发和输出大小。
+- 长任务返回 task_id 并具有状态、失败、超时与取消语义。
+- 不对非幂等 POST 默认重试；provider 重试应遵守总预算。
+- 日志避免保存 key、完整 prompt、音频和私人记忆正文。
 
-| 异常 | 触发 |
-|---|---|
-| `ApiRequestError` | 网络/超时/连接失败 |
-| `ApiResponseError` | 服务端返回 `ok=false`（含 `.code` / `.request_id`） |
-| `ApiValidationError` | 本地参数校验失败 |
+## 10. 路由注册规则
 
----
+期望规则：Controller router 只声明资源路径（例如 /save、/audit），统一由 register_all_routers 添加一次 /api。当前 controllers/__init__.py 确实为所有 router 添加 prefix=/api；但 save.py router prefix 当前是 /api/save，audit.py 当前是 /api/audit，可能产生重复 /api/api 路径。这是源码差异，不可仅用文档掩盖。应导出 FastAPI 的实际 registered paths、修正 controller prefix，并同步客户端。
 
-## 15. 前端调用约束（重要）
+同理，WebSocket 当前在 app.websocket("/") 注册，而旧文档写 /ws；需统一为明确且被测试的路径。
 
-1. **不要在前端主线程同步等待长任务**：聊天/下载走 SSE 或 WebSocket 流式接口。
-2. **流式接口在调度器 loop 执行**，Web 线程只做转发；前端可并发发起多个流。
-3. **事件回调必须同步**：若前端（PyQt）注册总线回调，回调内只做投递，不 `await`。
-4. **双通道输出**：`route=tool_call` 时后端会先执行命令再角色化总结，
-   前端通过 `command.result` + `chat.done` 两个事件收到完整链路。
-5. **`api_key` 默认掩码**，设置页如需回显请用 `?raw=true`（仅本机可信环境）。
+## 11. 契约变更要求
 
----
+每次 API 修改需：
+1. 更新本文件与请求/响应 DTO。
+2. 更新前端 service/types 的权威生成源并运行统一生成器。
+3. 为正常、业务错误、404、超时、取消和边界参数添加契约测试。
+4. 给旧路径/字段/事件定义兼容期与移除标准。
+5. 在 API 表中注明 current/target，避免设计目标被误认为已部署。
 
-## 16. 模块到端点的映射
+## 12. 源码差异与需核对项
 
-| 后端模块 | 端点组 |
-|---|---|
-| `modules/config` | `/api/config` |
-| `modules/manager/pipeline.py` | `/api/pipeline` |
-| `modules/manager/service/manager.py` | `/api/service` |
-| `modules/logger` | `/api/logger` |
-| `modules/pipeline/chat.py` | `/api/request` |
-| `modules/manager/session.py` | `/api/session` |
-| `modules/manager/saves/manager.py` | `/api/save` |
-| `modules/characters` + `manager/character.py` | `/api/character` |
-| `modules/memory` | `/api/memory` |
-| `modules/tools/skills` | `/api/skill` |
-| `modules/manager/task` | `/api/task` |
-| `modules/api/controllers/websocket.py` | `/ws` |
+| 优先级 | 发现 | 文件依据 | 建议 |
+|---|---|---|---|
+| P0 | 成功 code 分叉：后端 200，desktop bridge 判断 0 | modules/api/exceptions.py、src/api/http.ts | 共用 decoder，以 200 为统一成功 code |
+| P0 | save/audit router 自带 /api，注册器又加 /api | controllers/__init__.py、controllers/save.py、controllers/audit.py | controller prefix 改为资源名，再从 app.routes 导出验证 |
+| P1 | WebSocket route 当前声明在 /，旧文档写 /ws | controllers/websocket/__init__.py、server.py | 明确稳定路径并对客户端兼容 |
+| P1 | SSE 文档曾出现 /api/request/chat/stream | controllers/request.py | 按注册器统一路径 /api/chat/stream 校对 |
+| P1 | PPT/审计/device 等路由未完全出现在旧文档 | controllers/ppt.py、audit.py、controllers/__init__.py | 统一生成/检查 endpoint inventory |
+| P1 | 前端 save service 有 /save/slots/restore 方法，当前 save controller 清单需核对是否实现 | src/api/services/save.ts、controllers/save.py | 决定补实现或移除未支持客户端方法 |
+| P1 | response.py 的 unhandled exception message 可能暴露内部异常详情 | modules/api/response.py | 对外通用错误 + request_id，内部日志脱敏 |
+| P1 | raw=true 可请求敏感配置原值 | controllers/pipline.py 及配置 controller | 移除通用原文输出，或加本地受控权限 |
+
+本轮文档提交不修复这些实现风险，也未运行应用导出真实路由；路线和方法清单中已标注应以 FastAPI 实际注册结果为最终依据。
