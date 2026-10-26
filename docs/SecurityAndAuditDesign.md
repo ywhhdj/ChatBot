@@ -107,3 +107,15 @@
 - [ ] 取消/超时后资源释放，后台异常可追踪。
 - [ ] 审计记录动作/资源/决策/结果，但不存隐私正文。
 - [ ] 远程绑定、CORS、认证和来源限制经安全审查。
+
+
+## 10. 上下文和恢复带来的安全边界
+
+- ContextStore 以 session_id 做数据隔离，检索 API 先过滤再排名；不能依赖 prompt 指令来防止跨会话泄露。
+- PromptSnapshot 区分 configured policy、用户输入、retrieved memory、tool result 和文件/网页内容的 trust label；label 由程序生成，不能由模型或外部内容自我声明。
+- 切换 session/character 时检查活动请求和任务的归属，避免迟到的 stream/工具结果写入错误的会话。
+- RestorePlan 先校验 slot/revision 权限、schema、hash、文件大小和路径。不能直接把外部导入的 YAML/JSON 对象当作可信内部对象。
+- 恢复阶段禁止路径逃逸、任意 import、执行脚本或自动打开外部 URI；所有 artifact 都在受控根目录内经过验证。
+- Snapshot manifest 可记录哈希以发现意外损坏，但本地可写 hash 不能防恶意修改；若要防篡改，需要 HMAC/签名密钥与安全存储策略。
+- 删除墓碑必须优先于旧快照恢复。恢复动作不能重置隐私删除状态。
+- 存档导出默认剔除 provider key、token、登录凭证和短期 session secret；重新加载后需要明确提示缺失秘密需重新配置。

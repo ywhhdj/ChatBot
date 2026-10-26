@@ -126,3 +126,40 @@ Adapters      Skills     FAISS / MD
 上述是目标值，不是本分支的实测结果。
 
 降级顺序：可选 reranker/RAG → detailed memory layer → LLM 摘要压缩 → 非核心事件通知。不得降级权限检查、会话隔离、删除语义、索引一致性和存档校验。
+
+
+## 11. 上下文装配与边界（规范以 ContextArchitecture.md 为准）
+
+当前 \`UserContext\` 是单例，内部 deque 的每条消息含 \`session_id\`，但 \`get_current_messages()\` 返回所有 USER/ASSISTANT 消息，不在 getter 中按 session 过滤；Orchestrator 会使用该入口构造对话 prompt。此处应视为 P0 潜在跨 session 污染风险，不能仅依赖调用方“会正确切换会话”的隐式约定。
+
+目标约束：
+
+- 每个入站请求都构造不可变 \`RequestContext(request_id, trace_id, session_id, character_id, deadline, cancellation)\`。
+- ContextStore 按 session 分桶；所有读取窗口、记忆候选、写入、清理和摘要刷新必须显式接收 session_id。
+- CharacterContext、SessionContext、InputContext、ToolContext、RetrievedMemoryContext 分开建模。
+- PromptBuilder 是纯构建步骤：先过滤 scope/有效期，再解决冲突/排序，最后按 token budget 组装 Prompt DTO。
+- 记忆片段不能作为无来源 SYSTEM 文本永久积累在全局对话窗口；它们应保留 memory id/source/confidence 并在每轮按需装配。
+- 不持锁调用 LLM、工具、embedding 或磁盘长操作；锁按 session 分片，只保护短暂状态更新。
+- 详细方案、伪代码、迁移步骤与验收见 [ContextArchitecture.md](ContextArchitecture.md)。
+
+## 12. 应用服务和领域边界落地顺序
+
+不要一次重写所有现有 manager。按风险建立稳定的应用服务入口：
+
+| 用例 | 应用服务边界 | 主要依赖 | 持久化所有者 |
+|---|---|---|---|
+| Chat | ChatApplicationService | Router、PromptBuilder、LLM adapter、ToolExecutor、ContextStore | Session/Memory/Character manager |
+| Memory query | MemoryApplicationService | scope filter、retriever、ranker、token budget | Memory storage adapter |
+| Save snapshot | SaveApplicationService | SnapshotCoordinator、Originator adapters、RestorePlan | 各 domain originator + snapshot repository |
+| Provider switch | PipelineApplicationService | Config validator、ProviderFactory、health check | Config manager |
+| Task | TaskApplicationService | bounded scheduler、cancellation token、result store | Task registry/store |
+
+Controller 只构造输入 DTO 并调用用例；应用服务负责业务流程；领域模块定义不变量；adapter 负责协议与 IO。若现阶段尚无这些类，先通过现有模块中的薄函数/对象形成显式边界，避免机械地新增十几个空目录。
+
+## 13. 一致性和副作用
+
+- 用户消息、工具调用、工具结果、assistant final 要关联同一 round_id/request_id；失败轮次应有明确状态。
+- 不把 EventBus 当事务机制；若“工具已执行但总结失败”，需要保留 tool result 和 round state。
+- 对修改状态的用例定义 precondition、执行点、补偿动作和可重放性。
+- Save restore、provider switch、记忆重建等长操作需要 operation/task id，阶段状态可查询。
+- 持久化失败必须区别“业务动作成功但日志写失败”和“业务事务未成功”；审计不能作为主状态的唯一真相。
