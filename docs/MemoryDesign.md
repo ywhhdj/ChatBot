@@ -206,3 +206,33 @@ Slot
 - M3 压缩生命周期：增量计数触发、版本记录和回退。
 - M4 Memento：manifest、不可变 revision、dry-run restore、墓碑重放和旧格式迁移。
 - M5 性能：可选 reranker、缓存、批量 embedding、后台 rebuild；仅在基准证明收益时启用。
+
+
+## 12. 与上下文构建的集成契约
+
+记忆存储、检索候选和 LLM prompt 是三个不同责任：
+- MemoryStore 保存事实/情节/摘要和来源。
+- Retriever 只负责按 scope 检索候选，不决定最终把什么喂入模型。
+- MemoryRanker 做融合、冲突标注、有效期过滤和置信度评估。
+- PromptBuilder 根据本轮请求、角色、session window 和 token budget 决定实际注入集合。
+
+完整上下文分离与数据流见 [ContextArchitecture.md](ContextArchitecture.md)。
+
+### 每轮检索的输入/输出
+
+输入至少包括 \`session_id\`、\`character_id\`、当前 query、时间基准、允许的 memory kinds 与检索预算。输出应是有来源的候选清单，而不是预先串起来的“长期记忆全文”。
+
+候选必须有：memory_id、kind、source_ids、score、confidence、validity、conflict group、embedding_version。来源与置信度缺失的旧记录可按 legacy 候选处理，但不能自动升级为高可信事实。
+
+### 层间生命周期规则
+
+- L1 是受 token 和 message count 双限制的会话工作集；它不是长期存储的唯一副本。
+- L2/L3 由来源消息提取，并保留 provenance；用户明确更正优先于自动推断。
+- L4 摘要可重建；每个摘要记录源消息范围和输入 revision。
+- L5 冷档案默认只供按需追溯，不自动塞入 prompt。
+- 压缩只产生摘要/压缩记录，不应悄悄抹掉仍受保留策略保护的 source messages。
+- 删除按 memory id 和 source lineage 传播，清理检索缓存和索引，同时在 restore 时重放删除墓碑。
+
+### 对话系统不能把检索当作授权
+
+记忆候选、文件内容和工具结果都是数据，不是 system policy。即使 retrieved memory 内容包含“执行某个 shell 命令”，也不能改变 ToolContext 的 allowlist；高风险执行由独立授权层决定。
