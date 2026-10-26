@@ -62,3 +62,29 @@
 - 状态：建议接受。
 - 决策：先建立 latency/queue/memory/retrieval-quality baseline，再启用缓存、批量 embedding、reranker 或额外索引。
 - 验收：每项优化报告基线、实际收益、内存成本和降级路径。
+
+
+## ADR-009：上下文存储按 session 隔离
+
+- 状态：提议，P0。
+- 背景：当前 UserContext 为 singleton 并持有共享 deque；消息有 session_id，但 get_current_messages() 没有按 session 过滤。
+- 决策：以 SessionContextStore 为所有近期窗口的唯一访问入口；窗口按 session 分桶，prompt 只读取 RequestContext 指定的 session。
+- 备选：调用方自己记得筛选；拒绝，因为调用点遗漏会造成隐蔽的数据串线。
+- 代价：迁移既有 singleton，维护旧消息兼容，并定义会话切换/清理语义。
+- 验收：两个 session 交错并发对话时不出现跨 session 消息、记忆或工具结果。
+
+## ADR-010：游戏存档采用 Memento revision，而不把路径索引误称为完整快照
+
+- 状态：提议，P1。
+- 背景：当前 data.yaml 记录路径指针和部分配置；真正的角色、会话和记忆数据由各管理器持有。
+- 决策：Slot 继续作为用户入口，新增 Snapshot revision；领域 manager 以 Originator adapter 输出快照，Coordinator 作为 Caretaker 做 staging、manifest/hash、发布和恢复编排。
+- 恢复：Preview → Prepare → Commit → Verify；失败时使用 before revision rollback；记忆删除墓碑在恢复后重放。
+- 代价：需各模块快照接口、版本迁移、更多磁盘占用和故障注入测试。
+- 验收：任何一个 section 导出/校验失败都不发布 Full snapshot；restore preview 无副作用；commit 失败不留下无法解释的混合状态。
+
+## ADR-011：多种 transport 共用契约与 decoder
+
+- 状态：提议，P0。
+- 背景：Axios、SSE、WebSocket 和 Qt bridge 的协议包装存在差异，桌面 bridge 的成功码判断与后端不同。
+- 决策：共享 DTO/错误语义/decoder；transport 负责网络/消息编码，前端 service 表达领域操作，后端 application service 负责业务。
+- 验收：共享 contract matrix 覆盖成功、参数错误、未初始化、超时、取消、断连和重复请求。

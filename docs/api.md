@@ -314,3 +314,15 @@ layers query 包括 session_id 与 detail_top_k；search request 需以 MemorySe
 | P1 | raw=true 可请求敏感配置原值 | controllers/pipline.py 及配置 controller | 移除通用原文输出，或加本地受控权限 |
 
 本轮文档提交不修复这些实现风险，也未运行应用导出真实路由；路线和方法清单中已标注应以 FastAPI 实际注册结果为最终依据。
+
+
+## 14. 架构设计文档索引
+
+本文件定义外部接口和 transport 契约；以下文档定义实现该契约的模块边界与状态生命周期：
+
+- [FrontendBackendContract.md](FrontendBackendContract.md)：REST/SSE/WebSocket/Qt bridge 共用请求 ID、事件信封、错误与取消语义。
+- [ContextArchitecture.md](ContextArchitecture.md)：session-scoped context/prompt 构建。API 的 session_id 是业务隔离字段，不是可选装饰字段。
+- [GameSaveArchitecture.md](GameSaveArchitecture.md)：Slot、Checkpoint、Full Snapshot 与 restore operation 的目标 API/流程；其中新增 snapshot endpoint 仅为目标设计，未经实现不得当作当前可用 API。
+- [MemoryDesign.md](MemoryDesign.md)：记忆查询、来源、置信度、删改和向量一致性。
+
+任何目标 endpoint 都必须先在源码实现并导出 OpenAPI 后，才可从“目标设计”升级为“当前接口”。当前 session/save API 的兼容性要求维持旧路径和字段，新增 Memento 能力应使用明确的新操作，而不是改变旧 load 的意义。
