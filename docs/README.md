@@ -1,78 +1,95 @@
-# ChatBot 工程设计索引
+# ChatBot 工程架构设计索引
 
-> 分支基线：dev（审阅提交 c5e6343ec4b3913caaa04e5f6af2c34327213314）
-> 范围：只更新设计文档和计划，不修改业务源码。
+> 本文档集以 \`dev\` 源码为事实基线。标记为“目标设计/提议”的内容尚需按实施计划落地；文档描述不代表相应运行功能已经实现。
+>
+> 范围：架构与计划设计，不修改业务源码。遵循项目约定，不自动安装依赖、不执行构建/测试。
 
-## 1. 项目现状
+## 1. 目标架构
 
-ChatBot 是一个以 Python 为核心的本地/桌面 AI 助手，包含 FastAPI REST、SSE/WebSocket、Vue 3 + TypeScript 前端、模型管道适配器、工具/技能系统、会话与存档、混合记忆及本地文件存储。Qt 主线程、WebServer asyncio loop、任务调度器、事件总线和存储 worker 的边界，是后端正确性与性能的关键。
+ChatBot 是一个以 Python 为核心的本地/桌面 AI 助手，包含 FastAPI REST、SSE/WebSocket、Vue 3 + TypeScript 前端、Qt WebChannel bridge、模型管道、工具/技能、角色与会话、混合记忆和存档。
+
+目标是维持模块化单体部署，明确领域边界及 transport/存储适配边界。重点不是增加层数，而是让一次对话、一次记忆查询、一次工具执行、一次存档/恢复都具有明确的输入、所有权、状态、失败语义和验收条件。
+
+核心要求：
+- 上下文以请求为作用域，以 session 为隔离边界；禁止从共享全局 deque 构建未过滤的多会话 prompt。
+- 角色、用户输入、会话历史、检索记忆、工具能力和工具结果独立建模，再由 PromptBuilder 按优先级和 token 预算装配。
+- REST、SSE、WebSocket、Qt bridge 共用业务 DTO、错误语义、身份/权限策略与 request/task 关联。
+- 存储通过模块自己的 Originator/Repository/Adapter 访问；游戏存档通过 Memento snapshot 组合领域快照，不把路径指针误称完整快照。
+- 安全检查由确定性代码负责；检索和 LLM 不拥有权限；删除墓碑优先于旧存档恢复。
+- 性能优化先建立延迟、队列、内存、检索质量基准，不提前引入微服务或不必要的外部基础设施。
+
+## 2. 源码模块地图
 
 | 路径 | 当前职责 |
 |---|---|
-| src_py/modules/api/ | FastAPI 服务、REST 控制器、统一响应、异常处理、WebSocket |
-| src_py/modules/manager/ | 会话、角色、服务、任务调度和存档运行时管理 |
-| src_py/modules/pipeline/ | LLM、TTS、ASR、OCR 适配器及对话路由 |
-| src_py/modules/memory/ | 混合记忆、embedding、Markdown/SQLite 存储、FAISS、RAG |
-| src_py/modules/context/ | 会话上下文和 prompt 数据 |
-| src_py/modules/events/ | 线程安全事件总线与事件类型 |
-| src_py/modules/tools/、services/ | 技能执行、工具编排和外部服务 |
-| resources/defaults/ | 默认配置、提示词、角色和记忆 SQL schema |
-| src/ | Vue 前端入口、页面、状态管理、API service |
-| scripts/api/、scripts/gen_api_types.mjs | API 生成/类型相关流程，需统一权威入口 |
+| \`src_py/modules/api/\` | FastAPI 服务、REST 控制器、统一响应/异常、WebSocket |
+| \`src_py/modules/pipeline/\` | chat 入口、角色/工具编排、LLM/TTS/ASR/OCR adapters |
+| \`src_py/modules/context/\` | UserContext、音频等输入上下文 |
+| \`src_py/modules/manager/session/\` | 会话元数据、round record 与消息持久化 |
+| \`src_py/modules/manager/saves/\` | SaveSlotManager、slot section 与 index/data YAML |
+| \`src_py/modules/manager/character.py\` | 角色管理与运行状态 |
+| \`src_py/modules/memory/\` | HybridMemorySystem、embedding、SQLite/Markdown、FAISS、RAG、压缩 |
+| \`src_py/modules/events/\` | 线程安全事件总线及事件类型 |
+| \`src_py/modules/tools/\`、\`services/\` | 技能、工具执行与外部服务 |
+| \`src_py/modules/runtime.py\` | 应用/用户数据目录与运行时管理 |
+| \`src/api/services/\`、\`src/api/http.ts\` | 前端领域 API service 和 Axios/Qt bridge 适配 |
+| \`src/stores/\`、\`src/router/\`、\`src/views/\` | Pinia 状态、页面路由和 UI |
 
-## 2. 文档导航
+## 3. 文档导航
 
-- [后端架构设计](BackendDesign.md)：模块边界、线程、编排、存档、性能与安全。
-- [后端实施计划](BackendPlan.md)：P0/P1/P2 任务、依赖、验收与回滚。
-- [前端架构设计](FrontendDesign.md)：Vue、Pinia、API service、桌面桥接和流式状态。
-- [前端实施计划](FrontendPlan.md)：契约修复、流式交互、状态一致性与性能。
-- [记忆系统设计](MemoryDesign.md)：现状、分层、模糊检索、衰减、压缩、归档和删除。
-- [API 契约](api.md)：REST、SSE、WebSocket、响应信封及差异记录。
-- [安全与审计设计](SecurityAndAuditDesign.md)：威胁模型、密钥、技能执行、事件审计和数据删除。
-- [架构决策记录](ArchitectureDecisionRecords.md)：需要评审的方案及其理由。
+### 总体和后端
+- [BackendDesign.md](BackendDesign.md)：模块依赖方向、线程模型、请求生命周期、provider、任务、存储与安全。
+- [BackendPlan.md](BackendPlan.md)：分优先级实施工作、依赖关系、验收与回滚。
+- [ArchitectureDecisionRecords.md](ArchitectureDecisionRecords.md)：架构决策、备选方案和接受标准。
 
-## 3. 工程硬约束
+### 上下文、记忆与存档
+- [ContextArchitecture.md](ContextArchitecture.md)：request/session/character/tool/memory 上下文隔离、PromptBuilder、token 预算与迁移。**当前优先审查跨 session 上下文污染风险。**
+- [MemoryDesign.md](MemoryDesign.md)：当前记忆实现、五层逻辑记忆、模糊检索、置信/冲突、衰减、压缩、索引一致性和删除语义。
+- [GameSaveArchitecture.md](GameSaveArchitecture.md)：当前 Slot/路径指针模型与目标 Memento：不可变 Snapshot、manifest/hash、preview/prepare/commit/rollback、旧格式兼容。
+- [SecurityAndAuditDesign.md](SecurityAndAuditDesign.md)：威胁模型、秘密、技能沙盒、审计事件、数据删除和恢复风险。
 
-1. 只依据真实源码断言现状；新机制必须标为目标方案，不能写成已经完成。
-2. 分层解耦：Controller 处理协议/输入校验/响应映射，领域逻辑留在应用与管理模块，供应商和存储细节放在适配器。
-3. 不跨层反向依赖；领域核心不得依赖 FastAPI、Vue、Qt UI 或具体模型供应商。
-4. 先检查 api.md 再改接口；保持路由、字段、错误码、事件名和流式语义兼容，破坏性变更必须有迁移窗口。
-5. Qt 主线程不运行常驻 asyncio loop；线程内已有运行中 loop 时不能嵌套 asyncio.run；跨线程派发要显式可追踪。
-6. 后台任务必须保存引用、回收异常、设置超时/取消策略并在 shutdown 时有界收尾。
-7. 安全检查由确定性代码执行；LLM 输出不得作为授权证明。
-8. 记忆元数据、FAISS index 和存档 revision 必须定义一致性、失败补偿、校验与恢复规则。
-9. 每个实施任务维护 Plan，写清影响面、验收、失败路径、回滚与数据迁移。
-10. 按仓库约定不自动下载依赖、不执行构建/测试；本轮只做 Markdown、链接和契约静态检查。
+### 前后端契约
+- [api.md](api.md)：外部路径、请求/响应、错误码、SSE/WS 事件及源码差异。
+- [FrontendBackendContract.md](FrontendBackendContract.md)：REST/SSE/WebSocket/Qt bridge 统一契约、ID 语义、超时/取消/幂等和 API 生成流程。
+- [FrontendDesign.md](FrontendDesign.md)：Vue/Pinia/API service、桌面桥接、流式请求和 UI 资源生命周期。
+- [FrontendPlan.md](FrontendPlan.md)：契约对齐、流式隔离、上下文绑定、存档 UI 和性能工作。
 
-## 4. 当前源码审阅发现
+## 4. 核心设计约束
 
-| 级别 | 问题 | 影响 |
+1. **单一职责**：Controller 做协议校验/映射；Application Service 协调用例；Domain Manager 维护业务不变量；Adapter 负责具体 provider/文件/DB/transport。
+2. **依赖朝内**：领域层不依赖 FastAPI、Vue、Qt widget、具体 LLM SDK 或具体向量库。
+3. **上下文不共享隐式状态**：每个请求显式传 request_id/session_id/character_id；每条消息保留 session_id/source/role；检索先过滤 scope。
+4. **会话与存档分离**：Session 是对话容器，Slot 是用户存档入口，Snapshot 是不可变的一致性版本。
+5. **transport 共享契约**：Axios/Qt bridge 不可分别定义成功码；SSE/WS 的流事件需 request_id/stream_id 与明确终态。
+6. **异步有界**：工作队列、连接并发、模型工具步数、响应字节、音视频大小、总 deadline 均有限制；后台任务有状态与异常回收。
+7. **数据变更可恢复**：记忆索引和元数据有修复流程；快照是 stage/validate/publish；恢复是 preview/prepare/commit/verify。
+8. **删除高于恢复**：隐私删除 tombstone 必须在压缩、缓存、备份和 restore 后仍然有效。
+9. **可审计而不泄露**：通过 request/task/op id 关联事件；普通日志不记录完整 prompt、记忆正文和 secret。
+10. **先测量再优化**：缓存、RRF、reranker、批量 embedding 和新的索引都要有基线和回滚开关。
+
+## 5. 已确认的源码设计风险
+
+| 优先级 | 观察 | 处置方向 |
 |---|---|---|
-| P0 | 后端成功 code 是 200，但 src/api/http.ts 的 desktop bridge 分支判断 code === 0 | 桌面请求可能把成功响应当作失败 |
-| P0 | controllers/__init__.py 给所有 router 加 /api；save.py、audit.py 的 router 自带 /api/save、/api/audit | 可能形成 /api/api/... 双前缀；必须用 FastAPI 实际注册路由核实后修正 |
-| P1 | api.md 有 SSE 路径示例笔误，未完整列出 PPT/审计等控制器 | 文档与实际注册路径可能漂移 |
-| P1 | 前端 HTTP 与 bridge 的信封解包逻辑分开实现 | 错误码、request_id 与通知语义容易分叉 |
-| P1 | API 生成脚本/生成产物权威来源待统一 | 后端 DTO、文档和 TS service/types 可能产生漂移 |
-| P1 | hash embedding、FAISS 映射、Markdown fallback 与删除传播缺少端到端验收契约 | 可能出现召回质量差、孤儿向量或后端语义不一致 |
-| P2 | 存档为 index.yaml + 每槽 data.yaml，缺少完整不可变 revision/恢复预演约定 | 失败恢复、追溯与旧快照删除保护不足 |
-| P2 | audit controller 主要列出服务/工具能力，不等于完整安全审计 | 必须另定义记录 actor、动作、决策、结果和保留期 |
+| P0 | \`UserContext\` 是单例，共享 deque；\`get_current_messages()\` 未按 session_id 过滤，而 Orchestrator 使用此消息集合构建 prompt | 优先重构 session-scoped ContextStore，增加并发交错隔离测试 |
+| P0 | 后端成功 code 当前为 200，而 \`src/api/http.ts\` 桌面 bridge 分支判断 code=0 | 共用响应 decoder |
+| P0 | Controller registration 统一加 \`/api\`，save/audit router 自身也含 \`/api\` 前缀 | 导出真实路由清单并修正重复前缀 |
+| P1 | WebSocket 注册点使用 \`app.websocket("/")\`，旧文档写 \`/ws\` | 通过 server mount 和实际客户端确认唯一稳定路径 |
+| P1 | \`data.yaml\` 保存路径指针/部分配置，不是全量游戏状态 | 区分 Slot 与 Full Snapshot，提供 originator snapshot adapters |
+| P1 | FAISS 向量索引与 SQLite 元数据无法组成一个原子事务；embedding 有 hash fallback | index health check、版本指纹、repair/rebuild 和评估集 |
+| P1 | 前端 API service 生成源/类型生成流程需要单一权威 | OpenAPI/DTO/client/doc 契约检查 |
+| P2 | audit controller 当前主要列出能力目录，并非完整的安全事件审计日志 | 独立定义 actor/action/decision/result 与 retention |
 
-以上是文档审阅发现，不代表本次已修复运行行为。涉及实际路由的判断需再以 app.routes/OpenAPI 清单确认。
+“源码风险”只说明静态审阅的观察和待确认项，不等于本次已修改行为。路由相关问题必须以应用的实际注册路径/OpenAPI 导出为最终依据。
 
-## 5. 架构方向
+## 6. 推荐实施顺序
 
-- 保持模块化单体，不为“先进”而提前拆微服务。
-- 以应用服务、明确的协议/存储端口和适配器降低耦合；拆进程必须由性能或故障隔离数据驱动。
-- 记忆按工作、情节、语义、摘要、冷档案划分逻辑层，底层初期继续使用现有 SQLite/FAISS/Markdown。
-- 存档借鉴 Memento：不可变版本、manifest、哈希校验、恢复预演、提交/回滚和删除墓碑。
-- 统一 request_id/trace_id、结构化任务状态与低基数指标；普通日志不写秘密、完整 prompt 或私人记忆。
-- API 契约只保留一个权威来源；生成类型/服务文件不得手工漂移。
-- 任何检索权重、缓存或 reranker 优化先建立基准，再决定是否启用。
+1. P0：修复 session context 隔离、HTTP/bridge 成功码、重复路由前缀，并生成权威 API route inventory。
+2. P0/P1：建立共享 ContextSnapshot/PromptBuilder 契约；为 SSE/WS/Qt bridge 统一 request/stream/task ID、错误、取消与 deadline。
+3. P1：定义 memory provenance/confidence/validity schema migration、索引修复与删除墓碑。
+4. P1：建立 Snapshot Originator adapters、manifest 与不可变 revisions；实现 preview/prepare/commit/rollback，而非直接覆盖 data.yaml。
+5. P1：生成统一前端 API types/services 和 transport contract tests。
+6. P2：离线评估多语言混合检索、性能和 token budget；按基准启用 RRF/reranker/cache。
+7. P2：建立审计事件与可观测性，梳理保留期、脱敏和导出策略。
 
-## 6. 推荐阅读顺序
-
-1. [API 契约](api.md)
-2. [后端架构](BackendDesign.md) 与 [前端架构](FrontendDesign.md)
-3. [记忆设计](MemoryDesign.md) 与 [安全审计](SecurityAndAuditDesign.md)
-4. [后端计划](BackendPlan.md) 与 [前端计划](FrontendPlan.md)
-5. [架构决策记录](ArchitectureDecisionRecords.md)
+每一步必须在对应 Plan 中记录代码范围、迁移方案、测试、回滚和验收状态。

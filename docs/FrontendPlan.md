@@ -49,3 +49,34 @@ F0-04 + F2-02 → 安全验收
 - 自动生成文件与权威源一致；生成命令写入文档。
 - 不将服务端秘密存进浏览器存储；通知不是异常处理的替代。
 - 遵守仓库约束：本轮不下载依赖、不执行 build/test。
+
+
+## 4. 前后端交互、上下文与存档 UI 增补
+
+细节契约见 [FrontendBackendContract.md](FrontendBackendContract.md)、上下文规则见 [ContextArchitecture.md](ContextArchitecture.md)、存档流程见 [GameSaveArchitecture.md](GameSaveArchitecture.md)。
+
+| ID | 优先级 | 任务 | 验收 |
+|---|---|---|---|
+| F0-06 | P0 | 所有聊天与记忆请求显式传 session_id/character_id | 不允许用隐式全局当前会话构建 request |
+| F0-07 | P0 | Web/desktop 共用 ApiResponse decoder | 相同响应在 Axios 与 bridge 中产生相同结果 |
+| F1-06 | P1 | session/character 切换前中止或 detach 旧 stream | 无迟到事件覆盖当前 store |
+| F1-07 | P1 | 为流与后台任务使用 request_id/stream_id/task_id | 所有 chunk/状态都能归属到会话和任务 |
+| F1-08 | P1 | 存档列表显示 slot 与 snapshot 类型/版本 | 旧槽不被误标为 Full snapshot |
+| F1-09 | P1 | 恢复前展示 RestorePlan | 用户能看见覆盖范围、缺失资产、迁移与警告 |
+| F2-06 | P2 | 删除记忆后清理 UI memory cache | 页面、搜索结果和缓存都不显示已删除条目 |
+| F2-07 | P2 | 流式消息虚拟化与 token 批量刷新 | 长对话增长时渲染成本有界 |
+
+### 存档交互状态
+
+目标状态机：
+
+~~~text
+idle → creating → validating → committed
+                     ↘ failed
+idle → previewing → ready_to_restore → restoring
+                                      ├→ restored
+                                      ├→ rolled_back
+                                      └→ partial_failure
+~~~
+
+前端只根据服务端 operation 状态更新 UI。用户点击“保存”后不能立刻显示已保存；应等待 committed。恢复遇到 partial_failure 时必须呈现明确警告和操作记录，不得当作普通失败 toast 隐藏。

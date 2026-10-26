@@ -100,3 +100,28 @@ FastAPI contract (docs/api.md)
 - 前端确认不是后端授权的替代；服务端必须重复验证能力和参数。
 - 关键操作有 loading、disabled、success/failure、cancelled 状态；删除/恢复有明确影响说明。
 - 对用户可见错误隐藏堆栈、绝对路径和内部配置。
+
+
+## 10. 前后端契约的唯一规则
+
+详细 transport contract 见 [FrontendBackendContract.md](FrontendBackendContract.md)，API 路径与源码差异见 [api.md](api.md)。
+
+- Axios、SSE、WebSocket、Qt bridge 不是四套业务实现，而是四种 transport adapter。
+- Service 只表达领域操作；transport 负责编码、请求 ID、取消、timeout 和统一响应 decoder。
+- 前端所有异步结果都要校验 request_id + session_id/character_id 的归属，再更新 store。
+- 切换 session/character 时，先取消旧流或把旧流标为 detached，再加载新 context，禁止迟到事件覆盖当前会话。
+- 非幂等操作不能因为超时就直接自动重发；先通过 task_id/operation_id 查询服务端是否已执行。
+- 统一 error object，底层 service 不弹窗；由 composable/page 决定何时提示、何时静默处理取消。
+
+## 11. Session 视图和上下文不能混淆
+
+前端显示的选中会话是 UI 状态，不代表后端全局 singleton 已安全切换。每次 chat request 都应显式传 session_id；所有 stream/store mutation 用 request/session key 归属。前端 store 分离缓存无法替代后端 ContextStore 的隔离和授权。
+
+建议 Chat store 采用 per-session cache：
+- \`messagesBySession[sessionId]\`：只缓存 UI 消息投影。
+- \`activeStreamBySession[sessionId]\`：stream id、request id、状态、cancel handle。
+- \`pendingTasksBySession[sessionId]\`：仅缓存与会话相关的任务引用。
+- \`memoryPreviewBySession[sessionId]\`：短时缓存，必须有 revision/TTL，删除后失效。
+- \`activeSessionId\`：当前展示状态，不能作为后端请求的隐式 session_id 唯一来源。
+
+该结构仅供前端展示/交互，不取代后端 session/memory 的权威数据。
