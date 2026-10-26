@@ -1,5 +1,5 @@
 declare namespace User {
-  type BaseConfig = {
+  type UIConfig = {
     textSpeed: number;
     bgVolume: number;
     soundVolume: number;
@@ -7,30 +7,30 @@ declare namespace User {
     bgPath: string;
     soundPath: string;
     historyPath: string;
+    isAutoSend: boolean;
     animations: {
       snowFlakes: boolean;
-    }
-  }
+      liquid: boolean;
+    };
+  };
+
   type DialogHistoryType = "message" | "reply";
+
   type DialogHistoryRole = "user" | "assistant";
+
   type DialogHistory = {
     id: string;
     type: DialogHistoryType;
     role: DialogHistoryRole;
     content: string;
-  }
+  };
+
   type DialogHistoryMap = Record<string, DialogHistory[]> | null;
+
   type State = {
-    config: BaseConfig;
+    config: UIConfig;
     dialogHistory: DialogHistoryMap;
     clientId: string;
-    serviceConfig: Record<API.ServiceName, {
-      name: string;
-      description?: string;
-      value?: boolean | string;
-      status?: ServiceStatus;
-      config?: UI.ServiceConfigItem[];
-    }> | null;
-    isAutoSend: boolean;
-  }
+    serviceConfig: Record<string, API.ServiceUIDescription>;
+  };
 }

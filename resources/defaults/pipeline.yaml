@@ -1,0 +1,209 @@
+asr:
+  whisper:
+    config:
+      language:
+        default: zh
+        description: ''
+        required: false
+      
+      model_size:
+        default: base
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: whisper
+    tags: []
+
+llm:
+  chatgpt:
+    config:
+      api_key:
+        default: null
+        description: ''
+        required: true
+      
+      api_url:
+        default: null
+        description: ''
+        required: true
+      
+      max_retries:
+        default: 1
+        description: ''
+        required: false
+      
+      model:
+        default: gpt-3.5-turbo
+        description: ''
+        required: false
+      
+      timeout:
+        default: 20
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: chatgpt
+    tags: []
+
+  deepseek:
+    config:
+      
+      api_key:
+        default: null
+        description: ''
+        required: true
+      
+      max_retries:
+        default: 3
+        description: ''
+        required: false
+      
+      model:
+        default: deepseek-v4-flash
+        description: ''
+        required: false
+      
+      timeout:
+        default: 60.0
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: deepseek
+    tags: []
+
+  ollama:
+    config:
+      api_url:
+        default: http://localhost:11434/api/chat
+        description: ''
+        required: false
+      
+      max_retries:
+        default: 3
+        description: ''
+        required: false
+      
+      model:
+        default: null
+        description: ''
+        required: true
+      
+      timeout:
+        default: 20.0
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: ollama
+    tags: []
+
+ocr:
+  easy:
+    config:
+      languages:
+        default:
+        - ch_sim
+        - en
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: easy
+    tags: []
+
+  paddle:
+    config: {}
+    description: Helper class that provides a standard way to create an ABC using
+    name: paddle
+    tags: []
+
+  tesseract:
+    config:
+      lang:
+        default: chi_sim+eng
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: tesseract
+    tags: []
+
+  umi:
+    config: {}
+    description: Helper class that provides a standard way to create an ABC using
+    name: umi
+    tags: []
+
+tts:
+  aivis:
+    config:
+      api_key:
+        default: null
+        description: ''
+        required: true
+      api_url:
+        default: null
+        description: ''
+        required: true
+      audio_format:
+        default: mp3
+        description: ''
+        required: false
+      language:
+        default: ja
+        description: ''
+        required: false
+      model_uuid:
+        default: null
+        description: ''
+        required: true
+      speaker_uuid:
+        default: null
+        description: ''
+        required: false
+      style_id:
+        default: null
+        description: ''
+        required: false
+      style_name:
+        default: null
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: aivis
+    tags: []
+  
+  bv2:
+    config:
+      api_url:
+        default: null
+        description: ''
+        required: true
+    description: Helper class that provides a standard way to create an ABC using
+    name: bv2
+    tags: []
+  
+  gptsovits:
+    config:
+      api_url:
+        default: null
+        description: ''
+        required: true
+      params:
+        default: null
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: gptsovits
+    tags: []
+  
+  vits:
+    config:
+      api_url:
+        default: null
+        description: ''
+        required: true
+      params:
+        default: null
+        description: ''
+        required: false
+    description: Helper class that provides a standard way to create an ABC using
+    name: vits
+    tags: []

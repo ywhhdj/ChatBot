@@ -1,31 +1,20 @@
-from typing import TypedDict,Optional,TypedDict
-from dataclasses import dataclass
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
 
-from pydantic import BaseModel
 
 class OBSEventType:
+    """obsws WebSocket op code 与常用请求名。"""
+
     class ObsWebsocketSERIVE:
-        SERVICE_CONNECT = 0 # 服务端连接
-        SERVICE_RECOGNIZED_SUCCESS = 2 # 服务端已识别
-        SERVICE_EVENT_RESULT = 5 # 服务端返回事件结果
-        SERVICE_EVENT_RESULTING = 7 # 服务端正在返回事件结果
-        SERVICE_SERIAL_REQUEST = 9   #服务端返回串行处理结果
+        SERVICE_CONNECT = 0            # Hello
+        SERVICE_RECOGNIZED_SUCCESS = 2 # Identified
+        SERVICE_EVENT_RESULT = 5       # Event
+        SERVICE_REQUEST_RESPONSE = 7   # RequestResponse  ← 原代码缺失
 
     class ObsWebsocketCLINETEvent:
-        CLIENT_RECOGNIZED=1 # 客户端识别
-        CLIENT_RECOGNIZED_RETRY = 3 # 客户端重新识别
-        CLIENT_GET_EVENT = 6 #客户端请求获取事件信息
-        CLIENT_SERIAL_REQUEST = 8 # 客户端发送串行处理请求
+        CLIENT_GET_EVENT = 6           # Request
 
-    # class OBSUIEvent(str, Enum):
-    #     UI_EVENT_STUDIO_MODE_STATE_CHANGED = "StudioModeStateChanged"
-
-
-    # class UIActionData:
-    #     def __init__(self) -> None:
-    #         self.studio_mode_state_is_open: bool = False
-
-    # EventSubscription 位掩码 (协议 Enumerations)
     class EventSubscription:
         NONE = 0
         GENERAL = 1 << 0
@@ -35,71 +24,69 @@ class OBSEventType:
         TRANSITIONS = 1 << 4
         FILTERS = 1 << 5
         OUTPUTS = 1 << 6
-        SCENE_ITEMS = 1 << 7
-        MEDIA_INPUTS = 1 << 8
+        SCENEITEMS = 1 << 7
+        MEDIAINPUTS = 1 << 8
         VENDORS = 1 << 9
         UI = 1 << 10
-        ALL = (GENERAL | CONFIG | SCENES | INPUTS | TRANSITIONS | FILTERS
-            | OUTPUTS | SCENE_ITEMS | MEDIA_INPUTS | VENDORS | UI)
-        INPUT_VOLUME_METERS = 1 << 16
-        INPUT_ACTIVE_STATE_CHANGED = 1 << 17
-        INPUT_SHOW_STATE_CHANGED = 1 << 18
-        SCENE_ITEM_TRANSFORM_CHANGED = 1 << 19
-
-    # 媒体输入动作 (ObsMediaInputAction)
-    class ObsMediaInputAction:
-        NONE = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_NONE"
-        PLAY = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY"
-        PAUSE = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE"
-        STOP = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP"
-        RESTART = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART"
-        NEXT = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_NEXT"
-        PREVIOUS = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PREVIOUS"
+        ALL = (1 << 11) - 1
 
     class GeneralEventType:
-        VERSION="GetVersion"
-        STATS="GetStats"
-        HOTKEY_LIST="GetHotkeyList"
+        VERSION = "GetVersion"
+        STATS = "GetStats"
+        HOTKEY_LIST = "GetHotkeyList"
 
-    class TransitionsEventType:
-        TRANSITION_KIND_LIST="GetTransitionKindList"
-        SCENE_TRANSITION_LIST="GetSceneTransitionList"
-        CURRENT_SCENE_TRANSITION="GetCurrentSceneTransition"
-
-    class SourceEventType:
-        SOURCE_ACTIVE="GetSourceActive"
-        SOURCE_SCREENSHOT="GetSourceScreenshot"
-    
     class ConfigEventType:
-        SCENE_COLLECTION_LIST="GetSceneCollectionList"
-        CURRENT_SCENE_COLLECTION="GetCurrentSceneCollection"
-        PROFILE_LIST="GetProfileList"
-        SET_CURRENT_SCENE_COLLECTION="SetCurrentSceneCollection"
-        SET_CURRENT_SCENE="SetCurrentScene"
-        SET_CURRENT_PROFILE="SetCurrentProfile"
-        GET_VIDEO_SETTINGS="GetVideoSettings"
-        SET_VIDEO_SETTINGS="SetVideoSettings"
-        GET_STREAM_SERVICE_SETTINGS="GetStreamServiceSettings"
-        GET_RECORD_DIRECTORY="GetRecordDirectory"
-        SET_RECORD_DIRECTORY="SetRecordDirectory"
+        SCENE_COLLECTION_LIST = "GetSceneCollectionList"
+        SET_CURRENT_SCENE_COLLECTION = "SetCurrentSceneCollection"
+        PROFILE_LIST = "GetProfileList"
+        SET_CURRENT_SCENE = "SetCurrentProfile"
+        GET_VIDEO_SETTINGS = "GetVideoSettings"
+        SET_VIDEO_SETTINGS = "SetVideoSettings"
+        GET_STREAM_SERVICE_SETTINGS = "GetStreamServiceSettings"
+        GET_RECORD_DIRECTORY = "GetRecordDirectory"
+        SET_RECORD_DIRECTORY = "SetRecordDirectory"
 
-class OBSError:
+    class SceneEventType:
+        GET_SCENE_LIST = "GetSceneList"
+        GET_CURRENT_PROGRAM_SCENE = "GetCurrentProgramScene"
+        SET_CURRENT_PROGRAM_SCENE = "SetCurrentProgramScene"
+
+    class RecordEventType:
+        START_RECORD = "StartRecord"
+        STOP_RECORD = "StopRecord"
+        TOGGLE_RECORD = "ToggleRecord"
+        GET_RECORD_STATUS = "GetRecordStatus"
+
+    class StreamEventType:
+        START_STREAM = "StartStream"
+        STOP_STREAM = "StopStream"
+        TOGGLE_STREAM = "ToggleStream"
+        GET_STREAM_STATUS = "GetStreamStatus"
+
+
+@dataclass
+class OBSResponseData:
+    """服务端下发的帧。"""
+    status_code: Optional[int] = None   # op
+    data: Optional[Dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class OBSRequestParams:
+    """客户端上发的请求帧。"""
+    op: int = 6
+    d: Dict[str, Any] = field(default_factory=dict)
+
+
+class OBSError(Exception):
+    """OBS 相关异常基类。"""
+    class ConnectionError(Exception):
+        pass
+
     class RequestError(Exception):
-        def __init__(self, code: int, comment: Optional[str], response: Optional[dict] = None):
+        def __init__(self, code: int, comment: Optional[str] = None,
+                     result: Optional[dict] = None):
             self.code = code
             self.comment = comment
-            self.response = response
-            super().__init__(f"OBS request failed: code={code}, comment={comment}")
-
-    class ConnectionError(Exception):
-        def __init__(self, message: str):
-            self.message = message
-            super().__init__(f"OBS conection failed: {message}")
-
-class OBSRequestParams(TypedDict):
-    op:int
-    d:dict
-
-class OBSResponseData(BaseModel):
-    status_code:int
-    data:dict = {}
+            self.result = result
+            super().__init__(f"OBS 请求失败(code={code}): {comment}")

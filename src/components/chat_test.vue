@@ -107,8 +107,16 @@ const onKeydown = (event: KeyboardEvent) => {
       </aside>
 
       <main class="chat-main">
-        <div class="message-list" ref="listRef">
-          <div class="message-row" v-for="message in messages" :key="message.id" :class="message.role">
+        <div
+          class="message-list"
+          ref="listRef"
+        >
+          <div
+            class="message-row"
+            v-for="message in messages"
+            :key="message.id"
+            :class="message.role"
+          >
             <div class="avatar">
               <span>{{ message.role === 'user' ? '你' : '灵' }}</span>
             </div>
@@ -125,18 +133,32 @@ const onKeydown = (event: KeyboardEvent) => {
         </div>
 
         <div class="composer">
-          <textarea v-model="draft" class="composer-input" rows="2" placeholder="输入内容，Enter 发送，Shift+Enter 换行"
-            @keydown="onKeydown"></textarea>
+          <textarea
+            v-model="draft"
+            class="composer-input"
+            rows="2"
+            placeholder="输入内容，Enter 发送，Shift+Enter 换行"
+            @keydown="onKeydown"
+          ></textarea>
           <div class="composer-actions">
-            <button class="icon-btn ghost" type="button">语音</button>
-            <button class="icon-btn ghost" type="button">图片</button>
-            <button class="icon-btn" type="button" @click="sendMessage">发送</button>
+            <button
+              class="icon-btn ghost"
+              type="button"
+            >语音</button>
+            <button
+              class="icon-btn ghost"
+              type="button"
+            >图片</button>
+            <button
+              class="icon-btn"
+              type="button"
+              @click="sendMessage"
+            >发送</button>
           </div>
         </div>
       </main>
     </div>
   </section>
-  <Code language="json" code="{}" editable />
 </template>
 
 <style scoped>

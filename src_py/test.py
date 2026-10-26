@@ -7,6 +7,7 @@ import os
 import sys
 
 from modules.context.audio import AudioContext
+from src_py.modules.core.native import decorator
 
 
 
@@ -68,7 +69,12 @@ def test_webservice():
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-def test_ui():
+def test_ui(sample_text = """花间一壶酒，独酌无相亲。
+举杯邀明月，对影成三人。
+月既不解饮，影徒随我身。
+暂伴月将影，行乐须及春。"""):
+    font_color="#F6F6F6"
+
     from PyQt5.QtCore import (
         QTimer, Qt, QPropertyAnimation, QEasingCurve, 
         QPoint, pyqtSignal
@@ -120,9 +126,12 @@ def test_ui():
         
         def center_on_screen(self):
             """居中显示在屏幕上"""
-            screen = QApplication.primaryScreen().geometry()
-            x = (screen.width() - self.width()) // 2
-            y = (screen.height() - self.height()) // 2
+            screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+            screen_rect = screen.geometry()
+            x = (screen_rect.width() - self.width()) // 2
+            y = (screen_rect.height() - self.height()) // 2
             self.move(x, y)
             
         def _setup_ui(self):
@@ -150,7 +159,7 @@ def test_ui():
             
             # 设置字体
             font = QFont()
-            font.setFamilies(['华文彩云', 'STCaiyun', 'KaiTi', 'SimSun'])
+            # font.setFamilies(['华文彩云', 'STCaiyun', 'KaiTi', 'SimSun'])
             font.setPointSize(22)
             font.setBold(True)
             self._text_label.setFont(font)
@@ -181,7 +190,6 @@ def test_ui():
             self._text_label.setGraphicsEffect(shadow)
             
         def resizeEvent(self, event):
-            """调整大小事件"""
             super().resizeEvent(event)
             self._text_label.setGeometry(10, 10, self.width() - 20, self.height() - 20)
             
@@ -207,7 +215,7 @@ def test_ui():
                         i = entity_end + 1
                         continue
                 else:
-                    color = '#00CED1'
+                    color = font_color
                     result.append(f'<span style="color: {color}; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">{char}</span>')
                     char_index += 1
                     i += 1
@@ -308,10 +316,12 @@ def test_ui():
             
         def show_at_position(self, x: int, y: int):
             """在指定位置显示"""
-            screen = QApplication.primaryScreen().geometry()
-            x = max(0, min(x, screen.width() - self.width()))
-            y = max(0, min(y, screen.height() - self.height()))
-            
+            screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+            screen_rect = screen.geometry()
+            x = max(0, min(x, screen_rect.width() - self.width()))
+            y = max(0, min(y, screen_rect.height() - self.height()))
             self.move(x, y)
             
         def mousePressEvent(self, event):
@@ -319,7 +329,7 @@ def test_ui():
             if event.button() == Qt.MouseButton.LeftButton:
                 self._is_dragging = True
                 # 记录鼠标按下时的全局位置
-                self._drag_start_pos = event.globalPos()
+                self._drag_start_pos = event.globalPosition().toPoint()
                 # 记录窗口当前的位置
                 self._window_start_pos = self.pos()
                 event.accept()
@@ -329,7 +339,7 @@ def test_ui():
             """鼠标移动事件 - 拖动中"""
             if self._is_dragging:
                 # 计算鼠标移动的距离
-                delta = event.globalPos() - self._drag_start_pos
+                delta = event.globalPosition().toPoint() - self._drag_start_pos
                 # 计算窗口新位置 = 窗口原位置 + 鼠标移动距离
                 new_pos = self._window_start_pos + delta
                 self.move(new_pos)
@@ -351,11 +361,6 @@ def test_ui():
     
     # 模拟流式输出
     def simulate_stream():
-        sample_text = """花间一壶酒，独酌无相亲。
-举杯邀明月，对影成三人。
-月既不解饮，影徒随我身。
-暂伴月将影，行乐须及春。"""
-        
         display.display_text(sample_text)
     
     # 延迟1秒启动模拟
@@ -1234,15 +1239,19 @@ async def test_compression_comparison():
 
         await browser.close()
 
-
+#测试流装饰器
+@decorator.sync_task_scheduler(timeout=SYNC_TIMEOUT)
 async def main():
-    await test_html()
+    await test_compression_comparison()
     # await test_real_page()
     # await test_compression_comparison()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    # audio_context = AudioContext()
-    # audio_context2= AudioContext()
-    # print(audio_context is audio_context2)
+    import ctypes, json
+    lib = ctypes.CDLL("src_py/perf_native.dll")
+    buf = ctypes.create_string_buffer(4096)
+    _ = lib.detect_performance_buf(buf, len(buf))
+    print("buf 版:", json.loads(buf.value.decode("utf-8")))
+    # import struct, sys; print(sys.version); print('64bit' if struct.calcsize('P')*8==64 else '32bit')
+

@@ -1,0 +1,19 @@
+starts:
+
+
+nodes:
+  node1:
+    type: start
+    next: 
+      - "node2"
+    texts: 
+      - "This is a test"
+      - "with two lines"
+    options:
+      - texts:
+          - "Option 1"
+        next:
+          - "node2"
+
+  node2:
+    

@@ -19,22 +19,6 @@ def time_since(last_access_time:datetime,now:datetime)->float:
 def cosine_similarity(vec1:ndarray,vec2:ndarray)->float:
     return dot(vec1,vec2)/(norm(vec1)*norm(vec2) +1e-8)
 
-async def embed_text(text: str, dim: int = 384) -> ndarray:
-    """
-    Simple, deterministic hash embedding (fallback when no embedding model is configured).
-    """
-    vec = zeros(dim, dtype=float32)
-    if not text:
-        return vec
-    for token in text.lower().split():
-        h = hashlib.md5(token.encode("utf-8")).hexdigest()
-        idx = int(h[:8], 16) % dim
-        vec[idx] += 1.0
-    norm_val = norm(vec)
-    if norm_val > 0:
-        vec /= norm_val
-    return vec
-
 def compute_memory_score(
         simillarity:float,
         now:datetime,
@@ -75,4 +59,27 @@ def text_to_list(text:Union[str,list[str]])->list[str]:
         return [text]
     return text
 
-    
+EMBED_DIM = 384
+
+
+def embed_text(text: str, dim: int = EMBED_DIM) -> ndarray:
+    """确定性 hash 嵌入（无模型依赖）。"""
+    vec = zeros(dim, dtype=float32)
+    if not text:
+        return vec
+    for token in str(text).lower().split():
+        h = hashlib.md5(token.encode("utf-8")).hexdigest()
+        vec[int(h[:8], 16) % dim] += 1.0
+    n = norm(vec)
+    if n > 0:
+        vec = vec / n
+    return vec
+
+
+def embed_texts_sync(texts: List[str], dim: int = EMBED_DIM) -> ndarray:
+    """批量版本，返回 shape (len(texts), dim) 的 float32 矩阵。"""
+    from numpy import vstack
+
+    if not texts:
+        return zeros((0, dim), dtype=float32)
+    return vstack([embed_text(t, dim) for t in texts]).astype(float32)

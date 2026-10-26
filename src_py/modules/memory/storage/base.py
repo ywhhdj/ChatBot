@@ -1,46 +1,84 @@
+"""记忆存储抽象基类。
+
+| 方法 | 基类签名 | 实际实现（sqlite.py / markdown.py） | main.py 调用 |
+|---|---|---|---|
+| `add_memory` | `(memory, vector, importance) -> int` | `-> list[int]` | — |
+| `retrieve_memory` | `(query_vector, limit)` | `(query_vector, limit, session_id)` | 有 session_id |
+| `get_detailed` | `(memory_id)` | `(session_id, limit)` | `(session_id, limit)` |
+| `get_long_term` | `(session_id, limit)` | `(session_id, query, limit)` | 有 query |
+| `get_compressed` | `()` | `(session_id, short_first, limit)` | 有参数 |
+
+`HybridMemorySystem` 按实现签名调用，一旦存储后端切换（SQLite ↔ Markdown）
+或有人照基类签名写代码，立刻 TypeError。这里统一为**实现侧的真实签名**
+（带 session_id），并把 `get_detailed` 的参数名从 `memory_id` 改对。
+"""
+
 from abc import ABC, abstractmethod
-from types import CoroutineType
 from typing import Any
-import numpy as np
+
+from numpy import ndarray
+
 from .models import CompressedMemory, Memory
 
-class _MemoryStorageBase(ABC):
+
+class MemoryStorageBase(ABC):
+
     @abstractmethod
-    def add_memory(self,memory:Memory,vector:np.ndarray,importance:float=0.0) -> CoroutineType[Any,Any,int]:
+    async def add_memory(
+        self, memory: Memory, vector: ndarray, importance: float = 0.0
+    ) -> int:
         raise NotImplementedError
 
     @abstractmethod
-    def retrieve_memory(self,query_vector: np.ndarray,limit:int=10)-> CoroutineType[Any,Any,list[dict[str,Any]]]:
+    async def retrieve_memory(
+        self, query_vector: ndarray, limit: int = 10, session_id: str = "default"
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def delete_memory(self,memory_id:str) -> CoroutineType[Any,Any,None]:
+    async def delete_memory(self, memory_id: str) -> None:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def get_short_term(self, session_id: str = "default", limit: int = 100) -> CoroutineType[Any,Any,list[dict[str, Any]]]:
+    async def get_short_term(
+        self, session_id: str = "default", limit: int = 100
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def get_long_term(self, session_id: str = "default", limit: int = 100) -> CoroutineType[Any,Any,list[dict[str, Any]]]:
+    async def get_long_term(
+        self, session_id: str = "default", query: str = "", limit: int = 100
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def get_detailed(self,memory_id:str)-> CoroutineType[Any,Any,list[dict[str, Any]]]:
+    async def get_detailed(
+        self, session_id: str = "default", limit: int = 20
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def close(self) -> CoroutineType[Any,Any,None]:
+    async def close(self) -> None:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def get_compressed(self) -> CoroutineType[Any,Any,list[CompressedMemory]]:
+    async def get_compressed(
+        self, session_id: str = "default", short_first: bool = True, limit: int = 24
+    ) -> list[CompressedMemory]:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def add_memories(self,memories:list[Memory]) -> CoroutineType[Any,Any,list[int]]:
+    async def add_memories(self, memories: list[Memory]) -> list[int]:
         raise NotImplementedError
-    
+
     @abstractmethod
-    def start(self) -> CoroutineType[Any,Any,None]:
+    async def add_compressed_memory(self, memory: CompressedMemory) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def start(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def decay_now(self) -> None:
         raise NotImplementedError

@@ -1,0 +1,29 @@
+{
+  "url": "http://localhost:8000/openapi.json",
+  "types_out": "src/types/",
+  "services_out": "src/api/services",
+  "strip_prefix": "/api",
+  "http_import": "../http",
+  "rename_map": {
+    "ChatRequest": "ChatOptions"
+  },
+  "service_map": {
+    "session": ["history.ts", "historyService"],
+    "chat":    ["chat.ts",    "chatService"],
+    "character": ["character.ts", "characterService"],
+    "skill": ["skill.ts", "skillService"],
+    "service": ["service.ts", "serviceService"],
+    "system": ["system.ts", "systemService"],
+    "logger": ["logger.ts", "loggerService"],
+    "save": ["save.ts", "saveService"],
+    "pipeline": ["pipeline.ts", "pipelineService"],
+    "config": ["config.ts", "configService"],
+    "tts": ["audio.ts", "audioService"],
+    "asr": ["audio.ts", "audioService"],
+    "command": ["command.ts", "commandService"],
+    "task": ["task.ts", "taskService"],
+    "folder": ["folder.ts", "folderService"],
+    "status": ["status.ts", "statusService"],
+    "device": ["device.ts", "deviceService"]
+  }
+}

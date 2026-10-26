@@ -1,18 +1,20 @@
+"""配置数据模型"""
+
 from __future__ import annotations
 from typing import Any, Dict, List
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, ValidationError
 
 from ..runtime import RuntimePath
 from ..pipeline.enum import ASRProviderType, LLMProviderType, TTSProviderType
 
 
 class _BaseConfig(BaseModel):
-    enabled: bool = Field(default=True, description="是否启用")
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
 
-    def get_config_items(
+    def get_ui_config_items(
         self,
         include_fields: List[str] | None = None,
         exclude_fields: List[str] | None = None,
@@ -25,22 +27,45 @@ class _BaseConfig(BaseModel):
             if field_name in exclude_fields or field_name not in self.model_fields:
                 continue
             field_info = self.model_fields[field_name]
+            description = getattr(field_info, "description", None) or field_name
             items.append({
+                "default": getattr(self, field_name),
                 "name": field_name,
-                "description": field_info.description,
-                "value": getattr(self, field_name),
+                "description": description,
             })
         return items
 
-    def update_from_dict(self, data: Dict[str, Any]) -> None:
+    def update_from_dict(
+        self,
+        data: Dict[str, Any]
+    ) -> None:
+        """整批校验后写回"""
+        if not isinstance(data, dict):
+            return
         for key, value in data.items():
-            if not hasattr(self, key):
+            if key not in self.model_fields:
                 continue
             current = getattr(self, key)
             if isinstance(value, dict) and isinstance(current, _BaseConfig):
                 current.update_from_dict(value)
-            else:
-                setattr(self, key, value)
+                continue
+            try:
+                # 用 pydantic 校验这一个字段
+                validated = self.__class__.model_validate(
+                    {**self.model_dump(), key: value}
+                )
+                setattr(self, key, getattr(validated, key))
+            except ValidationError as exc:
+                from ..logger import logger
+
+                logger.warning(
+                    f"[Config] {self.__class__.__name__}.{key}={value!r} 非法，已忽略: "
+                    f"{exc.errors()[0].get('msg') if exc.errors() else exc}"
+                )
+            except Exception as exc:
+                from ..logger import logger
+
+                logger.warning(f"[Config] 写入 {self.__class__.__name__}.{key} 失败: {exc}")
 
 
 class SkillsConfig(_BaseConfig):
@@ -53,28 +78,34 @@ class SqliteConfig(_BaseConfig):
 
 
 class LogConfig(_BaseConfig):
-    level: str = Field(default="INFO", description="日志级别")
-    format: str = Field(default="%(asctime)s - %(name)s - %(levelname)s - %(message)s", description="日志格式")
+    # C45：默认改成小写，与 logger.types.LogLevel 保持一致
+    level: str = Field(default="info", description="日志级别")
+    format: str = Field(
+        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        description="日志格式",
+    )
     datefmt: str = Field(default="%Y-%m-%d %H:%M:%S", description="日期格式")
     log_dir: str = Field(default=str(RuntimePath.get_log_dir()), description="日志目录")
     enable_log_file: bool = Field(default=False, description="是否写入日志文件")
 
+    def normalized_level(self) -> str:
+        return str(self.level or "info").strip().lower()
+
 
 class NetworkConfig(_BaseConfig):
-    timeout: int = 10
-    retry_count: int = 3
-    delay: float = 1.0
+    timeout: int = Field(default=10, description="超时时间(秒)")
+    retry_count: int = Field(default=3, description="重试次数")
+    delay: float = Field(default=1.0, description="重试间隔(秒)")
 
 
 class WebConfig(_BaseConfig):
-    resources_path: str = "static"
-    host: str = "127.0.0.1"
-    port: int = 8080
-    root_path: str = "/"
-    allow_origins: List[str] = ["*"]
-    allow_credentials: bool = True
-    allow_methods: List[str] = ["*"]
-    allow_headers: List[str] = ["*"]
+    host: str = Field(default="127.0.0.1", description="监听地址")
+    port: int = Field(default=8080, description="监听端口")
+    root_path: str = Field(default="/", description="根路径")
+    allow_origins: List[str] = Field(default_factory=lambda: ["*"], description="允许的来源")
+    allow_credentials: bool = Field(default=True, description="是否允许携带凭证")
+    allow_methods: List[str] = Field(default_factory=lambda: ["*"], description="允许的方法")
+    allow_headers: List[str] = Field(default_factory=lambda: ["*"], description="允许的请求头")
 
     def update_web_config(self, config: Dict[str, Any]) -> None:
         self.update_from_dict(config)
@@ -98,6 +129,8 @@ class LLMConfig(_BaseConfig):
     base_url: str = Field(default="https://api.deepseek.com", description="LLM 服务 URL")
     active_perception: bool = Field(default=False, description="是否启用主动感知")
     wake_word: str = Field(default="ql", description="唤醒词")
+    max_tool_calls: int = Field(default=-1, description="最大工具调用次数")
+    max_turns: int = Field(default=-1, description="最大轮次")
 
     def update_llm_config(self, config: Dict[str, Any]) -> None:
         self.update_from_dict(config)
@@ -105,7 +138,9 @@ class LLMConfig(_BaseConfig):
 
 class ASRConfig(_BaseConfig):
     enabled: bool = Field(default=True, description="是否启用语音识别")
-    provider: str = Field(default=ASRProviderType.OPENAI_WISPER.value, description="语音识别供应商")
+    provider: str = Field(
+        default=ASRProviderType.OPENAI_WISPER.value, description="语音识别供应商"
+    )
     model: str = Field(default="base", description="语音识别模型")
     api_key: str = Field(default="", description="语音识别 API key")
     base_url: str = Field(default="", description="语音识别服务 URL")
@@ -113,3 +148,24 @@ class ASRConfig(_BaseConfig):
 
     def update_asr_config(self, config: Dict[str, Any]) -> None:
         self.update_from_dict(config)
+
+
+class AppConfig(BaseModel):
+    """应用配置根对象。
+
+    注意：这里列出的字段必须与 config/manager.py 的 CONFIG_BINDINGS 一致，
+    否则该分组的配置无法存取（原代码里的 mcp 就是这个情况）。
+    """
+
+    web: WebConfig = Field(default_factory=WebConfig)
+    log: LogConfig = Field(default_factory=LogConfig)
+    network: NetworkConfig = Field(default_factory=NetworkConfig)
+    sqlite: SqliteConfig = Field(default_factory=SqliteConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
+    asr: ASRConfig = Field(default_factory=ASRConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    debug: bool = Field(default=True, description="调试模式")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump()

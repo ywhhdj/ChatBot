@@ -1,32 +1,55 @@
-﻿import { DEFAULT_CONFIG } from '@/config';
-import { defineStore } from 'pinia';
+﻿import { CONFIG } from "@/config";
+import { defineStore } from "pinia";
 
-export const defaultUIStore = defineStore('ui', {
+export const defaultUIStore = defineStore("ui", {
   state: (): UI.State => ({
-    currentHomeTab: "services",
-    currentSettingsTab: "general",
-    currentModelProvider: "llm",
-    currentServiceTab: "live2d",
+    currentTab: {
+      settings: "general",
+      modelProvider: "llm",
+      service: "live2d",
+      more: "modelprovider",
+    },
   }),
   actions: {
-    setCurrentHomeTab(tab: UI.HomeTab) {
-      this.currentHomeTab = tab;
-    },
     setCurrentSettingsTab(tab: UI.SettingsTab) {
-      this.currentSettingsTab = tab;
+      this.currentTab.settings = tab;
+    },
+    setCurrentMoreTab(tab: UI.MoreTab) {
+      this.currentTab.more = tab;
     },
     setCurrentModelProvider(tab: UI.ModelProviderTab) {
-      this.currentModelProvider = tab;
+      this.currentTab.modelProvider = tab;
     },
     setCurrentServiceTab(tab: UI.ServiceTab) {
-      this.currentServiceTab = tab;
+      this.currentTab.service = tab;
     },
   },
 });
 
-export const useTempStore = defineStore('temp', {
-  state: (): UI.TempState => ({
-      bgList: [DEFAULT_CONFIG.background],
-      musicList: [DEFAULT_CONFIG.sound.audio],
-  }),
+export const useTempStore = defineStore("temp", () => {
+  const bgList = shallowRef<UI.Background[]>([CONFIG.background]);
+  const musicList = shallowRef<UI.Music[]>([CONFIG.sound.audio]);
+  const clear = () => {
+    if (bgList.value.length > 0) {
+      bgList.value.forEach((item) => {
+        if (item.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+    }
+    if (musicList.value.length > 0) {
+      musicList.value.forEach((item) => {
+        if (item.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+    }
+    bgList.value = [];
+    musicList.value = [];
+  };
+  return {
+    bgList,
+    musicList,
+    clear
+  };
 });

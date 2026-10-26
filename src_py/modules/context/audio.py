@@ -2,9 +2,11 @@ from pathlib import Path
 from threading import Lock
 from typing import Dict
 import uuid
+
+from ..utils import util
 from ..runtime import RuntimePath
 
-DEFAULT_AUDIO_DIR=RuntimePath.get_static_path("audios")
+DEFAULT_AUDIO_DIR=RuntimePath.get_web_resources_dir("audios")
 
 class AudioContext:
     _instance = None
@@ -43,12 +45,12 @@ class AudioContext:
     # 重置当前音频上下文，生成新的音频文件
     def reset_current_audio(self,category: str="default") -> None:
         # with self._lock:
-            self.current_audio_name = f"audio_{uuid.uuid4().hex[:8]}_{len(self.audio_chunks)+1}"
+            self.current_audio_name = util.id_generator(prefix="audio",suffix=str(len(self.audio_chunks)+1))
             self.current_audio_chunks = []
             self.audio_chunks[self.current_audio_name] = self.current_audio_chunks
             self.save_audio_chunks(self.audio_chunks,category)
-    from ..manager.task.decorator import sync_task_scheduler
-    @sync_task_scheduler
+
+
     def save_audio_chunks(self, chunks: Dict[str, list[bytes]],category: str) -> None:
         if not chunks:
             return

@@ -9,23 +9,28 @@ interface AppOptions {
   text: {
     speed: number;
     volume: number;
-  },
-  background: UI.Background,
+  };
+  background: UI.Background;
   sound: {
-    audio: UI.Music
-  },
+    audio: UI.Music;
+  };
   websocket: {
     maxReconnectAttempts: number;
     reconnectInterval: number;
-  },
+  };
   logger: {
     enabled: boolean;
     minLevel: LogLevel;
     exclude: {
       enabled: boolean;
       length: number;
-      patterns: (string|RegExp)[];
-    },
-    mode: 'real-time' | 'forward';
-  }
+      patterns: (string | RegExp)[];
+    };
+    mode: "real-time" | "forward";
+  };
+  save: {
+    MAX_SLOTS: number;
+    MIN_SLOTS: number;
+  };
+  env: Env;
 }

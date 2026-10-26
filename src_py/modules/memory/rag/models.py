@@ -8,7 +8,7 @@ class RAGConfig(BaseModel):
     doc_path: str = "./data/knowledge_base"
     sparse_weight: float = 0.3
     dense_weight: float = 0.7
-    fusion_method: str|Literal["weighted", "rrf"] = "weighted"
+    fusion_method: Literal["weighted", "rrf"] = "weighted"
     use_reranker: bool = False
 
 @dataclass

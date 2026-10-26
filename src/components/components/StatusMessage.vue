@@ -1,12 +1,8 @@
-<script setup lang="ts">
-defineProps<{
-  message: string
-}>()
-</script>
+
 
 <template>
   <div class="status-message">
-    <span>{{ message }}</span>
+    <span><slot></slot></span>
   </div>
 
 </template>

@@ -1,19 +1,22 @@
+"""命令解析与校验。"""
+
 from json import loads
 import re
 import shlex
-from typing import Any, List, Optional
-from ...tools.services.models import CommandData, CommandResult, CommandStatus
+from typing import Any, List, Optional, Tuple
+
+from .models import CommandData, CommandResult, CommandStatus
 
 
 class CommandParser:
-    """
-    将 LLM 输出的多行文本解析为结构化命令列表。
+    """将 LLM 输出的多行文本解析为结构化命令列表。
 
     支持的格式:
         obs_switch_scene --name "游戏画面"
-        browser_open --url https://example.com
-        live2d_say --text "你好世界"
-        error --reason "无法理解意图"
+        obs -switch_scene --name "游戏画面"
+        obs switch_scene --name "游戏画面"
+        skill --name xxx --des "..."
+        error --reason "..."
 
     规则:
         - 空行忽略
@@ -21,111 +24,119 @@ class CommandParser:
         - 参数支持 --key value 和 --key=value 两种形式
         - 值含空格必须用双引号包裹
         - 纯布尔标志: --verbose (等同 --verbose=true)
+
+    skill 命令固定使用 --id 指定技能 id（--des 为需求描述）:
+        skill --id weather --des "查天气"
     """
 
-    # 匹配两种格式:
-    #   service_method --params...     (下划线连接: obs_switch_scene)
-    #   service -method --params...    (短横线连接: obs -switch_scene)
-    #   service method --params...     (空格连接:   obs switch_scene)
     _pattern = re.compile(
         r'^\s*'
-        r'(?P<service>[A-Za-z_][A-Za-z0-9_]*?)'          # service (非贪婪)
-        r'(?:_|(?=-)|(?=\s))'                              # 分隔符: _ 或 - 或空格
-        r'(?P<method>[A-Za-z_][A-Za-z0-9_]*)'              # method
+        r'(?P<service>[A-Za-z_][A-Za-z0-9_]*?)'
+        r'(?:_|\s*-\s*|\s+)'
+        r'(?P<method>[A-Za-z_][A-Za-z0-9_]*)'
         r'(?:\s+(?P<params>.*))?\s*$'
     )
 
+    # 已知的内置命令名（不是 service.method 形态）
+    _BUILTIN = {
+        "error",
+        "skill"
+    }
+
+    # skill 统一用 --id 指定技能 id。
+    _SKILL_REQUIRED_PARAMS = {"id"}
+
     @classmethod
     def parse(cls, text: str) -> List[CommandData]:
-        """解析多行命令文本 → 命令字典列表"""
         commands: List[CommandData] = []
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
-            # 跳过明显不是命令的行 (模型偶尔会输出说明文字)
-            if not cls._looks_like_command(line):
-                continue
-            cmd = cls._parse_line(line)
+            cmd = cls.parse_line(line)
             if cmd is not None:
                 commands.append(cmd)
         return commands
 
     @classmethod
-    def _looks_like_command(cls, line: str) -> bool:
-        """快速判断一行是否像命令
-
-        支持格式:
-            obs_switch_scene --name xxx
-            browser_open --url xxx
-            live2d_say --text xxx
-            error --reason xxx
-        """
-        first = line.split()[0] if line.split() else ""
-        if first in {"error", "skill"}:
-            return True
-        # service_method 格式: 小写字母开头, 含下划线
-        return bool(re.match(r'^[a-z][a-z0-9_]*$', first)) and '_' in first
-
-    @classmethod
-    def _parse_line(cls, line: str) -> Optional[CommandData]:
-        # 特殊处理: error --reason "..."
+    def parse_line(cls, line: str) -> Optional[CommandData]:
+        """解析单行。返回 None 表示这行不是命令（应作为自然语言保留）。"""
         stripped = line.strip()
-        if stripped.startswith("skill"):
-            parts = stripped.split(maxsplit=1)
-            params = cls._parse_params(parts[1] if len(parts) > 1 else "")
-            return CommandData(
-                service="skill",
-                method="run",
-                params=params,
-                raw=line,
-            )
-        if stripped.startswith("error"):
-            # 直接用 split 解析
-            parts = stripped.split(maxsplit=2)
-            params = {}
-            if len(parts) >= 3 and parts[1] == "--reason":
-                params["reason"] = parts[2].strip().strip('"').strip("'")
-            return CommandData(
-                service="error",
-                method="error",
-                params=params,
-                raw=line,
-            )
-        m = cls._pattern.match(line)
-        if not m:
+        if not stripped:
             return None
-        service = m.group("service")
-        method  = m.group("method")
-        params_text = m.group("params") or ""
-        params = cls._parse_params(params_text)
+
+        first_token = stripped.split()[0] if stripped.split() else ""
+
+        # 内置命令：skill / error
+        if first_token in cls._BUILTIN or stripped.startswith("skill") or stripped.startswith("error"):
+            return cls._parse_builtin(stripped, first_token)
+
+        # 改为"能否被命令正则匹配 + 参数形态是否像命令"两步判定。
+        match = cls._pattern.match(stripped)
+        if not match:
+            return None
+
+        params_text = (match.group("params") or "").strip()
+        # C59：普通英文句子（"hello world how are you"）也能被上面的正则匹配，
+        # 这里用"参数必须为空或以 -- 开头"把它挡掉。
+        if params_text and not params_text.startswith("--"):
+            return None
+
         return CommandData(
-            service=service,
-            method=method,
-            params=params,
+            service=match.group("service"),
+            method=match.group("method"),
+            params=cls._parse_params(params_text),
             raw=line,
         )
 
     @classmethod
+    def _parse_builtin(cls, stripped: str, first_token: str) -> Optional[CommandData]:
+        if first_token == "skill":
+            parts = stripped.split(maxsplit=1)
+            params = cls._parse_params(parts[1] if len(parts) > 1 else "")
+            # 缺少 --id 也不是合法 skill 命令
+            if not cls._SKILL_REQUIRED_PARAMS <= set(params.keys()):
+                return None
+            return CommandData(
+                service="skill",
+                method="run",
+                params=params,
+                raw=stripped,
+            )
+        if first_token == "error":
+            parts = stripped.split(maxsplit=2)
+            params: dict[str, Any] = {}
+            if len(parts) >= 3 and parts[1] == "--reason":
+                params["reason"] = parts[2].strip().strip('"').strip("'")
+            elif len(parts) >= 2:
+                # LLM 偶尔写成 `error 无法理解`，直接把剩余当原因
+                params["reason"] = parts[1].strip().strip('"').strip("'")
+            return CommandData(
+                service="error",
+                method="error",
+                params=params,
+                raw=stripped,
+            )
+        return None
+
+    @classmethod
     def _parse_params(cls, text: str) -> dict[str, Any]:
-        if not text.strip():
+        if not text or not text.strip():
             return {}
         try:
             tokens = shlex.split(text)
         except ValueError:
-            # 引号不匹配时降级
+            # 引号不匹配时降级为空白切分
             tokens = text.split()
 
         params: dict[str, Any] = {}
         i = 0
         while i < len(tokens):
             token = tokens[i]
-            # --key=value
             if token.startswith("--") and "=" in token:
                 key, val = token[2:].split("=", 1)
                 params[key.strip()] = cls._cast(val)
                 i += 1
-            # --key value
             elif token.startswith("--"):
                 key = token[2:]
                 if i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
@@ -134,8 +145,8 @@ class CommandParser:
                 else:
                     params[key.strip()] = True
                 i += 1
-            # 位置参数 (无 -- 前缀) → 用 _args 列表收集
             else:
+                # 位置参数 → 收集到 _args
                 if "_args" not in params:
                     params["_args"] = []
                 params["_args"].append(cls._cast(token))
@@ -144,11 +155,10 @@ class CommandParser:
 
     @classmethod
     def _cast(cls, value: str) -> Any:
-        """智能类型转换: str → int/float/bool/list/dict"""
+        """智能类型转换"""
         text = value.strip()
         if text == "":
             return ""
-        # JSON 字面量
         if text in ("true", "false", "null"):
             return loads(text)
         if text.startswith("{") or text.startswith("["):
@@ -156,41 +166,36 @@ class CommandParser:
                 return loads(text)
             except Exception:
                 pass
-        # 数字
-        if re.match(r'^-?\d+$', text):
+        # 只转换"规范"的数字字面量。
+        if re.fullmatch(r'-?\d+', text):
+            if len(text) > 1 and (text[0] == '0' or (text[0] == '-' and text[1:2] == '0')):
+                return text
             return int(text)
-        if re.match(r'^-?\d+\.\d+$', text):
+        if re.fullmatch(r'-?\d+\.\d+', text):
             return float(text)
-        return text  # 保持字符串
+        return text
+
 
 class CommandValidator:
-    """
-    校验命令合法性:
-        1. 服务是否注册
-        2. 方法是否存在
-        3. 必填参数是否齐全
-        4. 参数类型是否匹配 (可选, 按 schema)
+    """校验命令合法性：服务是否注册 / 方法是否存在 / 必填参数是否齐全。
+
+    C61：服务声明 tools 的方式在代码库里不统一 ——
+        - `CommandValidator` 侧看到的是 dict: {method: {required_args: [...]}}
+        - `PromptBuilder.build_commands_prompt` 侧看到的是 list
+    这里统一兼容两种形态。
     """
 
     def __init__(self, service_manager: Any):
         self._sm = service_manager
 
     def validate(self, commands: List[CommandData]) -> List[CommandResult]:
-        """
-        返回与 commands 等长的检查结果列表。
-        不抛异常, 所有错误以 CommandResult(status=SKIPPED) 记录。
-        """
-        results: List[CommandResult] = []
-        for cmd in commands:
-            res = self._validate_one(cmd)
-            results.append(res)
-        return results
+        """返回与 commands 等长的检查结果；不抛异常，错误记为 SKIPPED。"""
+        return [self._validate_one(cmd) for cmd in commands]
 
     def _validate_one(self, cmd: CommandData) -> CommandResult:
         service_name = cmd["service"]
-        method_name  = cmd["method"]
+        method_name = cmd["method"]
 
-        # 1. 特殊命令: error --reason "..."
         if service_name == "error":
             return CommandResult(
                 ok=False, service=service_name, method=method_name,
@@ -199,8 +204,12 @@ class CommandValidator:
                 elapsed_ms=0, raw=cmd["raw"],
             )
 
-        # 2. 服务注册检查
-        if not self._sm.is_registered(service_name):
+        # 服务注册检查（兼容没有 is_registered 的实现）
+        try:
+            registered = self._sm.is_registered(service_name)
+        except Exception:
+            registered = False
+        if not registered:
             return CommandResult(
                 ok=False, service=service_name, method=method_name,
                 status=CommandStatus.SKIPPED.value,
@@ -208,9 +217,8 @@ class CommandValidator:
                 elapsed_ms=0, raw=cmd["raw"],
             )
 
-        # 3. 方法存在检查
         service = self._sm.get_service(service_name)
-        if not hasattr(service, method_name):
+        if service is None or not hasattr(service, method_name):
             return CommandResult(
                 ok=False, service=service_name, method=method_name,
                 status=CommandStatus.SKIPPED.value,
@@ -218,11 +226,11 @@ class CommandValidator:
                 elapsed_ms=0, raw=cmd["raw"],
             )
 
-        # 4. 必填参数检查 (基于服务 self.tools 配置)
-        tools_cfg = getattr(service, "tools", {})
-        method_cfg = tools_cfg.get(method_name, {})
-        required  = method_cfg.get("required_args", [])
-        params    = cmd["params"]
+        # 同时接受 dict / list / 对象三种 tools 形态
+        method_cfg = self._find_method_config(service, method_name)
+        required = self._required_args(method_cfg)
+
+        params = dict(cmd["params"])
         position_args = params.pop("_args", None)
 
         for i, req_name in enumerate(required):
@@ -238,9 +246,38 @@ class CommandValidator:
                 elapsed_ms=0, raw=cmd["raw"],
             )
 
-        # 校验通过 → 返回 pending 状态, 等待执行
         return CommandResult(
             ok=True, service=service_name, method=method_name,
             status=CommandStatus.PENDING.value,
             data=None, error=None, elapsed_ms=0, raw=cmd["raw"],
         )
+
+    @staticmethod
+    def _find_method_config(service: Any, method_name: str) -> Any:
+        tools_cfg = getattr(service, "tools", None)
+        if not tools_cfg:
+            return None
+        # 形态 A：dict，key 是方法名
+        if isinstance(tools_cfg, dict):
+            return tools_cfg.get(method_name)
+        # 形态 B：list，元素是 dict/对象，含 name
+        if isinstance(tools_cfg, (list, tuple)):
+            for item in tools_cfg:
+                name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+                if name == method_name:
+                    return item
+        return None
+
+    @staticmethod
+    def _required_args(method_cfg: Any) -> List[str]:
+        if not method_cfg:
+            return []
+        if isinstance(method_cfg, dict):
+            required = method_cfg.get("required_args")
+            if required is None:
+                # 也兼容 OpenAI schema 风格的 parameters.required
+                parameters = method_cfg.get("parameters")
+                if isinstance(parameters, dict):
+                    required = parameters.get("required")
+            return list(required or [])
+        return list(getattr(method_cfg, "required_args", None) or [])

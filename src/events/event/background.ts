@@ -1,14 +1,16 @@
 import events from "..";
 
 enum BackgroundEvent {
-  Change = 'background:change',
+  Change = "background:change",
 }
 
 export function emitBackgroundChange(url: string, duration?: number) {
   events.emit(BackgroundEvent.Change, url, duration);
 }
 
-export function onBackgroundChange(callback: (url: string, duration?: number) => void) {
+export function onBackgroundChange(
+  callback: (url: string, duration?: number) => void
+) {
   events.on(BackgroundEvent.Change, callback);
 }
 

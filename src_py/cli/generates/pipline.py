@@ -7,6 +7,7 @@ pipeline.json 配置自动生成器
     自动生成符合 PipelineManager 加载格式的 pipeline.json。
 
 输出结构（与 pipeline.py 对齐）：
+```json
     {
         "asr": {
             "whisper": {
@@ -26,20 +27,21 @@ pipeline.json 配置自动生成器
         "llm": { ... },
         "ocr": { ... }
     }
+Example
+    ```bash
+        # 在项目根目录执行
+        cd D:\\Project\\ChatBot
+        python cli/generates/config.py
 
-用法：
-    # 在项目根目录执行
-    cd D:\\Project\\ChatBot
-    python cli/generates/config.py
+        # 指定输出路径
+        python cli/generates/config.py --output ./modules/config/pipeline.json
 
-    # 指定输出路径
-    python cli/generates/config.py --output ./modules/config/pipeline.json
+        # 指定 modules 目录路径
+        python cli/generates/config.py --modules ./modules
 
-    # 指定 modules 目录路径
-    python cli/generates/config.py --modules ./modules
-
-    # 生成后交互式填写 description
-    python cli/generates/config.py --interactive
+        # 生成后交互式填写 description
+        python cli/generates/config.py --interactive
+    ```
 """
 import argparse
 import inspect
@@ -48,6 +50,8 @@ import os
 import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Type
+
+import yaml
 
 # ──────────────────────────────────────────────
 # 工具函数
@@ -277,9 +281,7 @@ def build_final_config(discovered: Dict[str, List[Dict[str, Any]]]) -> dict:
     PipelineManager.switch_adapter 会把这个 config dict 解包传给
     adapter_manager.intialize_provider(**provider_config)
     """
-    output:dict[str,Any] = {
-        "$schema": "../schema/pipeline.schema.json"
-    }
+    output:dict[str,Any] = {}
     for adapter_type, providers in discovered.items():
         output[adapter_type] = {}
         for prov in providers:
@@ -392,7 +394,7 @@ def build_frontend_manifest(config: dict) -> dict:
     return manifest
 
 INPUT_MODULES_PATH="src_py/modules"
-OUTPUT_PATH="resources/defaults/pipeline.json"
+OUTPUT_PATH="resources/defaults/pipeline.yaml"
 
 def main():
     parser = argparse.ArgumentParser(
@@ -472,7 +474,7 @@ def main():
     else:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(new_config, f, ensure_ascii=False, indent=2)
+            yaml.safe_dump(new_config, f, allow_unicode=True)
         print(f"\n✅ 已写入: {output_path}")
 
     # 前端 manifest

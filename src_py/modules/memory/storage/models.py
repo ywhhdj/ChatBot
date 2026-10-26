@@ -1,44 +1,19 @@
-from dataclasses import dataclass
+"""记忆存储数据模型"""
+
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
-from pydantic import BaseModel, Field, PrivateAttr
+
 from numpy import ndarray
-
-class TimeRange(BaseModel):
-    start: datetime
-    end: datetime
-
-class Role(str, Enum):
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"
-    TOOL = "tool"
-
-    @staticmethod
-    def get_zh_name(role:str) -> str:
-        return {
-            Role.USER.value: "用户",
-            Role.ASSISTANT.value: "助手",
-            Role.SYSTEM.value: "系统",
-            Role.TOOL.value: "工具",
-        }.get(role,"用户")
-
-@dataclass
-class Message:
-    role: Role
-    content: str
-
-    def to_dict(self) -> dict:
-        return {
-            "role": self.role,
-            "content": self.content,
-        }
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from ...models import Role, TimeRange
 
 class Memory(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     id: str
     session_id: str = "default"
-    role: str = Role.USER
+    role: str = Role.USER.value
     source: str = "text"
     content: str = ""
     importance: float = 1.0
@@ -51,6 +26,8 @@ class Memory(BaseModel):
 
 
 class CompressedMemory(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     id: str
     original_ids: list[str]
     compressed_content: str
@@ -59,9 +36,10 @@ class CompressedMemory(BaseModel):
     time_range: TimeRange
     session_id: str = "default"
     metadata: dict[str, Any] = Field(default_factory=dict)
-    _persisted: bool =  PrivateAttr(default=False)
+    _persisted: bool = PrivateAttr(default=False)
 
 
 class MemoryStorgeData(Memory):
     vector: Optional[ndarray] = None
-    _persisted: bool = False
+    # C130：pydantic 私有属性必须用 PrivateAttr
+    _persisted: bool = PrivateAttr(default=False)

@@ -18,12 +18,9 @@ const history = ref<User.DialogHistory[]>(user.dialogHistory?.["default"] || [])
   </MenuItem>
   <MenuItem title="◈ 历史对话">
   <div class="history-container">
-    <div
-      v-if="history.length === 0"
-      class="status-message"
-    >
+    <StatusMessage v-if="history.length === 0">
       暂无历史记录，去和ta聊聊天叭(*^▽^*)
-    </div>
+    </StatusMessage>
     <div
       v-else
       class="chat-history-container"
@@ -71,17 +68,5 @@ const history = ref<User.DialogHistory[]>(user.dialogHistory?.["default"] || [])
   /* 如果内容过多，可以设置最大高度和滚动条 */
   overflow-y: auto;
   scroll-behavior: smooth;
-}
-
-.status-message {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #f5f5f5;
-  padding: 2rem;
-  font-size: 24px;
-  font-weight: bold;
-  height: 100%;
-  text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
 }
 </style>

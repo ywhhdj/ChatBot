@@ -1,7 +1,8 @@
 from functools import wraps
 from typing import Generic, Optional, Type
 
-from .manager import service_manager,T
+from .manager import service_manager, T
+
 
 class ServiceDecorator(Generic[T]):
     def __init__(self, id: Optional[str] = None) -> None:
@@ -41,5 +42,5 @@ class ServiceDecorator(Generic[T]):
         return cls
 
 
-def Service(id: Optional[str] = None) -> Type[T]: # type: ignore
-    return ServiceDecorator[T](id) # type: ignore[type-arg]
+def Service(id: Optional[str] = None) -> Type[T]:  # type: ignore
+    return ServiceDecorator[T](id)  # type: ignore[type-arg]

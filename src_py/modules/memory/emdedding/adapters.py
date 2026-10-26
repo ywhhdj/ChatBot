@@ -1,11 +1,12 @@
 import asyncio
 import os
-from typing import Optional, Union, List
+from re import S
+from typing import List, Optional, Union
 from numpy import array,float32, ndarray,linalg
 
 from ...utils import decorators
 from ...logger import logger
-from .base import _AsyncEmbeddingAdapter
+from .base import AsyncEmbeddingAdapter
 from ...runtime import RuntimePath
 
 
@@ -16,16 +17,20 @@ class EmbeddingError(Exception):
         super().__init__(message)
         logger.exception(message)
 
-class SentenceEmbeddingAdapter(_AsyncEmbeddingAdapter):
+class SentenceEmbeddingAdapter(AsyncEmbeddingAdapter):
     def __init__(
         self,
-        model_path: str = RuntimePath.get_models_path("emotion/model_quint8_avx2.onnx"),
+        model_path: Optional[str] = None,
         normalize: bool = True,
         device: Optional[str] = None,
         batch_size: int = 32,
         max_retries: int = 3,
         thread_pool_size: int = 4
     ):
+        if model_path is None:
+            model_path = str(RuntimePath.get_models_path(
+                "emotion/model_quint8_avx2.onnx"
+            ))
         super().__init__(
             model=model_path,
             normalize=normalize,
@@ -66,18 +71,15 @@ class SentenceEmbeddingAdapter(_AsyncEmbeddingAdapter):
         if self._initialized and self._model is not None:
             return
         if not os.path.exists(self.model_name):
-            # 检查是否是HuggingFace模型名称
-            if "/" not in self.model_name and not self.model_name.startswith("sentence-transformers/"):
-                # 尝试添加默认前缀
-                hf_model_name = f"sentence-transformers/{self.model_name}"
-                logger.info(f"尝试加载HuggingFace模型: {hf_model_name}")
-            else:
-                raise ImportError(f"模型路径不存在: {self.model_name}")
+            raise ImportError(
+                f"模型路径不存在: {self.model_name}"
+                f"（请确认已下载模型，或传入正确的 model_path）"
+            )
         
         try:
-            from emotion_classifier.model import ONNXEncoder
+            from emotion_classifier.models.encoder import ONNXEncoder
             self._model = ONNXEncoder(
-                self.model_path,
+                self.model_path, # type: ignore
                 tokenizer_dir=f"{self.model_path}/tokenizer"
             )
             self._initialized = True
@@ -116,6 +118,7 @@ class SentenceEmbeddingAdapter(_AsyncEmbeddingAdapter):
             raise ValueError("model is not initialized")
         if not texts:
             raise ValueError("texts is empty")
+        self._single_input = isinstance(texts, str)
         if isinstance(texts, str):
             texts = [texts]
         try:
@@ -123,23 +126,29 @@ class SentenceEmbeddingAdapter(_AsyncEmbeddingAdapter):
                 texts,
                 normalize=self.normalize,
                 batch_size=self.batch_size
-            )# type: ignore
-            if len(embeddings) == 1 and isinstance(texts, str):
+            )  # type: ignore
+            if getattr(self, "_single_input", False) and len(embeddings) == 1:
                 return embeddings[0]
             return embeddings
         except Exception as exc:
             raise ValueError("model encode error") from exc
     
     async def close(self) -> None:
-        if self.__executor:
-            self.__executor.shutdown(wait=True)
+        executor = getattr(self, "_SentenceEmbeddingAdapter__executor", None)
+        if executor is not None:
+            loop = asyncio.get_running_loop()
+            try:
+                await loop.run_in_executor(None, lambda: executor.shutdown(wait=True))
+            except Exception:
+                pass
             self.__executor = None
-            self._model=None
+        self._model = None
+        self._initialized = False
     
     def get_params(self):
         return self.params
 
-class OpenAIEmbeddingAdapter(_AsyncEmbeddingAdapter):
+class OpenAIEmbeddingAdapter(AsyncEmbeddingAdapter):
     def __init__(
         self,
         api_key: str,
@@ -203,6 +212,7 @@ class OpenAIEmbeddingAdapter(_AsyncEmbeddingAdapter):
             raise ValueError("文本不能为空")
         
         # 转换为列表
+        self._single_input = isinstance(texts, str)
         if isinstance(texts, str):
             texts = [texts]
         import httpx
@@ -220,10 +230,9 @@ class OpenAIEmbeddingAdapter(_AsyncEmbeddingAdapter):
             if self.normalize:
                 for emb in embeddings:
                     emb /= linalg.norm(emb)
-            
-            if len(embeddings) == 1 and isinstance(texts, str):
+            if getattr(self, "_single_input", False) and len(embeddings) == 1:
                 return embeddings[0]
-            
+
             return embeddings
             
         except httpx.HTTPStatusError as e:
@@ -233,7 +242,7 @@ class OpenAIEmbeddingAdapter(_AsyncEmbeddingAdapter):
             logger.error(f"OpenAI嵌入失败: {e}")
             raise EmbeddingError(f"嵌入失败: {e}") from e
 
-class OllamaEmbeddingAdapter(_AsyncEmbeddingAdapter):    
+class OllamaEmbeddingAdapter(AsyncEmbeddingAdapter):    
     def __init__(
         self,
         model: str = "nomic-embed-text",
@@ -303,9 +312,10 @@ class OllamaEmbeddingAdapter(_AsyncEmbeddingAdapter):
             raise ValueError("文本不能为空")
         
         # 转换为列表
+        self._single_input = isinstance(texts, str)
         if isinstance(texts, str):
             texts = [texts]
-        
+
         embeddings: List[ndarray] = []
         endpoint = f"{self.api_url}/api/embeddings"
         import httpx
@@ -339,7 +349,6 @@ class OllamaEmbeddingAdapter(_AsyncEmbeddingAdapter):
                 logger.error(f"Ollama嵌入失败: {e}")
                 raise EmbeddingError(f"嵌入失败: {e}") from e
         
-        if len(embeddings) == 1 and isinstance(texts, str):
+        if getattr(self, "_single_input", False) and len(embeddings) == 1:
             return embeddings[0]
-        
         return embeddings

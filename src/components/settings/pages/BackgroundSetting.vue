@@ -1,7 +1,3 @@
-<script setup lang="ts">
-
-</script>
-
 <template>
   <MenuItem title="选择背景">
   <BackGroundSelect />

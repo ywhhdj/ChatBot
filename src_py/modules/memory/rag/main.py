@@ -1,6 +1,8 @@
-from typing import Callable, List, Optional
-from .models import Document, RetrievalResult
 import time
+from typing import Any, Callable, List, Literal, Optional
+
+from ...logger import logger
+from .models import Document, RetrievalResult
 
 class HybridRetriever:
     """
@@ -12,12 +14,13 @@ class HybridRetriever:
         documents: List[Document],
         sparse_weight: float = 0.3,
         dense_weight: float = 0.7,
-        fusion_method: str = "weighted",  # "weighted" or "rrf"
+        fusion_method: Literal["weighted", "rrf"] = "weighted",  # "weighted" or "rrf"
         reranker: Optional[Callable[[str, List[Document]], List[Document]]] = None,
+        embed_fn: Optional[Callable[[List[str]], Any]] = None,
     ):
         from .retriever import BM25Retriever, DenseRetriever
         self.sparse = BM25Retriever(documents)
-        self.dense = DenseRetriever(documents)
+        self.dense = DenseRetriever(documents, embed_fn=embed_fn)
         from .models import RAGConfig
         self.config=RAGConfig(
             enabled=True,
@@ -30,6 +33,11 @@ class HybridRetriever:
         self.reranker = reranker
         from .store import DocumentStore
         self.doc_store = DocumentStore()
+        if self.config.enabled:
+            try:
+                self._load_documents(self.config.doc_path)
+            except Exception as exc:
+                logger.warning(f"[RAG] 加载知识库失败 {self.config.doc_path}: {exc}")
     
     def _load_documents(self, path: str):
         from pathlib import Path
@@ -48,6 +56,12 @@ class HybridRetriever:
                 docs.append(doc)
         self.doc_store.add_documents(docs)
         self.doc_store.save()
+        # C170：加载后必须重建检索器，否则新增文档检索不到
+        if docs:
+            from .retriever import BM25Retriever, DenseRetriever
+            all_docs = self.doc_store.get_all()
+            self.sparse = BM25Retriever(all_docs)
+            self.dense = DenseRetriever(all_docs, embed_fn=getattr(self.dense, "embed_fn", None))
 
     def retrieve(
             self, query: str, top_k: int = 5,
@@ -63,8 +77,13 @@ class HybridRetriever:
         fused = self.__fusion(sparse_result.documents, dense_result.documents)
 
         # 3. 可选重排序
-        if self.reranker and len(fused) > top_k:
-            fused = self.reranker(query, fused)
+        # C171：原条件 `len(fused) > top_k`，候选不足 top_k 时直接跳过精排。
+        # 精排的作用是重排，跟候选数量无关，恒应执行。
+        if self.reranker and fused:
+            try:
+                fused = self.reranker(query, fused)
+            except Exception as exc:
+                logger.warning(f"[RAG] 重排序失败，使用原顺序: {exc}")
 
         # 4. 截断 top_k
         fused = fused[:top_k]

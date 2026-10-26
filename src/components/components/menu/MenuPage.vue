@@ -36,4 +36,10 @@ defineProps({
     width: 100%;
   }
 }
+
+@media (max-width: 768px) {
+  .menu-page {
+    align-items: center;
+  }
+}
 </style>

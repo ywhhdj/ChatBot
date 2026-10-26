@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { openFolder } from '@/api/config';
+import { folderService } from '@/api/services/folder';
 import { emitBackgroundChange } from '@/events/event/background';
 import { useTempStore } from '@/stores/ui';
 import notification from '@/utils/notification';
+import { getFileExtension } from '@/utils/util';
 
 const uiStore = useTempStore();
 const fileInputType = ['.jpeg', '.png', '.webp', '.bmp', '.svg', '.tif', '.gif'];
@@ -27,55 +28,46 @@ const triggerUpload = () => {
   }
 };
 
-const handleFileUpload = async (event: Event) => {
+const handleFileUpload = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const files = Array.from(target.files || []);
-  if (files && files.length > 0) {
-    files.forEach((file) => {
-      if (!file) {
-        return;
-      }
-      console.log(file);
-      //获取文件类型
-      if (!file.type.startsWith('image/')) {
-        return;
-      }
-      const fileType = file.type.split('/').pop()?.toLowerCase();
-      if (!fileType || !fileInputType.includes(`.${fileType}`)) {
-        console.error('文件类型错误:', fileType);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          if (reader.result) {
-            const name = file.name.split('.')[0] as string;
-            const url = URL.createObjectURL(file);
-            if (uiStore.bgList.find((item) => item.url === url)) {
-              URL.revokeObjectURL(url);
-              notification.showError({
-                title: '文件已存在',
-                message: name,
-              });
-              return;
-            }
-            uiStore.bgList.push({
-              url,
-              index: currentIndex.value + 1,
-            });
-          }
-        } catch (error) {
-          console.error('上传背景失败:', error);
-        }
-      };
-      reader.readAsDataURL(file);
+  if (files.length === 0) return;
+  files.forEach((file) => {
+    if (!file.type.startsWith('image/')) {
+      notification.showError({
+        title: '文件类型错误',
+        message: `${file.name} 不是图片文件`
+      });
+      return;
+    }
+    const ext = `.${getFileExtension(file.name)}`;
+    if (!fileInputType.includes(ext)) {
+      notification.showWarning({
+        title: '不支持的图片格式',
+        message: `${file.name} 格式不支持`
+      });
+      return;
+    }
+    const exists = uiStore.bgList.some((item) => item.name === file.name);
+    if (exists) {
+      notification.showWarning({
+        title: '文件已存在',
+        message: file.name
+      });
+      return;
+    }
+    uiStore.bgList.push({
+      url: URL.createObjectURL(file),
+      name: file.name.replace(/\.[^.]+$/, ''), // 去除扩展名
+      index: uiStore.bgList.length, // 或 currentIndex + 1
+      duration: undefined, // 默认无过渡时长
     });
-  }
+  });
   if (target) target.value = '';
 };
 
 const openBackgroundFolder = async () => {
-  await openFolder("static/images/background");
+  await folderService.openFolder("images");
 };
 
 const deleteBackground = (index: number) => {

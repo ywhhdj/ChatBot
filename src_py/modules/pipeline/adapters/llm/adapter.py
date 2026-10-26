@@ -4,17 +4,23 @@ from types import CoroutineType
 from typing import Optional, List, Dict, Any, AsyncGenerator
 
 from regex import T
-from . import client, types
+from . import client, models
 
 DEFAULT_RETRY_DELAY = 1.0
 MAX_CONNECTIONS = 100
 MAX_KEEPALIVE_CONNECTIONS = 20
 
 class _LLMBaseAdapter(ABC):
+    #是否为本地0,API1
+    name: str
+    description: str
+    local: int= 0
+    tags: Optional[List[str]] = None
+
     def __init__(self,model: str = ""):
         super().__init__()
         self.model: str = model
-        self.params= None
+        self.params: Optional[models.SamplingParams] = None
         self._client= None
         self.last_tool_calls: List[Dict[str, Any]] = []
         self._tool_call_cache: Dict[int, Dict[str, Any]] = {}
@@ -23,7 +29,7 @@ class _LLMBaseAdapter(ABC):
     def initialize_client(self) -> 'client._BaseLLMClient':
         pass
 
-    from ....tools.models import AITool
+    from ...models import AITool
     @abstractmethod
     def generate_text_stream(
         self, 
@@ -53,7 +59,8 @@ class _LLMBaseAdapter(ABC):
         ) -> Dict:
         """构建请求数据"""
         data = {
-            **dict(self.params),
+            **self.params.model_dump(), # type:ignore
+            "model": self.model,
             "messages": messages,
             "stream": stream,
             "temperature": temperature,
@@ -65,7 +72,7 @@ class _LLMBaseAdapter(ABC):
         return data
     
     def get_params(self) -> Dict[str, Any]:
-        return dict(self.params)
+        return self.params.model_dump() # type:ignore
     
     def close(self):
         import asyncio
@@ -74,6 +81,7 @@ class _LLMBaseAdapter(ABC):
                 asyncio.run(self._client.close())
 
 class ChatGPTLLMAdapter(_LLMBaseAdapter):
+    tags: Optional[List[str]] = ["chatgpt"]
     
     def __init__(
         self, 
@@ -89,8 +97,7 @@ class ChatGPTLLMAdapter(_LLMBaseAdapter):
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
-        self.params = types.ChatGPTParams(
-            model=self.model,
+        self.params = models.ChatGPTParams(
             temperature=0.7,
             max_tokens=1024,
             top_p=0.9,
@@ -137,15 +144,16 @@ class ChatGPTLLMAdapter(_LLMBaseAdapter):
             raise
     
     async def generate_text(
-            self, 
-            messages: List[Dict], 
-            tools: Optional[List] = None,
-            temperature: float = 0.7,
-            max_tokens: int = 1024
-        ) -> str:
+        self, 
+        messages: List[Dict], 
+        tools: Optional[List] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024
+    ) -> str:
         client = await self.initialize_client()
         data = self._build_request_data(
-            messages, tools, 
+            messages, 
+            tools, 
             stream=False,
             temperature=temperature,
             max_tokens=max_tokens
@@ -165,6 +173,8 @@ class ChatGPTLLMAdapter(_LLMBaseAdapter):
             raise
 
 class OllamaLLMAdapter(_LLMBaseAdapter):
+    local: int = 1
+    tags: Optional[List[str]] = ["ollama"]
     
     def __init__(
         self, 
@@ -177,7 +187,8 @@ class OllamaLLMAdapter(_LLMBaseAdapter):
         self.api_url = api_url
         self.timeout = timeout
         self.max_retries = max_retries
-        self.params = types.OllamaParams(model=model)
+        self.model = model
+        self.params = models.OllamaParams()
     
     async def initialize_client(self):
         if self._client is None:
@@ -205,7 +216,7 @@ class OllamaLLMAdapter(_LLMBaseAdapter):
             "stream": True,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            **self.params
+            **self.params.model_dump() # type:ignore
         }
         
         if tools:
@@ -232,7 +243,7 @@ class OllamaLLMAdapter(_LLMBaseAdapter):
             "stream": False,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            **self.params
+            **self.params.model_dump() # type:ignore
         }
         
         if tools:
@@ -245,7 +256,8 @@ class OllamaLLMAdapter(_LLMBaseAdapter):
         except Exception as e:
             raise
 
-class DeepseekLLMAdapter(_LLMBaseAdapter):    
+class DeepseekLLMAdapter(_LLMBaseAdapter):
+
     def __init__(
         self, 
         api_key: str, 
@@ -260,8 +272,7 @@ class DeepseekLLMAdapter(_LLMBaseAdapter):
             raise ValueError(f"Invalid model: {model}")
         self.timeout = timeout
         self.max_retries = max_retries
-        self.params = types.DeepSeekParams(
-            model=model,
+        self.params = models.DeepSeekParams(
             temperature=0.7,
             max_tokens=1024,
             top_p=0.9,
@@ -280,37 +291,37 @@ class DeepseekLLMAdapter(_LLMBaseAdapter):
         return self._client
     
     async def generate_text_stream(
-            self, 
-            messages: List[Dict], 
-            tools: Optional[List] = None,
-            temperature: float = 0.7,
-            max_tokens: int = 1024
-        ) -> AsyncGenerator[str, None]:
+        self, 
+        messages: List[Dict], 
+        tools: Optional[List] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024
+    ) -> AsyncGenerator[str, None]:
         client = await self.initialize_client()
         data = self._build_request_data(
-            messages, tools, 
+            messages, 
+            tools, 
             stream=True,
             temperature=temperature,
             max_tokens=max_tokens
         )
-        
         try:
             async for chunk in client.stream_request(data):
                 yield chunk
-                
         except Exception as e:
             raise
     
     async def generate_text(
-            self, 
-            messages: List[Dict], 
-            tools: Optional[List] = None,
-            temperature: float = 0.7,
-            max_tokens: int = 1024
-        ) -> str:
+        self, 
+        messages: List[Dict], 
+        tools: Optional[List] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024
+    ) -> str:
         client = await self.initialize_client()
         data = self._build_request_data(
-            messages, tools, 
+            messages, 
+            tools, 
             stream=False,
             temperature=temperature,
             max_tokens=max_tokens

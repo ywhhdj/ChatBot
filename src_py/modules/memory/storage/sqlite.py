@@ -6,17 +6,18 @@ from types import CoroutineType
 from typing import Any, Callable, Optional
 import numpy as np
 
-from .base import _MemoryStorageBase
+from .base import MemoryStorageBase
 from .models import CompressedMemory, Memory
 from .. import utils
 from .database import FAISSMemory, SQLiteMemory
+from ...logger import logger
 
 class _MemoryTask:
     def __init__(self, fn: Callable[[], Any], future: asyncio.Future) -> None:
         self.fn = fn
         self.future = future
 
-class SQLiteFAISSStorage(_MemoryStorageBase):
+class SQLiteFAISSStorage(MemoryStorageBase):
     def __init__(
         self,
         embed_fn: Callable[[str, int], CoroutineType[Any,Any,np.ndarray]],
@@ -67,9 +68,24 @@ class SQLiteFAISSStorage(_MemoryStorageBase):
             self._faiss.set_next_faiss_id(max(self._faiss.next_faiss_id, max_faiss_id + 1))
 
     async def __worker_loop(self) -> None:
+        """C142（最致命）：循环条件写反了。
+
+        原代码：
+            while not self._running or not self._task_queue.empty():
+
+        而 `start()` 里是**先** `self._running = True` **再**创建 worker task，
+        所以进入循环时 `_running` 已经是 True：
+            not True or not empty  ==  False or not empty  ==  not empty
+        队列空时条件立即为 False -> worker **瞬间退出**。
+
+        后果：所有 `_run_on_worker()` 都会 `await future` 永久挂起，
+        而 future 永远不会有人 set_result —— 每次记忆读写都是**永久死锁**。
+
+        正确语义：运行中就继续跑；停止后要把队列排空再退出。
+        """
         await self.__initialize()
         last_decay = datetime.now()
-        while not self._running or not self._task_queue.empty():
+        while self._running or not self._task_queue.empty():
             try:
                     # 等待任务，超时后检查是否需要衰减
                 get_task = asyncio.create_task(self._task_queue.get())
@@ -100,21 +116,30 @@ class SQLiteFAISSStorage(_MemoryStorageBase):
                 now = datetime.now()
                 if (now - last_decay).total_seconds() >= self.decay_interval_sec and self._sqlite is not None:
                     try:
-                        asyncio.create_task(self._sqlite.decay_importance(self.decay_rate))
-                        asyncio.create_task(self.__prune_if_needed())
+                        await self._sqlite.decay_importance(self.decay_rate)
+                        await self.__prune_if_needed()
                     except Exception:
                         pass
                     last_decay = now
             except asyncio.CancelledError:
                 break
-
+        # 清理统一交给 close()。
         if self._faiss is not None:
             self._faiss.save()
-        if self._sqlite is not None:
-            self._sqlite.__del__()
 
     async def _run_on_worker(self, fn: Callable[[], Any]) -> Any:
-        future= asyncio.get_event_loop().create_future()
+        """C145：`asyncio.get_event_loop()` 在无运行中 loop 时会创建/报警告，
+        且在 3.12+ 已废弃。这里必然在协程内，用 get_running_loop()。
+
+        C146：同时防止 worker 未启动导致永久挂起 ——
+        start() 之前调用会直接报错，而不是悄悄卡死。
+        """
+        if not self._running or self._worker_task is None or self._worker_task.done():
+            raise RuntimeError(
+                "SQLiteFAISSStorage 的 worker 未运行，请先 await start()"
+            )
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
         await self._task_queue.put(_MemoryTask(fn=fn, future=future))
         return await future
 
@@ -125,20 +150,41 @@ class SQLiteFAISSStorage(_MemoryStorageBase):
 
     async def close(self) -> None:
         self._running = False
+
         if self._worker_task:
             self._worker_task.cancel()
             try:
                 await self._worker_task
             except asyncio.CancelledError:
                 pass
-        
+            except Exception as exc:
+                logger.warning(f"[Memory] worker 退出异常: {exc}")
+            self._worker_task = None
+
+        # 兜底：把还没处理的任务全部置为异常，唤醒等待方
+        while not self._task_queue.empty():
+            try:
+                task = self._task_queue.get_nowait()
+            except Exception:
+                break
+            if task.future is not None and not task.future.done():
+                task.future.set_exception(RuntimeError("storage 已关闭"))
+
         # 保存FAISS索引
         if self._faiss:
-            self._faiss.save()
-        
+            try:
+                self._faiss.save()
+            except Exception as exc:
+                logger.warning(f"[Memory] FAISS 索引保存失败: {exc}")
+
         # 关闭数据库
         if self._sqlite:
-            await self._sqlite.close()
+            try:
+                await self._sqlite.close()
+            except Exception as exc:
+                logger.warning(f"[Memory] 数据库关闭失败: {exc}")
+            self._sqlite = None
+        self._faiss = None
 
     async def __prune_if_needed(self) -> None:
         """如果需要，删除最低排名的记录"""
@@ -156,9 +202,10 @@ class SQLiteFAISSStorage(_MemoryStorageBase):
         self._faiss.remove_ids(faiss_ids)
         await self._sqlite.delete_memories(memory_ids)
 
-    async def add_memory(self, memory: Memory, vector: np.ndarray, importance: float = 0.0) -> list[int]:
+    async def add_memory(self, memory: Memory, vector: np.ndarray, importance: float = 0.0) -> int:
         memory.importance = importance
-        return await self.add_memories([memory])
+        ids = await self.add_memories([memory])
+        return int(ids[0]) if ids else 0
     
     async def __add_memories_write(self, memories: list[Memory]) -> list[int]:
         vectors: list[np.ndarray] = [await self._embed_text(str(m.content).strip()) for m in memories]

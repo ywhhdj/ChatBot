@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DEFAULT_CONFIG } from '@/config';
+import { CONFIG } from '@/config';
 import {
   onMusicPause, onMusicPlay, onMusicProgress
   , offMusicPlay, offMusicPause, offMusicProgress,
@@ -12,17 +12,17 @@ const user = useUserStore();
 
 const audioRef = ref<HTMLAudioElement | null>(null);
 
-const backgroundUrl = ref(DEFAULT_CONFIG.background.url);
-const backgroundDuration = ref(DEFAULT_CONFIG.background.duration);
+const backgroundUrl = ref(CONFIG.background.url);
+const backgroundDuration = ref(CONFIG.background.duration);
 function registerEvent() {
-  onMusicPlay((url?: string) => {
+  onMusicPlay(async (url?: string) => {
     if (!audioRef.value) return;
     if (url) audioRef.value.src = url;
-    audioRef.value?.play()
+    await audioRef.value?.play();
   })
   onMusicPause(() => {
     audioRef.value?.pause();
-  })
+  });
   onMusicProgress((progress: number, url?: string) => {
     if (!audioRef.value) return;
     if (url) audioRef.value.src = url;
@@ -37,7 +37,6 @@ function registerEvent() {
     backgroundUrl.value = url;
     if (duration) backgroundDuration.value = duration;
   });
-
 }
 
 function unregisterEvent() {
@@ -53,7 +52,6 @@ onUnmounted(() => unregisterEvent())
 </script>
 
 <template>
-
   <ImageAcrossFade
     class="background-image"
     :src="backgroundUrl"
@@ -69,8 +67,7 @@ onUnmounted(() => unregisterEvent())
     controls
     autoplay
     loop
-    muted
-    :src="DEFAULT_CONFIG.sound.audio.url"
+    :src="CONFIG.sound.audio.url"
   />
 </template>
 

@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from ...utils.http import download_file
 from ...logger import logger
-from ...manager.task.decorator import async_task_scheduler
+from ...core.native.decorator import async_task_scheduler
 
 @async_task_scheduler
 async def download_google_facelandmarker(

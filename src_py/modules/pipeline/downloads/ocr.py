@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from ...utils.http import create_httpx_async_client, download_file
 from ...logger import logger
-from ...manager.task.decorator import async_task_scheduler
+from ...core.native.decorator import async_task_scheduler
 
 @async_task_scheduler
 async def download_paddle_ocr(
@@ -17,7 +17,10 @@ async def download_paddle_ocr(
         "cls": "https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar"
     }
     try:
-        total_progress = {"downloaded": 0, "total": len(download_model_urls)}
+        total_progress = {
+            "downloaded": 0,
+            "total": len(download_model_urls)
+        }
         task=[]
         client = create_httpx_async_client()
         async def update_progress(progress: int):

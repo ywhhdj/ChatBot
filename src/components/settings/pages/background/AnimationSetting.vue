@@ -9,6 +9,13 @@ const animations = [
     change: (checked: boolean) => {
       user.config.animations.snowFlakes = checked;
     }
+  },
+  {
+    name: '液态光晕动画',
+    checked: user.config.animations.liquid,
+    change: (checked: boolean) => {
+      user.config.animations.liquid = checked;
+    }
   }
 ]
 

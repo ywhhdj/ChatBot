@@ -1,14 +1,11 @@
 <script setup lang="ts">
-const props = defineProps({
-  menus: {
-    type: Array as PropType<UI.MenuItem[]>,
-    required: true,
-    default: () => []
-  },
-  modelValue: {
-    type: Number,
-    default: 0
-  }
+const props = withDefaults(defineProps<{
+  menus: UI.MenuItem[];
+  modelValue: number;
+  isliquid: boolean;
+}>(), {
+  modelValue: 0,
+  isliquid: false
 });
 
 const rootRef = ref<HTMLElement | null>(null);
@@ -89,6 +86,7 @@ const activeClass = computed(() => (index: number) => {
       <span class="nav-text">{{ menu.name }}</span>
       <!-- 液态光晕特效层 (仅选中时显示) -->
       <div
+        v-if="isliquid"
         v-show="modelValue === index"
         class="liquid-overlay"
       />
@@ -134,7 +132,7 @@ const activeClass = computed(() => (index: number) => {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.5),
     0 2px 5px rgba(0, 0, 0, 0.05);
-  color: var(--accent-color);
+  color: var(--primary-color);
   font-weight: 500;
   justify-content: center;
 }
@@ -146,7 +144,7 @@ const activeClass = computed(() => (index: number) => {
 /* 选中状态的强化样式 */
 .liquid-nav-item.active {
   background: rgba(255, 255, 255, 0.6);
-  color: var(--accent-color);
+  color: var(--primary-color);
   /* 选中时文字更清晰 */
   box-shadow:
     inset 0 2px 4px rgba(0, 0, 0, 0.7),

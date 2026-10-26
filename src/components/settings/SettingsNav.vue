@@ -31,16 +31,23 @@ const menus: UI.MenuItem[] = [
 
   {
     type: 'nav',
-    name: '音效',
+    name: '声音',
     icon: 'sound',
     clickAction: () => uiStore.setCurrentSettingsTab('sound'),
-  }
+  },
+  {
+    type: 'nav',
+    name: '存档',
+    icon: 'save',
+    clickAction: () => uiStore.setCurrentSettingsTab('save'),
+  },
+  {
+    type: 'nav',
+    name: '其它',
+    icon: 'more',
+    clickAction: () => uiStore.setCurrentSettingsTab('more'),
+  },
 ];
-
-const closeSettingsNav = () => {
-  router.back();
-}
-
 </script>
 
 <template>
@@ -58,7 +65,7 @@ const closeSettingsNav = () => {
   </MenuBar>
   <div class="close-container">
     <Icon
-      @click="closeSettingsNav"
+      @click="router.back()"
       icon="close"
       :icon-size="24"
     />
@@ -69,6 +76,7 @@ const closeSettingsNav = () => {
 .nav-container {
   display: flex;
   align-items: center;
+  flex-direction: column;
 }
 
 .close-container {
@@ -88,10 +96,13 @@ const closeSettingsNav = () => {
 
   &:hover {
     transform: rotate(90deg);
+    color: var(--primary-color);
   }
 }
 
-.close-container:hover {
-  color: var(--accent-color);
+@media screen and (max-width: 768px) {
+  .logo {
+    display: none;
+  }
 }
 </style>

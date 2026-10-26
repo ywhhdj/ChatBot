@@ -1,0 +1,19 @@
+[package]
+name = "chatbot-core-rs"
+version = "0.1.0"
+edition = "2021"
+description = "并发内核：任务调度 / 流 / 事件总线 / 定时器。Python 只做胶水层。"
+
+[lib]
+name = "core_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+# R16：依赖最小化。只用 pyo3，不引 tokio / rayon / crossbeam。
+pyo3 = { version = "0.22", features = ["extension-module", "py-clone"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

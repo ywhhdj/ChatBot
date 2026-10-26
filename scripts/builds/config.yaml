@@ -1,0 +1,142 @@
+entry: "main.py"
+output: "dist"
+app_name: "ChatBot"
+version: "0.1.0"
+python_path: "C:/Users/naixida/AppData/Local/Programs/Python/Python311/python.exe"
+
+##: 复制 Python 源码时排除
+exclude_should_ext:
+  - ".pyc"
+  - ".pyo"
+  - ".pyd"
+  - ".so"
+  - ".dll"
+  - ".exe"
+  - ".dylib"
+  - ".c"
+  - ".pyx"
+  - ".pyi"
+  - ".DS_Store"
+  - ".gitignore"
+
+#: 复制资源时排除（**保留** .dll/.so/.dylib/.bin —— 原生依赖必须带上）
+exclude_resource_ext:
+  - ".pyc"
+  - ".pyo"
+  - ".pyi"
+  - ".c"
+  - ".pyx"
+  - ".DS_Store"
+  - ".gitignore"
+
+#: 忽略目录
+exclude_dir_names:
+  - "schema"
+  - "__pycache__"
+  - ".git"
+  - ".pytest_cache"
+  - "__pyx_cache__"
+  - ".idea"
+  - ".vscode"
+  - ".mypy_cache"
+  - ".ruff_cache"
+
+#: Cython 排除
+exclude_cython_patterns:
+  - "*/tests/*"
+  - "*/test_*.py"
+  - "*/_test.py"
+  - "*/__pycache__/*"
+  - "*/migrations/*"
+  - "*/conftest.py"
+
+#: Cython 默认关闭
+cython_enabled_by_default: False
+
+#: Nuitka 不追踪
+nofollow_import_patterns:
+  - "*.tests"
+  - "*.test"
+  - "tests.*"
+  - "test_*"
+  - "pytest"
+  - "unittest"
+  - "setuptools"
+  - "pip"
+  - "IPython"
+
+#Cython 忽略模块
+cython_never:
+  - "ui" # PyQt6 + qtwebview2
+  - "utils" # 静态方法
+  - "core" # Rust 绑定入口
+  - "services" # 大量 setattr 动态包装（Service 装饰器）
+  - "api" # gateway 依赖 get_type_hints()，B20
+
+# 资源映射
+# src: 源文件路径
+# dst: 目标文件目录路径
+# kind: 资源类型 source | resource
+#    * ``source``   —— Python 源码目录，走源码排除规则
+#    * ``resource`` —— 二进制/数据资源，保留 .dll/.so/.bin/.dylib
+# base: 基础路径类型 auto | project | resources
+resources:
+  - src: "defaults"
+    dst: "defaults"
+    kind: "resource"
+    base: "resources"
+
+  - src: "roles"
+    dst: "roles"
+    kind: "resource"
+    base: "resources"
+
+  - src: "live2d"
+    dst: "models/live2d"
+    kind: "resource"
+    base: "resources"
+
+  - src: "emotion"
+    dst: "models/emotion"
+    kind: "resource"
+    base: "resources"
+
+  - src: "mediapipe"
+    dst: "models/mediapipe"
+    kind: "resource"
+    base: "resources"
+
+  - src: "panddleOCR"
+    dst: "models/panddleOCR"
+    kind: "resource"
+    base: "resources"
+
+  - src: "asr"
+    dst: "models/asr"
+    kind: "project"
+    base: "resources"
+
+  - src: "tts"
+    dst: "models/tts"
+    kind: "resource"
+    base: "resources"
+
+  - src: "ocr"
+    dst: "models/ocr"
+    kind: "resource"
+    base: "resources"
+
+  - src: "modules/services/browser/scripts"
+    dst: "scripts"
+    kind: "resource"
+    base: "project"
+
+  - src: "skills"
+    dst: "skills"
+    kind: "resource"
+    base: "project"
+
+  - src: "static"
+    dst: "static"
+    kind: "resource"
+    base: "project"

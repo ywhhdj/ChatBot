@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import asyncio
 import os
 from types import CoroutineType
-from typing import Any, AsyncGenerator, List, Optional, Union
+from typing import AsyncGenerator,Optional, Union
 
 from .client import AsyncGenerateTTSClient
 from . import models
@@ -16,11 +16,11 @@ class _TTSBaseAdapter(ABC):
         self.client=AsyncGenerateTTSClient()
 
     @abstractmethod
-    def generate_voice_stream(self, text: str) -> AsyncGenerator[bytes, None]:
+    def generate_voice_stream(self, text: str,**kwagrs) -> AsyncGenerator[bytes, None]:
         raise NotImplementedError("generate_voice_stream method must be implemented")
 
     @abstractmethod
-    def generate_voice(self, text: str) -> CoroutineType:
+    def generate_voice(self, text: str,**kwagrs) -> CoroutineType:
         """生成语音"""
         raise NotImplementedError("generate_voice method must be implemented")
 
@@ -42,6 +42,12 @@ class _TTSBaseAdapter(ABC):
     async def close(self):
         if self.client is not None:
             await self.client.close()
+    
+    def update_params(self,text:str,**kwargs):
+        if self.params is None:
+            self.params= dict()
+        self.params["text"]=text
+        self.params.update(kwargs)
 
 # class EdgeTTSAdapter(_TTSBaseAdapter):
 #     def __init__(self) -> None:
@@ -153,11 +159,11 @@ class AIVISAdapter(_TTSBaseAdapter):
             "Authorization": f"Bearer {self.api_key}"
         }
 
-    async def generate_voice_stream(self, text: str) -> AsyncGenerator[bytes, None]:
+    async def generate_voice_stream(self, text: str,**kwargs) -> AsyncGenerator[bytes, None]:
         if self.client is None:
             raise RuntimeError("ATS客户端未初始化")
         headers = self.__generate_headers(text)
-        self.params["text"] = text
+        self.update_params(text,**kwargs)
         try:
             sentences = self.client.text_splitter.feed(text)
             for sentence in sentences:
@@ -224,10 +230,10 @@ class BV2Adapter(_TTSBaseAdapter):
             text="", # 文本
         )
 
-    async def generate_voice_stream(self, text:str) -> AsyncGenerator[models.TTSResult, None]:
+    async def generate_voice_stream(self, text:str,**kwargs) -> AsyncGenerator[models.TTSResult, None]:
         if self.client is None:
             raise RuntimeError("BV2客户端未初始化")
-        self.params["text"]=text
+        self.update_params(text,**kwargs)
         try:
             sentences = self.client.text_splitter.feed(text)
             for sentence in sentences:
@@ -297,10 +303,10 @@ class GPTSoVITSAdapter(_TTSBaseAdapter):
             raise ValueError(f"SoVITS模型文件扩展名必须为.pth: {sovits_model_path}")
         self.client = AsyncGenerateTTSClient()
 
-    async def generate_voice_stream(self, text:str)->AsyncGenerator[bytes, None]:
+    async def generate_voice_stream(self, text:str,**kwargs)->AsyncGenerator[bytes, None]:
         if self.client is None:
             raise RuntimeError("GPTSoVITS客户端未初始化")
-        self.params["text"]=text
+        self.update_params(text,**kwargs)
         try:
             sentences = self.client.text_splitter.feed(text)
             for sentence in sentences:
@@ -326,7 +332,7 @@ class GPTSoVITSAdapter(_TTSBaseAdapter):
         except Exception as e:
             raise RuntimeError(f"GPTSoVITS TTS请求失败: {e}")
     
-    async def generate_voice(self, text: str):
+    async def generate_voice(self, text: str,**kwagrs):
         if self.client is None:
             raise RuntimeError("GPTSoVITS客户端未初始化")
         try:
@@ -353,10 +359,10 @@ class VitsAdapter(_TTSBaseAdapter):
             temperature=1.0,
         )
 
-    async def generate_voice_stream(self,text:str) -> AsyncGenerator[bytes, None]:
+    async def generate_voice_stream(self,text:str,**kwagrs) -> AsyncGenerator[bytes, None]:
         if self.client is None:
             raise RuntimeError("Vits客户端未初始化")
-        self.params["text"]=text
+        self.update_params(text,**kwagrs)
         try:
             sentences = self.client.text_splitter.feed(text)
             for sentence in sentences:
@@ -386,7 +392,7 @@ class VitsAdapter(_TTSBaseAdapter):
         except Exception as e:
             raise RuntimeError(f"Vits TTS请求失败: {e}")
 
-    async def generate_voice(self, text: str):
+    async def generate_voice(self, text: str,**kwagrs):
         if self.client is None:
             raise RuntimeError("Vits客户端未初始化")
         try:

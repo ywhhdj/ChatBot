@@ -1,42 +1,48 @@
 <script setup lang="ts">
-const duration = ref(0);
-const isRecording = ref(false);
-const isSending = ref(false);
-const CANCEL_THRESHOLD = 100;
-let startY = 0;
+const props = defineProps<{
+  disabled?: boolean;
+}>();
 
 const emit = defineEmits<{
   (e: 'start'): void;
   (e: 'stop', text: string): void;
 }>();
 
+const duration = ref(0);
+const isRecording = ref(false);
+const isSending = ref(false);
+const CANCEL_THRESHOLD = 100;
+let startY = 0;
 let durationTimer: number | null = null;
+
+const buttonDisabled = computed(() => props.disabled || isRecording.value);
+
 const formattedDuration = computed(() => {
   const minutes = Math.floor(duration.value / 60);
   const seconds = duration.value % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 });
-const StartRecord = (event: PointerEvent) => {
+
+const StartRecord = async () => {
   isRecording.value = true;
   duration.value = 0;
   durationTimer = window.setInterval(() => duration.value++, 1000);
-  emit('start');
+  try {
+    await emit('start');
+  } catch (error) {
+    StopRecord();
+  }
 };
 
-const StopRecord = (event: PointerEvent) => {
-  try {
-    if (!isRecording.value) return;
-    isRecording.value = false;
-    emit('stop', '');
-  } catch (error) {
-    cancelRecording();
-  }
+const StopRecord = () => {
+  if (!isRecording.value) return;
+  isRecording.value = false;
+  cancelRecording();
 };
 
 const cancelRecording = () => {
   try {
     emit('stop', '');
-    isRecording.value = false;
     if (durationTimer) {
       clearInterval(durationTimer);
       durationTimer = null;
@@ -62,6 +68,14 @@ const statusTipClass = computed(() => {
     visible: isRecording.value || isSending.value
   }
 });
+
+const typeClass = computed(() => {
+  return {
+    disabled: buttonDisabled.value,
+    recording: isRecording.value
+  }
+});
+
 </script>
 
 <template>
@@ -69,7 +83,8 @@ const statusTipClass = computed(() => {
     <Button
       type="nav"
       icon="record"
-      class="record-button"
+      :class="typeClass"
+      :disabled="buttonDisabled"
       @mousedown="StartRecord"
       @mouseup="StopRecord"
     />

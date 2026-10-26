@@ -1,6 +1,6 @@
 import { LogLevel } from "./typings/enums";
 
-export const DEFAULT_CONFIG: AppOptions = {
+export const CONFIG: AppOptions = {
   websocket: {
     maxReconnectAttempts: 5,
     reconnectInterval: 1000,
@@ -12,15 +12,15 @@ export const DEFAULT_CONFIG: AppOptions = {
   background: {
     name: "黑夜",
     duration: 0.5,
-    url: "/images/background/night.webp",
+    url: "/static/images/background/night.webp",
     index: 0,
   },
   sound: {
     audio: {
-      name: '夏·烟火',
-      url: '/audios/夏·烟火.mp3',
+      name: "夏·烟火",
+      url: "/static/audios/夏·烟火.mp3",
       progress: 0,
-    }
+    },
   },
   logger: {
     enabled: true,
@@ -28,8 +28,17 @@ export const DEFAULT_CONFIG: AppOptions = {
     exclude: {
       enabled: false,
       length: 100, // 排除的模式数量
-      patterns: [],// 排除的模式
+      patterns: [], // 排除的模式
     },
-    mode: 'real-time',
-  }
-}
+    mode: "real-time",
+  },
+  save: {
+    MAX_SLOTS: 10,
+    MIN_SLOTS: 2,
+  },
+  env: {
+    API_BASE_URL: "http://localhost:8000",
+    WS_API_BASE_URL: "ws://localhost:8000/",
+    TIMEOUT: 100000,
+  },
+};

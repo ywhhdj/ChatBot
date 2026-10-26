@@ -1,17 +1,19 @@
 from modules.runtime import RuntimePath
-from modules.services.config import BrowserConfig, Live2DConfig, ObsConfig, QQBotConfig
-from modules.services import ServiceId
-from modules.utils.file import write_yaml
+from modules.services.config import get_service_classes
+from src_py.modules.services.keys import ServiceId
+from modules.utils.file import yaml
 
 
-def generate_default_config_file():
-    service_config={
-        ServiceId.LIVE2D:Live2DConfig().to_dict(),
-        ServiceId.BROWSER:BrowserConfig().to_dict(),
-        ServiceId.OBS:ObsConfig().to_dict(),
-        ServiceId.QQBOT:QQBotConfig().to_dict(),
-    }
-    write_yaml(
+def generate_ui_config_file():
+    service_config={}
+    for service_id in [
+        ServiceId.LIVE2D,
+        ServiceId.BROWSER,
+        ServiceId.OBS,
+        ServiceId.QQBOT
+    ]:
+        service_config[service_id] = get_service_classes(service_id)().to_dict()
+    yaml.write_yaml(
         RuntimePath.get_service_config_file_path(),
         service_config
     )

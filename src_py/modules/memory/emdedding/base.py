@@ -6,12 +6,12 @@ from numpy import ndarray
 from abc import ABC, abstractmethod
 import asyncio
 from typing import Any, Dict, Optional, Union, List
-from numpy import ndarray,vstack,vstack
+from numpy import ndarray, vstack
 from ...logger import logger
 
 EmbeddingResult = Union[ndarray, List[ndarray]]
 
-class _BaseEmbeddingAdapter(ABC):
+class BaseEmbeddingAdapter(ABC):
     def __init__(
             self,
             model: str,
@@ -84,7 +84,7 @@ class _BaseEmbeddingAdapter(ABC):
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(model={self.model_name})"
 
-class _AsyncEmbeddingAdapter(_BaseEmbeddingAdapter):
+class AsyncEmbeddingAdapter(BaseEmbeddingAdapter):
 
     def __init__(
         self,
@@ -101,9 +101,25 @@ class _AsyncEmbeddingAdapter(_BaseEmbeddingAdapter):
         pass
 
     async def close(self):
-        if self.__model:
-            await self.__model.aclose() # type: ignore
-            self.__model = None
+        """C160：原实现 `if self.__model:` —— 双重错误。
+
+        1. `__model` 出现在 `_AsyncEmbeddingAdapter` 类体内，
+           被 name mangling 成 `_AsyncEmbeddingAdapter__model`；
+        2. 真正的属性叫 `self._model`，`__model` 从未被赋值过。
+
+        于是 `close()` 一调用就 AttributeError，模型资源永远不释放。
+        """
+        model = getattr(self, "_model", None)
+        if model is not None:
+            aclose = getattr(model, "aclose", None)
+            if aclose is not None:
+                try:
+                    result = aclose()
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as exc:
+                    logger.debug(f"关闭 embedding 模型失败: {exc}")
+            self._model = None
         super().close()
     
     async def embed_batch(

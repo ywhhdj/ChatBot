@@ -99,6 +99,9 @@ def create_options(
     )
 
 class FaceTracker:
+    name="mediapipe.face"
+    description="mediapipe的轻量人脸检测模块"
+
     def __init__(self,
             model_path: Union[str, Path],
             source: Union[int, str] = 0,
@@ -126,9 +129,6 @@ class FaceTracker:
                 return False
         else:
             return False
-        
-    def __del__(self):
-        self.close()
 
     def __on_result(self, result: FaceLandmarkerResult, _output_image, _timestamp_ms: int):
         data = build_face_data(result)
@@ -146,6 +146,7 @@ class FaceTracker:
         options = create_options(self.model_path, self.__on_result, VisionTaskRunningMode.LIVE_STREAM)
         self.landmarker = FaceLandmarker.create_from_options(options)
         self.__initialized = True
+
 
     def __submit_frame(self):
         if self.cap is None or self.landmarker is None:

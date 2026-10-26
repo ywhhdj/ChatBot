@@ -48,3 +48,8 @@ class QQBotEventData:
     # class ON_FRIEND_ADDEDEventData(BaseEvent):
     #     type:str=types.QQBotEventType.QQ_BOT_ON_FRIEND_ADDED
     #     data:Optional[Data.ON_FRIEND_ADDED]=None
+
+#情感变化事件
+class MoodChangedEventData(BaseEvent):
+    type:str=types.CharacterEventType.MOOD_CHANGED
+    data:Optional[dict]=None

@@ -1,14 +1,3 @@
-export function asyncCreateScriptTag(url: string) {
-  return new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = url;
-    script.type = "module";
-    script.onload = () => resolve();
-    script.onerror = (error) => reject(error);
-    document.head.appendChild(script);
-  });
-}
-
 export async function saveJsonFile(filename: string, data: any) {
   return new Promise<void>((resolve, reject) => {
     if (!filename) {
@@ -36,4 +25,38 @@ export async function loadJsonFile<T = any>(filename: string): Promise<T> {
     return JSON.parse(data);
   }
   return data;
+}
+
+export const JSONparse = (text: string) => {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+};
+
+export const loadStorage = (key: string) => {
+  return JSONparse(localStorage.getItem(key) || '{}');
+};
+
+export const saveStorage = (key: string, value: any) => {
+  localStorage.setItem(key, JSON.stringify(value));
+};
+
+export const getFileExtension = (filename: string) => {
+  return filename.split('.').pop()?.toLowerCase() || '';
+};
+
+export function throttle<T extends (...args: any[]) => any>(
+  fn: T,
+  delay: number
+): T {
+  let lastTime = 0;
+  return function (this: any, ...args: Parameters<T>) {
+    const now = Date.now();
+    if (now - lastTime >= delay) {
+      fn.apply(this, args);
+      lastTime = now;
+    }
+  } as T;
 }

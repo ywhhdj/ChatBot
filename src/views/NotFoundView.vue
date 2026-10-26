@@ -58,7 +58,7 @@ const router = useRouter();
 .error-code {
   font-size: 180px;
   font-weight: 900;
-  color: var(--accent-color);
+  color: var(--primary-color);
   opacity: 0.25;
   position: absolute;
   top: -60px;
@@ -70,7 +70,7 @@ const router = useRouter();
 
 .error-illustration i {
   font-size: 80px;
-  color: var(--accent-color);
+  color: var(--primary-color);
   padding: 20px;
   border-radius: 50%;
   background-color: #ecf5ff;

@@ -154,17 +154,20 @@ export default class WebSockets {
   }
 
   public send<T = any>(message: WebSocketAPI.WebSocketRequest<T>): void {
-    if (this.socket?.readyState !== WebSocket.OPEN) {
-      console.warn("[WebSocket] Cannot send message, socket is not open");
-      return;
+    try {
+      if (this.socket?.readyState !== WebSocket.OPEN) {
+        throw new Error("[WebSocket] Cannot send message, socket is not open");
+      }
+      let requestData: WebSocketAPI.WebSocketRequest<T> = {
+        type: (message as any).type || "unknown",
+        data: message.data,
+        timestamp: Date.now(),
+      };
+      requestData.data = this._sendCallback?.(requestData.data) || requestData.data;
+      this.socket.send(JSON.stringify(requestData));
+    } catch (error) {
+      throw error;
     }
-    let requestData: WebSocketAPI.WebSocketRequest<T> = {
-      type: (message as any).type || "unknown",
-      data: message.data,
-      timestamp: Date.now(),
-    };
-    requestData.data = this._sendCallback?.(requestData.data) || requestData.data;
-    this.socket.send(JSON.stringify(requestData));
   }
 
   public close(): void {

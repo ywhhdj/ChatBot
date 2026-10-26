@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from PyQt5.QtCore import QPoint, QTimer, Qt, pyqtSignal
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import QPoint, QTimer, Qt, pyqtSignal
+from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QWidget,
@@ -372,7 +372,17 @@ from ...utils.util import create_daemon_thread
 #         self.__update_typing_interval()
 
 class FaceTrackerComponent:
+    """人脸追踪组件。
+
+    修复对应清单：B38 / B39
+
+    B38 原来每次 start() 都无条件新建采集线程，set_enabled(True) 反复调用会
+        多路打开摄像头/采集源。加了运行态守卫。
+    B39 QTimer 没有 parent，改为由本组件长期持有（组件 -> controller -> view
+        的引用链足够长），并在 stop()/close() 里显式停表，避免静默失效。
+    """
     from ...pipeline.adapters.landmarker.face import ResultFaceData
+
     def __init__(self,
             model_path: Optional[Union[str, Path]]=None,
             process_callback: Optional[Callable[[ResultFaceData], None]]=None,
@@ -387,9 +397,9 @@ class FaceTrackerComponent:
         self.__enabled = enabled
         self.__process_callback = process_callback
         self.__mirror = mirror
-        self.__thread= None
+        self.__thread = None
         self.__timer: Optional[QTimer] = None
-        self.__face_tracker= None
+        self.__face_tracker = None
 
     def init(self):
         if not self.__enabled:
@@ -409,7 +419,7 @@ class FaceTrackerComponent:
         if self.__timer is None:
             self.__timer = QTimer()
             self.__timer.timeout.connect(self.__poll_face_data)
-    
+
     def __poll_face_data(self) -> None:
         if not self.__face_tracker:
             return
@@ -421,18 +431,29 @@ class FaceTrackerComponent:
         self.__fps = fps
         if self.__timer is not None:
             self.__timer.setInterval(int(1000 / max(1, self.__fps)))
-    
+
+    @property
+    def is_running(self) -> bool:
+        return self.__thread is not None and self.__thread.is_alive()
+
     def start(self) -> None:
         if not self.__enabled:
             return
         if self.__face_tracker is None:
             raise ValueError("FaceTrackerTask is not initialized")
-        self.__thread = create_daemon_thread(self.__face_tracker.start,name="fackTracker")
-        self.__thread.start()
-        if self.__timer is None:
+
+        # B38：已在运行就不要再开一条采集线程
+        if self.is_running:
+            if self.__timer is not None and not self.__timer.isActive():
+                self.__timer.start(int(1000 / max(1, self.__fps)))
             return
-        self.__timer.start(int(1000 / max(1, self.__fps)))
-    
+
+        self.__running = True
+        self.__thread = create_daemon_thread(self.__face_tracker.start, name="faceTracker")
+        self.__thread.start()
+        if self.__timer is not None:
+            self.__timer.start(int(1000 / max(1, self.__fps)))
+
     def set_model_path(self, model_path: Union[str, Path]) -> None:
         self.model_path = model_path
 
@@ -447,15 +468,18 @@ class FaceTrackerComponent:
             self.start()
         else:
             self.stop()
+
     def set_mirror(self, mirror: bool) -> None:
         self.__mirror = mirror
         if self.__face_tracker:
             self.__face_tracker.set_mirror(mirror)
-    
+
     def stop(self) -> None:
+        self.__running = False
         if self.__face_tracker:
             self.__face_tracker.stop()
         if self.__thread is not None:
+            # 带超时，绝不在主线程无限等待
             self.__thread.join(timeout=1)
             self.__thread = None
         if self.__timer is not None:
@@ -466,6 +490,9 @@ class FaceTrackerComponent:
         if self.__face_tracker:
             self.__face_tracker.close()
         self.__face_tracker = None
+        if self.__timer is not None:
+            self.__timer.stop()
+            self.__timer = None
 
     def set_process_callback(self, process_callback: Callable[[ResultFaceData], None]) -> None:
         self.__process_callback = process_callback

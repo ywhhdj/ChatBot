@@ -1,17 +1,33 @@
-from .log import Logger
-from .types import LogLevel,LogSource,LoggerRecord
+from .log import Logger, OptimizedBatchLogHandler
+from .models import LogLevel, LogSource, LoggerRecord
 
 def create_logger(app_name: str) -> Logger:
     from ..config import get_config
+
     config = get_config()
     return Logger(
-        app_name, 
+        app_name,
         enable_file=config.log.enable_log_file,
         log_dir=config.log.log_dir,
         format=config.log.format,
-        datefmt=config.log.datefmt
+        datefmt=config.log.datefmt,
     )
+
 
 logger = create_logger("app")
 logger.init()
 
+
+def get_logger() -> Logger:
+    return logger
+
+__all__ = [
+    "Logger",
+    "OptimizedBatchLogHandler",
+    "LogLevel",
+    "LogSource",
+    "LoggerRecord",
+    "create_logger",
+    "get_logger",
+    "logger",
+]

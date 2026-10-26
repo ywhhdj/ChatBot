@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Dict, Optional, TypedDict
 
+from pydantic import BaseModel
+
 class QQBotEvent:
     class WebSocketEvent:
         HEARTBEAT = 10
@@ -40,7 +42,7 @@ class QQBotData:
         seq: Optional[int] = None # 序列号，用于心跳确认
         data: Dict = field(default_factory=Dict)
 
-    class QQBotInfo(TypedDict):
+    class QQBotInfo(BaseModel):
         id: str
         username: str
         avatar: str

@@ -56,7 +56,7 @@ class MockLLM:
         # 获取用户最后一条输入
         user_msg = ""
         for m in reversed(messages):
-            if m.get("role") == "user":
+            if m.get("role") == Role.USER:
                 user_msg = m.get("content", "")
                 break
 
@@ -510,7 +510,7 @@ async def demo_custom_character():
     async def catgirl_llm(messages):
         user_msg = ""
         for m in reversed(messages):
-            if m.get("role") == "user":
+            if m.get("role") == Role.USER:
                 user_msg = m.get("content", "")
                 break
         if "累" in user_msg:

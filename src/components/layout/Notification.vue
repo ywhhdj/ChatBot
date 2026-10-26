@@ -17,10 +17,10 @@ const typeClass = computed(() => `notification-${notification.type.value}`)
       >
         <!-- 角色头像区域 -->
         <div
+          v-if="notification.avatarUrl.value"
           class="shrink-0 w-16 h-16 rounded-full overflow-hidden flex items-center justify-center notification-avatar"
         >
           <img
-            v-if="notification.avatarUrl.value"
             :src="notification.avatarUrl.value"
             alt="avatar"
             class="w-full h-full object-cover"
@@ -43,6 +43,8 @@ const typeClass = computed(() => `notification-${notification.type.value}`)
 
 <style scoped>
 .notifictiy {
+  opacity: 0;
+  visibility: hidden;
   position: fixed;
   z-index: 9999;
   left: 0;

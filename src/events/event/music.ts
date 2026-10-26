@@ -1,10 +1,10 @@
 import events from "..";
 
 enum MusicEvent {
-  Play = 'music:play',
-  Pause = 'music:pause',
-  Progress = 'music:progress',
-  VolumeChange = 'music:volumeChange',
+  Play = "music:play",
+  Pause = "music:pause",
+  Progress = "music:progress",
+  VolumeChange = "music:volumeChange",
 }
 
 export function emitMusicPlay(url?: string) {
@@ -15,8 +15,8 @@ export function emitMusicPause() {
   events.emit(MusicEvent.Pause);
 }
 
-export function emitMusicProgress(progress: number,url?: string) {
-  events.emit(MusicEvent.Progress, progress,url);
+export function emitMusicProgress(progress: number, url?: string) {
+  events.emit(MusicEvent.Progress, progress, url);
 }
 
 export function emitMusicVolumeChange(volume: number) {
@@ -31,10 +31,11 @@ export function onMusicPause(callback: () => void) {
   events.on(MusicEvent.Pause, callback);
 }
 
-export function onMusicProgress(callback: (progress: number, url?: string) => void) {
+export function onMusicProgress(
+  callback: (progress: number, url?: string) => void
+) {
   events.on(MusicEvent.Progress, callback);
 }
-
 
 export function onMusicVolumeChange(callback: (volume: number) => void) {
   events.on(MusicEvent.VolumeChange, callback);

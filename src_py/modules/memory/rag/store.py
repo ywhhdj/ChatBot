@@ -1,9 +1,10 @@
 import json
 import os
 from pathlib import Path
-from typing import List, Optional, Dict
-from .models import Document
+from typing import List, Dict
 
+from ...utils.file import json
+from .models import Document
 
 class DocumentStore:
     """
@@ -16,17 +17,16 @@ class DocumentStore:
         self._load()
 
     def _load(self):
-        if self.storage_path.exists():
-            with open(self.storage_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for item in data:
-                    doc = Document(**item)
-                    self.documents[doc.id] = doc
+        data=json.read_json(self.storage_path)
+        if data:
+            for item in data:
+                doc = Document(**item)
+                self.documents[doc.id] = doc
 
     def save(self):
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.storage_path, "w", encoding="utf-8") as f:
-            json.dump([doc.__dict__ for doc in self.documents.values()], f, ensure_ascii=False, indent=2)
+        data=[doc.__dict__ for doc in self.documents.values()]
+        json.write_json(self.storage_path, data)
 
     def add_document(self, doc: Document):
         self.documents[doc.id] = doc

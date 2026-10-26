@@ -1,31 +1,32 @@
 <script setup lang="ts">
-type Direction = "row" | "column"
 type IsTopRight = "true" | "false"
 type JustifyContent = "start" | "end" | "center"
 
-defineProps({
-  zIndex: {
-    type: Number,
-    default: 1000
-  },
-  isTopRight: {
-    type: String as PropType<IsTopRight>,
-    default: "true"
-  },
-  justify: {
-    type: String as PropType<JustifyContent>,
-    default: "start"
-  },
-  isBoxShadow: {
-    type: Boolean,
-    default: true
+const props = withDefaults(defineProps<{
+  zIndex?: number;
+  isTopRight?: IsTopRight | boolean;
+  justify?: JustifyContent;
+  isBoxShadow?: boolean;
+}>(),{
+  zIndex: 1000,
+  isTopRight: false,
+  justify: "start",
+  isBoxShadow: false
+});
+
+
+
+const classType = computed(() => {
+  return {
+    'box-shadow': props.isBoxShadow,
   }
 });
+
 </script>
 
 <template>
   <div
-    :class="['menu-bar', isTopRight, justify, { 'box-shadow': isBoxShadow }]"
+    :class="['menu-bar', isTopRight, justify, classType]"
     :style="{ zIndex: zIndex }"
   >
     <slot></slot>

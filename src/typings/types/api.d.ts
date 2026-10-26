@@ -1,12 +1,5 @@
 declare namespace API {
   type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
-  interface ApiResponse<T = any> {
-    code: number;
-    message: string;
-    data: T;
-    status: boolean;
-    requestId?: string;
-  }
   type ChatOptions = {
     message: string;
     session_id?: string;
@@ -27,14 +20,14 @@ declare namespace API {
     icon?: string;
   }
   type ServiceId = "live2d" | "browser" | "obs" | "qqbot";
-  interface ServiceConfigItem extends Record<ServiceId> {
+  type ServiceConfigItem = {
+    type: "boolean" | "string" | "select";
     name: string;
-    description: string;
-    config: {
-      [key: string]: any;
-    }[]
-  }
-
+    description?: string;
+    value: boolean | string;
+    config?: any[];
+  }| {};
+  type ServiceConfigItems = Record<ServiceId, ServiceConfigItem>;
   type QQBotInfo = {
     id: string;
     username: string;

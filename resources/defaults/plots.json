@@ -3,7 +3,6 @@
   "start": [],
   "nodes": {
     "node1": {
-      "id": "node1",
       "type": "start",
       "next": ["node2"],
       "texts": ["This is a test", "with two lines"],
@@ -19,13 +18,11 @@
       ]
     },
     "node2": {
-      "id": "node2",
       "type": "end",
       "texts": ["End of the test"],
       "next": ["node3"]
     },
     "node3": {
-      "id": "node3",
       "type": "middle",
       "texts": ["End of the test"],
       "next": []

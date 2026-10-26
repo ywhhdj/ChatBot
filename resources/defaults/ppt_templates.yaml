@@ -1,0 +1,79 @@
+consulting:
+  id: "consulting"
+  name: "战略咨询"
+  scenario: "战略汇报 / 董事会 / 管理咨询"
+  description: "深蓝主色，克制的衬线大标题，信息密度高，多用结构化框架（MECE、金字塔）"
+  colors:
+    primary: "#1F3A93"
+    secondary: "#2E86C1"
+    accent: "#C0392B"
+    background: "#FFFFFF"
+    text: "#1B1F23"
+    muted: "#6B7280"
+  cover_frame: "深蓝满版封面，白色大标题居左，下方细分隔线"
+  body_frame: "顶部标题条 + 左侧要点区 + 右下页码"
+
+marketing:
+  id: "marketing"
+  name: "市场营销"
+  scenario: "品牌方案 / 营销策划 / 活动复盘"
+  description: "高饱和强调色，大图留白，标题醒目，强调数字与转化漏斗"
+  colors:
+    primary: "#E74C3C"
+    secondary: "#F39C12"
+    accent: "#8E44AD"
+    background: "#FFF9F5"
+    text: "#2C3E50"
+    muted: "#7F8C8D"
+  title_size: 44
+  cover_frame: "强调色渐变大标题居中，副标题小字"
+  body_frame: "大标题 + 中央视觉区 + 底部数据条"
+
+academic:
+  id: "academic"
+  name: "学术研究"
+  scenario: "论文答辩 / 课程课件 / 技术分享"
+  description: "白底深色文字，结构清晰，图表优先，保留引用来源"
+  colors:
+    primary: "#154360"
+    secondary: "#2874A6"
+    accent: "#B9770E"
+    background: "#FFFFFF"
+    text: "#17202A"
+    muted: "#566573"
+  title_size: 36
+  body_size: 16
+  cover_frame: "顶部校名/机构 + 居中标题 + 作者与日期"
+  body_frame: "标题 + 双栏（左文右图）+ 页脚来源标注"
+
+launch:
+  id: "launch"
+  name: "产品发布"
+  scenario: "新品发布 / 路演 / 展会"
+  description: "深色底 + 高亮强调色，大图与数据图表，少堆砌文字"
+  colors:
+    primary: "#0B0C10"
+    secondary: "#45A29E"
+    accent: "#66FCF1"
+    background: "#0B0C10"
+    text: "#FFFFFF"
+    muted: "#C5C6C7"
+  title_size: 48
+  cover_frame: "深色满版，超大主标题 + 一句话定位 + 发布时间"
+  body_frame: "大标题居左 + 右侧产品图/数据 + 底部关键参数"
+
+funding:
+  id: "funding"
+  name: "融资路演"
+  scenario: "融资 BP / 投资人沟通"
+  description: "专业克制，强调市场容量（TAM/SAM/SOM）、竞争象限与财务预测"
+  colors:
+    primary: "#0E6655"
+    secondary: "#148F77"
+    accent: "#D35400"
+    background: "#FFFFFF"
+    text: "#17202A"
+    muted: "#7B7D7D"
+  title_size: 42
+  cover_frame: "公司名 + 一句话定位 + 融资轮次与金额"
+  body_frame: "标题 + 数据区（左数字右图表）+ 底部要点"

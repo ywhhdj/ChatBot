@@ -1,37 +1,26 @@
+from typing import Literal
+from .app import Application
+
 __version__ = "0.1.2"
 
-from functools import wraps
-from threading import Lock
+_app = None
 
-#单例装饰器
-def singleton(cls=None,*args, **kwargs):
-    def wrapper(cls,*args, **kwargs):
-        cls._lock = Lock()
-        cls._instance = None
-        cls._initialized = False
+def create_app(
+    app_name: str,
+    debug: bool = False,
+    debug_modules: Literal["service", "pipeline", "web", "all"] = "all",
+):
+    global _app
+    if _app is None:
+        _app = Application(app_name, debug, debug_modules)
+    return _app
 
-        original_init = cls.__init__
-        @wraps(original_init)
-        def __init__(self, *args, **kwargs):
-            if self._instance:
-                return
-            self._instance = self
-            original_init(self, *args, **kwargs)
-            self._initialized = True
 
-        def __new__(cls, *args, **kwargs):
-            if not cls._instance:
-                with cls._lock:
-                    if not cls._instance:
-                        cls._instance = super().__new__(cls)
-            return cls._instance
-        
-        cls.__init__ = __init__
-        cls.__new__ = __new__
-    if cls:
-        wrapper(cls,*args, **kwargs)
-    return cls
-    
+def get_app():
+    global _app
+    if _app is None:
+        raise Exception("App not initialized")
+    return _app
 
 __all__ = [
     "__version__"

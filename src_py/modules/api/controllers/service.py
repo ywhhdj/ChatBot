@@ -1,105 +1,226 @@
-from typing import Optional
-from fastapi import APIRouter,Query
+"""服务接口：列表、详情、工具定义、启停、配置读写、UI 描述。"""
+from __future__ import annotations
+from math import e
+from typing import Any, Dict, Optional
+from fastapi import APIRouter, Query
 
-from ...services import ServiceId,ServiceState
-from ...utils import response
-from ...events import emit,BaseEvent,types
-from ...manager.service.manager import service_manager
+from src_py.modules.services.keys import ServiceKeys
+
+from ..requests import (
+    ServiceConfigUpdateRequest,
+    ServiceStartRequest,
+)
+from ..dto import (
+    ServiceActionData,
+    ServiceInfoData,
+    ServiceListData,
+    ServiceUIDescription,
+    ToolData
+)
+from ..response import ApiError, ApiResponse, success
+from .._common import state_name, to_thread
+
+router = APIRouter(prefix="/service", tags=["service"])
 
 
-service_router = APIRouter(prefix="/service")
+def _sm():
+    from ...manager.service.manager import service_manager
 
-@service_router.get("/config")
-def get_service_config_info(name: Optional[str] = Query(None,description="服务名称")):
-    if name:
-        service_info=service_manager.get_service_info(name)
-        if service_info:
-            return response.success(service_info)
-        else:
-            return response.error(message=f"service {name} not registered")
-    return response.success(service_manager.get_default_services_description())
+    return service_manager
 
-@service_router.post("/start")
-def start_service(playload):
-    service_id=playload.get("id")
-    if not service_id:
-        return response.not_found("id 参数缺失")
-    service_registered=service_manager.is_registered(service_id)
-    if  not service_registered:
-        return response.error(message=f"service {service_id} not registered")
-    elif service_registered and service_manager.get_service_state(service_id)==ServiceState.RUNNING:
-        return response.error(message=f"service {service_id} already started")
-    event={
-        ServiceId.LIVE2D:types.Live2DEventType.LIVE2D_START,
-        ServiceId.OBS:types.ObsEventType.OBS_CONNECT,
-        ServiceId.QQBOT:types.QQBotEventType.QQ_BOT_START,
-        ServiceId.BROWSER:types.BrowserEventType.BROWSER_START,
-    }
-    event_type=event.get(service_id,"")
-    if not event_type:
-        return response.error(message=f"service {service_id} not found")
-    emit(BaseEvent(type=event_type))
-    return response.success(message="service started")
 
-@service_router.post("/enable")
-def enable_service(playload):
-    service_id=playload.get("id")
-    if not service_id:
-        return response.not_found("id 参数缺失")
-    service_registered=service_manager.is_registered(service_id)
-    if  not service_registered:
-        config=playload.get("config")
-        if not config:
-            return response.not_found("config 参数缺失")
-        if service_id==ServiceId.LIVE2D:
-            from ...services.live2d.views import Live2DView
-            Live2DView(**config)
-        elif service_id==ServiceId.OBS:
-            from ...services.obs.client import OBSClient
-            OBSClient(**config)
-        elif service_id==ServiceId.QQBOT:
-            from ...services.qqbot.client import QQBotClient
-            QQBotClient(**config)
-        elif service_id==ServiceId.BROWSER:
-            from ...services.browser.browser import Browser
-            Browser(**config)
-        else:
-            return response.error(message=f"service {service_id} not found")
+def _info_with_id(service_id: str) -> ServiceInfoData:
+    sm = _sm()
+    info = sm.get_service_info(service_id)
+    if info is None:
+        raise ApiError.not_found(f"服务 {service_id}")
+    return ServiceInfoData(
+        id=service_id,
+        name=str(info.get("name", "") or ""),
+        description=str(info.get("description", "") or ""),
+        state=state_name(info.get("state")),
+        main_thread=bool(info.get("main_thread", False)),
+        config=info.get("config"),
+    )
+
+
+@router.get("", response_model=ApiResponse[ServiceListData])
+async def list_services(
+    running_only: bool = Query(False, description="只返回运行中的服务"),
+) -> ApiResponse[ServiceListData]:
+    """服务列表。"""
+    sm = _sm()
+    services = [
+        _info_with_id(sid)
+        for sid in (sm.get_service_names() or [])
+    ]
+    if running_only:
+        services = [s for s in services if s.state == "running"]
+    return success(ServiceListData(services=services, total=len(services)))
+
+
+@router.get("/tools", response_model=ApiResponse[ToolData])
+async def list_tools() -> ApiResponse[ToolData]:
+    """所有服务暴露的工具定义（OpenAI function 格式）。"""
+    sm = _sm()
+    try:
+        tools = sm.get_tools() or []
+    except Exception as e:
+        raise ApiError.internal(f"获取工具失败: {e}")
+    return success(ToolData(
+        services={"tools": tools}, 
+        total=len(tools)
+    ))
+
+
+@router.get("/{service_id}", response_model=ApiResponse[ServiceInfoData])
+async def get_service(service_id: str) -> ApiResponse[ServiceInfoData]:
+    """单个服务详情。"""
+    return success(_info_with_id(service_id))
+
+
+@router.get("/{service_id}/tools", response_model=ApiResponse[ToolData])
+async def service_tools(service_id: str) -> ApiResponse[ToolData]:
+    """某个服务的工具定义。"""
+    sm = _sm()
+    if not sm.is_registered(service_id):
+        raise ApiError.not_found(f"服务 {service_id}")
+    try:
+        tools = sm.get_service_tool(service_id)
+    except Exception as e:
+        raise ApiError.internal(f"获取工具失败: {e}")
+    if isinstance(tools, list):
+        items = tools
     else:
-        return response.error(message=f"service {service_id} already enabled")
+        items = [tools] if tools else []
+    return success(ToolData(services={"tools": items}, total=len(items)))
 
-@service_router.post("/stop")
-def stop_service(playload):
-    service_id=playload.get("id")
-    if not service_id:
-        return response.not_found("id 参数缺失")
-    service_registered=service_manager.is_registered(service_id)
-    if  not service_registered:
-        return response.error(message=f"service {service_id} not registered")
-    elif service_registered and service_manager.get_service_state(service_id)==ServiceState.STOPPED:
-        return response.error(message=f"service {service_id} not running")
-    event={
-        ServiceId.LIVE2D:types.Live2DEventType.LIVE2D_STOP,
-        ServiceId.OBS:types.ObsEventType.OBS_DISCONNECT,
-        ServiceId.QQBOT:types.QQBotEventType.QQ_BOT_STOP,
-        ServiceId.BROWSER:types.BrowserEventType.BROWSER_STOP,
-    }
-    event_type=event.get(service_id,"")
-    if not event_type:
-        return response.error(message=f"service {service_id} not found")
-    emit(BaseEvent(type=event_type))
-    return response.success(message="service stopped")
 
-@service_router.get("/qqbot/info")
-def get_qqbot_info():
-    service_registered=service_manager.is_registered(ServiceId.QQBOT)
-    if not service_registered:
-        return response.error(message="qqbot not registered")
-    if service_registered and service_manager.get_service_state(ServiceId.QQBOT)==ServiceState.RUNNING:
-        result = emit(BaseEvent(type=types.QQBotEventType.QQ_BOT_INFO))
-        if result:
-            return response.success(data=result)
-        else:
-            return response.error(message="qqbot 返回空值")
+@router.get("/{service_id}/ui", response_model=ApiResponse[ServiceUIDescription])
+async def service_ui(service_id: str) -> ApiResponse[ServiceUIDescription]:
+    """UI 描述，供前端生成控制面板。"""
+    sm = _sm()
+    try:
+        desc = sm.get_ui_service_description(service_id)
+    except Exception as e:
+        raise ApiError.internal(f"获取 UI 描述失败: {e}")
+    return success(ServiceUIDescription(**desc))
+
+def register_service(service_id: str,payload: Optional[Dict[str, Any]] = None):
+    sm = _sm()
+    if service_id == ServiceKeys.BROWSER:
+        from ...services.browser.browser import Browser
+        sm.register_service(ServiceKeys.BROWSER,Browser(**(payload or {})))
+    elif service_id == ServiceKeys.OBS:
+        from ...services.obs.client import OBSClient
+        sm.register_service(ServiceKeys.OBS,OBSClient(**(payload or {})))
+    elif service_id == ServiceKeys.QQBOT:
+        from ...services.qqbot.client import QQBotClient
+        sm.register_service(ServiceKeys.QQBOT,QQBotClient(**(payload or {})))
+    elif service_id == ServiceKeys.LIVE2D:
+        from ...services.live2d.views import Live2DView
+        sm.register_service(ServiceKeys.LIVE2D,Live2DView(**(payload or {})))
     else:
-        return response.error(message="qqbot not running")
+        raise ApiError.not_found(f"服务 {service_id}")
+
+
+@router.post("/{service_id}/start", response_model=ApiResponse[ServiceActionData])
+async def start_service(
+    service_id: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> ApiResponse[ServiceActionData]:
+    """启动服务。
+
+    服务启动可能拉起线程 / 建立连接，放在线程池执行。
+    """
+    sm = _sm()
+    if sm.is_registered(service_id):
+        raise ApiError.not_found(f"服务 {service_id} 已注册")
+
+    current = state_name(sm.get_service_state(service_id))
+    if current == "running":
+        raise ApiError.conflict(f"服务 {service_id} 已在运行")
+
+    #注册服务
+    register_service(service_id)
+    ok = await to_thread(sm.start_service, service_id, **(payload or {}))
+    if not ok:
+        raise ApiError.internal(f"服务 {service_id} 启动失败")
+
+    return success(
+        ServiceActionData(id=service_id, state="running"),
+        message=f"服务 {service_id} 已启动",
+    )
+
+
+@router.post("/{service_id}/stop", response_model=ApiResponse[ServiceActionData])
+async def stop_service(service_id: str) -> ApiResponse[ServiceActionData]:
+    """停止服务。"""
+    sm = _sm()
+    if not sm.is_registered(service_id):
+        raise ApiError.not_found(f"服务 {service_id}")
+
+    await to_thread(sm.stop_service, service_id)
+    return success(
+        ServiceActionData(id=service_id, state=state_name(sm.get_service_state(service_id))),
+        message=f"服务 {service_id} 已停止",
+    )
+
+
+@router.get("/{service_id}/config", response_model=ApiResponse[Dict[str, Any]])
+async def get_config(service_id: str) -> ApiResponse[Dict[str, Any]]:
+    """读取服务配置。"""
+    sm = _sm()
+    if not sm.is_registered(service_id):
+        raise ApiError.not_found(f"服务 {service_id}")
+    try:
+        cfg = sm.get_service_config(service_id)
+    except Exception as e:
+        raise ApiError.internal(f"读取配置失败: {e}")
+    if hasattr(cfg, "to_dict"):
+        cfg = cfg.to_dict()
+    return success({"id": service_id, "config": cfg})
+
+
+@router.put("/{service_id}/config", response_model=ApiResponse[Dict[str, Any]])
+async def update_config(
+    service_id: str,
+    payload: Dict[str,Any],
+) -> ApiResponse[Dict[str, Any]]:
+    """更新服务配置。"""
+    sm = _sm()
+
+    ok = await to_thread(
+        sm.update_service_config, service_id, payload or None
+    )
+    if not ok:
+        raise ApiError.internal(f"服务 {service_id} 配置更新失败")
+
+    cfg = sm.get_service_config(service_id)
+    if hasattr(cfg, "to_dict"):
+        cfg = cfg.to_dict()
+    return success({
+        "id": service_id,
+        "config": cfg
+    }, message="配置已更新")
+
+#应用服务配置需先保存配置，再停止服务，再启动服务
+@router.put("/{service_id}/config/apply", response_model=ApiResponse[Dict[str, Any]])
+async def apply_config(
+    service_id: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> ApiResponse[Dict[str, Any]]:
+    """应用服务配置。"""
+    sm = _sm()
+    if not sm.is_registered(service_id):
+        raise ApiError.not_found(f"服务 {service_id}")
+    try:
+        cfg = sm.set_service_config(service_id, payload or {})
+        await to_thread(sm.stop_service, service_id)
+        await to_thread(sm.start_service, service_id)
+    except Exception as e:
+        raise ApiError.internal(f"应用配置失败: {e}")
+    return success({
+        "id": service_id,
+        "config": cfg
+    }, message="配置已应用")

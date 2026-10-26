@@ -6,7 +6,7 @@ import httpx
 from websockets import connect,ClientConnection
 from websockets.exceptions import ConnectionClosed
 
-from ...tools.models import ToolFunction, ToolFunctionParameters
+from ...pipeline.models import ToolFunction, ToolFunctionParameters
 from ...events.data import BaseEvent
 from ...logger import logger
 from ..config import QQBotConfig
@@ -14,18 +14,20 @@ from .. import base
 from . import models
 from ...events import emit, types as eventType, on_event_class
 from ...manager.service.decorator import Service
-from .. import ServiceId
+from ..keys import ServiceKeys
 
 # QQ Bot API 端点
+#域名
+BASE_DOMAIN = "api.sgroup.qq.com"
 TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
-GATEWAY_URL = "https://api.sgroup.qq.com/gateway"  # 正式环境，沙箱用 sandbox.api.sgroup.qq.com/gateway
+GATEWAY_URL = f"https://{BASE_DOMAIN}/gateway"  # 正式环境，沙箱用 sandbox.api.sgroup.qq.com/gateway
 @on_event_class([
     (eventType.QQBotEventType.QQ_BOT_START, "start"),
     (eventType.QQBotEventType.QQ_BOT_STOP, "stop"),
     (eventType.QQBotEventType.QQ_BOT_INFO, "get_bot_info")
 ])
-@Service(id=ServiceId.QQBOT)
-class QQBotClient(base._BaseService):
+@Service(id=ServiceKeys.QQBOT)
+class QQBotClient(base.BaseService):
     """
         Reference:
             <a href="https://bot.q.qq.com/wiki/develop/api-v2/#">QQ Bot API V2</a>
@@ -77,9 +79,18 @@ class QQBotClient(base._BaseService):
                 parameters=ToolFunctionParameters(
                     type="object",
                     properties={
-                        "guild_id": {"type": "string", "description": "群ID"},
-                        "channel_id": {"type": "string", "description": "渠道ID"},
-                        "message": {"type": "string", "description": "要发送的消息"},
+                        "guild_id": {
+                            "type": "string", 
+                            "description": "群ID"
+                        },
+                        "channel_id": {
+                            "type": "string", 
+                            "description": "渠道ID"
+                        },
+                        "message": {
+                            "type": "string", 
+                            "description": "要发送的消息"
+                        },
                     },
                     required=["guild_id", "channel_id", "message"]
                 )
@@ -205,7 +216,7 @@ class QQBotClient(base._BaseService):
             raise ValueError("Config not initialized")
 
         if self.config.sandbox:
-            url = "https://sandbox.api.sgroup.qq.com/gateway"
+            url = f"https://sandbox.{BASE_DOMAIN}/gateway"
         
         headers = {"Authorization": f"QQBot {self.__token}"}
         logger.info(f"[QQBot] Requesting websocket URL from {url} with headers: {headers}")
@@ -403,11 +414,11 @@ class QQBotClient(base._BaseService):
         if self.__session is None:
             raise Exception("QQBot session not initialized")
         await self.__ensure_token()
-        url = f"https://api.sgroup.qq.com/v2/groups/{group_openid}/messages"
+        url = f"https://{BASE_DOMAIN}/v2/groups/{group_openid}/messages"
         if not self.config:
             raise ValueError("Config not initialized")
         if self.config.sandbox:
-            url = f"https://sandbox.api.sgroup.qq.com/v2/groups/{group_openid}/messages"
+            url = f"https://sandbox.{BASE_DOMAIN}/v2/groups/{group_openid}/messages"
         
         payload = {
             "content": content,
@@ -435,11 +446,11 @@ class QQBotClient(base._BaseService):
         if self.__session is None:
             raise Exception("QQBot session not initialized")
         await self.__ensure_token()
-        url = f"https://api.sgroup.qq.com/v2/users/{user_openid}/messages"
+        url = f"https://{BASE_DOMAIN}/v2/users/{user_openid}/messages"
         if not self.config:
             raise ValueError("Config not initialized")
         if self.config.sandbox:
-            url = f"https://sandbox.api.sgroup.qq.com/v2/users/{user_openid}/messages"
+            url = f"https://sandbox.{BASE_DOMAIN}/v2/users/{user_openid}/messages"
         
         payload = {
             "content": content,
@@ -462,7 +473,7 @@ class QQBotClient(base._BaseService):
         if self.bot_info is not None:
             return self.bot_info #避免多次调用接口
         await self.__ensure_token()
-        url = "https://api.sgroup.qq.com/users/@me"
+        url = f"https://{BASE_DOMAIN}/users/@me"
         response = await self.__session.get(url, headers=self.__headers())
         if response.status_code != 200:
             logger.error(f"[QQBot] Get self info failed: {response.status_code}")

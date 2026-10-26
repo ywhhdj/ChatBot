@@ -35,20 +35,39 @@ const textSpeedChange = (value: number) => {
   </MenuItem>
   <MenuItem
     icon="communication"
-    title=" WebSocket状态"
+    title="网络状态"
     size="small"
     :disabled="true"
   >
-  <div
-    class="ws-status"
-    :class="['ws-status', userStore.clientId ? 'connected' : 'disconnected']"
-  >
-    {{ userStore.clientId ? '√ 已连接' : ' X 未连接' }}
+  <div class="netwok-item">
+    <span>WebSocket 状态</span>
+    <span
+      class="ws-status"
+      :class="['ws-status', userStore.clientId ? 'connected' : 'disconnected']"
+    >
+      {{ userStore.clientId ? '√ 已连接' : ' X 未连接' }}
+    </span>
   </div>
+  <div class="netwok-item">
+    <span>重试次数</span>
+    <input
+      type="number"
+      value="3"
+    />
+  </div>
+
   </MenuItem>
 </template>
 
 <style scoped>
+.netwok-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
 .ws-status {
   text-align: center;
 }

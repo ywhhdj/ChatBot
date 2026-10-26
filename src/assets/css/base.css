@@ -2,26 +2,46 @@
 @import 'highlight.js/styles/atom-one-dark.css';
 
 :root {
-  /* 白色模式的背景和字体颜色*/
+  --bg-color: #ffffff;
+  --bg-color-foreground: #1f2937;;
+  --surface-color: #f3f4f6;
+  --surface-color-foreground: #1f2937;
+  --primary-color: #1890ff;
+  --text-color: #f9fafb;
+  --text-color-foreground: #10151b;
+  --primary-bg-color: rgba(0, 51, 255, 0.1);
+  --accent-bg: linear-gradient(90deg, var(--primary-bg-color) 0%, rgba(255, 255, 255, 0.1) 100%);
+  --accent-bg-foreground:linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.1) 100%);
+  --dialog-bg-color: linear-gradient(to top, rgba(0, 14, 39, 0.7) 0%, rgba(0, 14, 39, 0.6) 100%);
+}
+
+.dark {
+  --bg-color: #111827;
+  --bg-color-foreground: #ffffff;
+  --surface-color: #1f2937;
+  --surface-color-foreground: #f3f4f6;
+  --primary-color: #3b82f6;
+  --text-color: #10151b;
+  --text-color-foreground: #f9fafb;
+  --primary-bg-color: rgba(59, 130, 246, 0.1);
+}
+
+:root {
   --vt-c-black-light: #000;
-  --vt-c-white-light: #fff;
+  --text-color: #fff;
   --vt-c-white-soft-light: #f5f5f5;
   --vt-c-white-mute-light: #e5e5e5;
 
-  /*黑夜模式的背景和字体颜色*/
   --vt-c-black-dark: #1a1a1a;
   --vt-c-white-dark: #f5f5f5;
   --vt-c-white-mute-dark: #e5e5e5;
-
   --accent-bg:linear-gradient(90deg, rgba(0, 51, 255, 0.1) 0%, rgba(255, 255, 255, 0.1) 100%);
-
-
   --tw-translate-y: 0;
   --tw-rotate: 0;
   --tw-skew-y: 0;
   --tw-scale-y: 1;
   --tw-scale-x: 1;
-  --accent-color: #79d9ff;
+  --accent-color: var(--primary);
   --font-sans: , -apple-system, BlinkMacSystemFont, "Microsoft YaHei",
     sans-serif;
   --font-mono: , -apple-system, BlinkMacSystemFont, "Microsoft YaHei",
@@ -50,17 +70,15 @@
   font-weight: normal;
 }
 
+@font-face {
+  font-family: 'Maoken Assorted Sans';
+  src: url('/static/fonts/MaokenAssorted.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
-  /* 字体配置 */
-  --font-sans: , -apple-system, BlinkMacSystemFont, "Microsoft YaHei",
-    sans-serif;
-  --font-mono: , -apple-system, BlinkMacSystemFont, "Microsoft YaHei",
-    sans-serif;
-
-  /* 颜色配置 */
-  --color-brand: var(--accent-color);
-
-  /* 动画配置 */
   --animate-blob: blob 7s infinite;
   --animate-fade-in-up: fadeInUp 0.8s ease-out forwards;
 }
@@ -72,12 +90,6 @@
 
   100% {
     transform: rotate(360deg);
-  }
-}
-
-@layer base {
-  html {
-    font-family: var(--font-sans);
   }
 }
 
@@ -96,15 +108,6 @@ body {
   overflow-y: auto;
 }
 
-@font-face {
-  font-family: 'Maoken Assorted Sans';
-  src: url('/fonts/MaokenAssorted.woff2') format('woff2');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* 小屏竖屏时，body 作为旋转容器 */
 @media (max-width: 768px) and (orientation: portrait) {
   body.force-landscape {
     width: 100vh;

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 @dataclass
 class DomElement:
@@ -39,3 +39,4 @@ class DistilledDOM:
     compression_ratio: float
     chunks: List[DomChunk]
     stats: Dict[str, int] = field(default_factory=dict)
+    version: Optional[int] = None

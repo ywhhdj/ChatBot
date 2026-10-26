@@ -1,11 +1,18 @@
 /**@type{import('tailwindcss').Config}*/
-module.exports = {
-  content: ["./index.html", "./src/**/*.{vue,js,ts,jsx,tsx}",], theme: {
+import type { Config } from "tailwindcss";
+
+export default {
+  content: ["./index.html", "./src/**/*.{vue,js,ts,jsx,tsx}"],
+  darkMode: "class",
+  theme: {
     extend: {
       colors: {
-        primary: '#1890ff',// 扩展主题色 
-      }
+        background: "var(--bg-color)",
+        surface: "var(--surface-color)",
+        primary: "var(--primary-color)",
+        text: "var(--text-color)",
+        primaryBg: "var(--primary-bg-color)",
+      },
     },
   },
-  plugins: [],
-}
+} satisfies Config;

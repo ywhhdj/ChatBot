@@ -22,6 +22,9 @@ class AppEventType:
         KEYBOARD_START = "keyboard.press"
         KEYBOARD_STOP = "keyboard.stop"
 
+class PptEventType:
+    PPT_STOP = "ppt.stop"
+
 class Live2DEventType: #用事件名: 方法名定义
     LIVE2D_START = "live2d.start"
     LIVE2D_DRAW = "live2d.draw"
@@ -72,6 +75,21 @@ class BrowserEventType:
     BROWSER_STOP = "browser.stop"
     BROWSER_OPEN_PAGE = "browser.open_page"
 
+class ChatStreamEventType:
+    """TD6：聊天流式事件（前端工具卡片 / phase 展示）。
+
+    命名与 `PipelineEventType.*` 区分开：
+    后者是管道内部事件（text_delta / audio_chunk 这类**数据**流），
+    这里是**元信息**流（消息开始、phase 变化、工具开始/结束）。
+    前端两类都订阅，但用途不同。
+    """
+
+    MESSAGE_START = "chat.message.start"
+    PHASE = "chat.phase"
+    TOOL_START = "chat.tool.start"
+    TOOL_END = "chat.tool.end"
+    MESSAGE_END = "chat.message.end"
+
 class WebSocketEventType:
     CONNECT = "connect"
     PRIVATE = "private"
@@ -83,6 +101,15 @@ class WebSocketEventType:
     RECORD_START = "record.start"
     RECORD_STOP = "record.stop"
     RECORD_CHUNK = "record.audio_chunk"
+    GET_AUDIT_LOGS = "get_audit_logs"
+
+class ToolEventType:
+    TOOL_CALL_START   = "tool.call.start"      # 开始调用某个工具
+    TOOL_CALL_RUNNING = "tool.call.running"     # 工具执行中（可携带进度）
+    TOOL_CALL_SUCCESS = "tool.call.success"     # 工具执行成功
+    TOOL_CALL_ERROR   = "tool.call.error"       # 工具执行失败
+    TOOL_CALL_SKIPPED = "tool.call.skipped"     # 工具被跳过
+    TOOL_CALL_FINISH  = "tool.call.finish"      # 一组工具全部结束（附带摘要）
 
 class DownloadEventType:
     STARTED = "download_started"
@@ -90,3 +117,6 @@ class DownloadEventType:
     COMPLETED = "download_completed"
     FAILED = "download_failed"
     ERROR = "download_error"
+
+class CharacterEventType:
+    MOOD_CHANGED = "character.mood_changed"

@@ -1,14 +1,27 @@
-from dataclasses import asdict
-from difflib import SequenceMatcher
-import hashlib
-import json
-import re
-from typing import Any, Dict, List, Optional
-from lxml import html as lxml_html
+"""7 级 DOM 蒸馏器：把原始页面压成 LLM 可消费的交互地图。
 
+    原始 HTML (10万 token)
+        ▼ 1. 删不可见节点（script/style/display:none/aria-hidden）
+        ▼ 2. 删被遮挡元素（z-index + bounds 检测）
+        ▼ 3. 只保留可交互元素
+        ▼ 4. 折叠冗余容器（无属性纯 div 包装）
+        ▼ 5. 去重（同 URL / 高相似文本）
+        ▼ 6. 编唯一 ID + 稳定 CSS selector
+        ▼ 7. 按视口分块 + 相似度过滤
+    精简交互地图 (500~5000 token)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
+
+from ...runtime import RuntimePath, is_dev_mode
 from ...utils.file import read_text
-from ...runtime import RuntimePath
-from .models import DistilledDOM,DomElement,DomChunk
+from .models import DistilledDOM, DomChunk, DomElement
 
 INTERACTIVE_TAGS = {
     "a", "button", "input", "select", "textarea",
@@ -22,22 +35,16 @@ NOISE_TAGS = {
     "picture", "source", "track", "area",
 }
 
-class DOMDistiller:
-    _DISTILL_JS=None
-    print(RuntimePath.get_scripts_path("./distiller.js"))
-    """
-    7 级 DOM 蒸馏器
+INTERACTIVE_ROLES = {
+    "button", "link", "menuitem", "tab", "switch",
+    "checkbox", "radio", "option",
+}
 
-    原始 HTML (10万 token)
-        ▼ 1. 删不可见节点（script/style/display:none/aria-hidden）
-        ▼ 2. 删被遮挡元素（z-index + bounds 检测）
-        ▼ 3. 只保留可交互元素
-        ▼ 4. 折叠冗余容器（无属性纯 div 包装）
-        ▼ 5. 去重（同 URL / 高相似文本）
-        ▼ 6. 编唯一 ID + 稳定 CSS selector
-        ▼ 7. 按视口分块 + 相似度过滤
-    精简交互地图 (500~5000 token)
-    """
+SIMILARITY_WINDOW = 60
+
+
+class DOMDistiller:
+    _DISTILL_JS: Optional[str] = None
 
     def __init__(
         self,
@@ -51,89 +58,72 @@ class DOMDistiller:
         self.max_text_length = max_text_length
         self.keep_semantic_tags = keep_semantic_tags
 
+    # ═══════════════════════════════════════
+    #  入口
+    # ═══════════════════════════════════════
+
     def distill_html(
         self,
         html: str,
         url: str = "",
         title: str = "",
-        viewport: Dict[str, int]|None = None,
+        viewport: Dict[str, int] | None = None,
     ) -> DistilledDOM:
+        """从静态 HTML 蒸馏（无浏览器时用）。"""
+        from lxml import html as lxml_html
+
         tree = lxml_html.fromstring(html)
         bodies = tree.findall(".//body")
-        if len(bodies) > 0:
-            body = bodies[0]
-        else:
-            body = tree
+        body = bodies[0] if bodies else tree
 
-        all_elements = list(body.iter())
+        # S40：过滤注释 / PI 节点 —— 它们的 tag 是函数不是字符串
+        all_elements = [e for e in body.iter() if isinstance(e.tag, str)]
         total_original = len(all_elements)
 
-        # 删噪声标签
-        elements=[]
-        for e in all_elements:
-            if e.tag not in NOISE_TAGS:
-                elements.append(e)
+        # ① 删噪声标签
+        elements = [e for e in all_elements if e.tag not in NOISE_TAGS]
 
-        # 删不可见：aria-hidden + CSS display:none/visibility:hidden + input[type=hidden]
+        # ① 删不可见：aria-hidden + inline style + input[type=hidden]
         elements = [e for e in elements if e.get("aria-hidden") != "true"]
         elements = [e for e in elements if not self.__is_style_hidden(e)]
         elements = [e for e in elements if (e.get("type") or "").lower() != "hidden"]
 
-        # 传播隐藏：父元素有 display:none / aria-hidden 时子元素也视为隐藏
-        hidden_ancestors = set()
-        for el in elements:
-            parent = el.getparent()
-            while parent is not None:
-                if id(parent) in hidden_ancestors:
-                    hidden_ancestors.add(id(el))
-                    break
-                if self.__is_style_hidden(parent) or parent.get("aria-hidden") == "true":
-                    hidden_ancestors.add(id(el))
-                    break
-                parent = parent.getparent()
-        elements = [e for e in elements if id(e) not in hidden_ancestors]
+        # 传播隐藏：祖先隐藏则后代也隐藏
+        elements = [e for e in elements if not self.__has_hidden_ancestor(e)]
 
-        # 模拟 z-index 遮挡检测（简化版：基于 DOM 顺序 + aria-modal）
+        # ② 遮挡
         elements = self.__filter_obscured(elements)
 
-        # 只保留可交互
+        # ③ 只保留可交互
         elements = self.__filter_interactive(elements)
 
-        # 转 DomElement
-        dom_elements=[]
-        for idx,e in enumerate(elements):
-            dom_elements.append(self.__element_to_dom(e,idx))
-        # 后处理
+        dom_elements = [self.__element_to_dom(e, i) for i, e in enumerate(elements)]
         return self.__post_process(dom_elements, url, title, total_original)
 
-    def __is_style_hidden(self, el) -> bool:
-        """解析 style 属性，检测 display:none / visibility:hidden / opacity:0"""
-        style = (el.get("style") or "").lower().replace(" ", "")
-        if "display:none" in style:
-            return True
-        if "visibility:hidden" in style:
-            return True
-        if "opacity:0" in style:
-            return True
-        # hidden 属性
-        if el.get("hidden") is not None:
-            return True
-        return False
-
     async def distill_page(self, page, url: str = "", title: str = "") -> DistilledDOM:
-        if self._DISTILL_JS is None:
-            self._DISTILL_JS = read_text(RuntimePath.get_scripts_path("distiller.js"))
-        raw = await page.evaluate(self._DISTILL_JS)
+        """在真实页面上执行注入脚本蒸馏（浏览器路径）。"""
+        if type(self)._DISTILL_JS is None:
+            type(self)._DISTILL_JS = self.__load_script("distiller.js")
+        raw = await page.evaluate(type(self)._DISTILL_JS)
         return self.__distill_from_js_result(raw)
+
+    def __load_script(self, name: str) -> str:
+        if is_dev_mode():
+            js_path = Path(__file__).parent / "scripts" / name
+        else:
+            js_path = RuntimePath.get_scripts_path(name)
+
+        content = read_text(js_path)
+        if content is None:
+            raise FileNotFoundError(f"蒸馏脚本缺失: {js_path}")
+        return content
 
     def __distill_from_js_result(self, raw: Dict) -> DistilledDOM:
         url = raw.get("url", "")
         title = raw.get("title", "")
         total_original = raw.get("total_original", 0)
-        elements_raw = raw.get("elements", [])
-        elements=[]
-        for idx,e in enumerate(elements_raw):
-            elements.append(self.__dict_to_dom(e,idx))
+        elements_raw = raw.get("elements", []) or []
+        elements = [self.__dict_to_dom(e, i) for i, e in enumerate(elements_raw)]
         return self.__post_process(elements, url, title, total_original)
 
     # 公开别名（Browser 类调用）
@@ -144,60 +134,84 @@ class DOMDistiller:
     #  各级过滤
     # ═══════════════════════════════════════
 
+    def __is_style_hidden(self, el) -> bool:
+        """解析 style 属性，检测 display:none / visibility:hidden / opacity:0"""
+        style = (el.get("style") or "").lower().replace(" ", "")
+        if "display:none" in style:
+            return True
+        if "visibility:hidden" in style:
+            return True
+        if "opacity:0" in style:
+            return True
+        if el.get("hidden") is not None:
+            return True
+        return False
+
+    def __has_hidden_ancestor(self, el) -> bool:
+        """祖先隐藏 → 自己也隐藏（原实现用 id() 集合，遍历重复）"""
+        cur = el.getparent()
+        while cur is not None:
+            if isinstance(cur.tag, str) and (
+                self.__is_style_hidden(cur) or cur.get("aria-hidden") == "true"
+            ):
+                return True
+            cur = cur.getparent()
+        return False
+
     def __filter_obscured(self, elements: List[Any]) -> List[Any]:
-        """② 遮挡检测：有 aria-modal=true 的弹窗出现时，屏蔽其后的同级元素"""
-        filtered = []
-        in_modal = False
+        """② 遮挡检测：S36 原实现三个分支都 append，等于没过滤。
+
+        有 modal（aria-modal=true 或 <dialog>）时，页面其余部分被遮住，
+        只保留 modal 及其后代。
+        """
+        modal_ids: Set[int] = set()
         for el in elements:
-            # 检测 modal 开始
             if el.get("aria-modal") == "true" or el.tag in ("dialog",):
-                in_modal = True
-                filtered.append(el)
-                continue
-            # modal 内的元素保留
-            if in_modal:
-                # 简化的 modal 结束检测：遇到 body 直接子元素且不是 dialog
-                parent = el.getparent()
-                if parent is not None and parent.tag == "body" and el.tag != "dialog":
-                    in_modal = False
-                    filtered.append(el)
-                else:
-                    filtered.append(el)
-                continue
-            filtered.append(el)
-        return filtered
+                modal_ids.add(id(el))
+
+        if not modal_ids:
+            return elements
+
+        keep = []
+        for el in elements:
+            cur = el
+            while cur is not None:
+                if id(cur) in modal_ids:
+                    keep.append(el)
+                    break
+                cur = cur.getparent()
+        return keep
 
     def __filter_interactive(self, elements: List[Any]) -> List[Any]:
-        """只保留可交互元素或有语义信息的元素"""
+        """③ 只保留可交互元素或有语义信息的元素"""
         result = []
         for el in elements:
             tag = el.tag.lower() if isinstance(el.tag, str) else ""
             if tag in INTERACTIVE_TAGS:
                 result.append(el)
                 continue
-            # 有 onclick
             if el.get("onclick"):
                 result.append(el)
                 continue
-            # 有 aria 角色
             role = el.get("role", "")
-            if role and role in {"button", "link", "menuitem", "tab", "switch", "checkbox", "radio", "option"}:
+            if role and role in INTERACTIVE_ROLES:
                 result.append(el)
                 continue
-            # 有 aria-label 或 aria-labelledby
             if el.get("aria-label") or el.get("aria-labelledby"):
                 result.append(el)
                 continue
-            # 有 tabindex
             tab = el.get("tabindex")
             if tab and tab != "-1":
                 result.append(el)
                 continue
-            # contenteditable
             if el.get("contenteditable") == "true":
                 result.append(el)
                 continue
         return result
+
+    # ═══════════════════════════════════════
+    #  后处理（④⑤⑥⑦）
+    # ═══════════════════════════════════════
 
     def __post_process(
         self,
@@ -207,13 +221,10 @@ class DOMDistiller:
     ) -> DistilledDOM:
         # ④ 折叠冗余容器
         elements = self.__collapse_redundant(elements)
-
         # ⑤ 去重
         elements = self.__deduplicate(elements)
-
         # ⑥ 唯一 ID + 稳定 selector
         elements = self.__assign_stable_ids(elements)
-
         # ⑦ 分块
         chunks = self._chunk_elements(elements)
 
@@ -224,11 +235,11 @@ class DOMDistiller:
             "total_original": total_original,
             "after_filter": total_after,
             "chunks": len(chunks),
-            "removed_by_noise": total_original - len(elements),
+            "removed": max(total_original - total_after, 0),
         }
 
         return DistilledDOM(
-            url=url, 
+            url=url,
             title=title,
             total_original_elements=total_original,
             total_after_filter=total_after,
@@ -238,7 +249,8 @@ class DOMDistiller:
         )
 
     def __collapse_redundant(self, elements: List[DomElement]) -> List[DomElement]:
-        """移除无语义的纯包装 div/span/section/article"""
+        """④ 移除无语义的纯包装容器"""
+        layout_tags = {"div", "span", "section", "article", "main", "header", "footer"}
         keep = []
         for el in elements:
             has_semantics = bool(
@@ -247,47 +259,45 @@ class DOMDistiller:
             )
             if has_semantics:
                 keep.append(el)
-            elif el.tag in ("div", "span", "section", "article", "main", "header", "footer"):
-                # 纯布局容器，丢弃
+            elif el.tag in layout_tags:
                 continue
             else:
                 keep.append(el)
         return keep
 
     def __deduplicate(self, elements: List[DomElement]) -> List[DomElement]:
-        seen_hashes: set[str] = set()
+        """⑤ 去重：同指纹 / 高相似文本 / 同 href 路径"""
+        seen_hashes: Set[str] = set()
         seen_texts: List[str] = []
-        # 按 href 前缀去重（同一搜索页多个链接）
-        seen_href_prefixes: set[str] = set()
-        deduped = []
+        seen_href_paths: Set[str] = set()
+        deduped: List[DomElement] = []
 
         for el in elements:
-            # 5a: 完全同指纹（同文本+同href+同aria）
+            # 5a 完全同指纹
             fp = (el.text + "|" + el.href + "|" + el.aria_label)[:200]
             h = hashlib.md5(fp.encode("utf-8", errors="ignore")).hexdigest()[:12]
             if h in seen_hashes:
                 continue
             seen_hashes.add(h)
 
-            # 5b: 高相似文本（如 "加入购物车" vs "立即购买" 同商品）
-            skip = False
-            for prev in seen_texts:
-                if prev and el.text and len(el.text) > 2:
-                    ratio = SequenceMatcher(None, el.text[:60], prev[:60]).ratio()
-                    if ratio > self.similarity_threshold:
-                        skip = True
-                        break
-            if skip:
-                continue
-
-            # 5c: 同 href 前缀去重（/search?q=手机 vs /search?q=手机）
-            if el.href:
-                # 去掉查询参数后比较
-                clean_href = el.href.split("?")[0].rstrip("/")
-                if clean_href in seen_href_prefixes:
-                    # 同路径只留第一个
+            # 5b 高相似文本（S39：只在最近窗口内比对）
+            if el.text and len(el.text) > 2:
+                skip = False
+                for prev in seen_texts[-SIMILARITY_WINDOW:]:
+                    if prev:
+                        ratio = SequenceMatcher(None, el.text[:60], prev[:60]).ratio()
+                        if ratio > self.similarity_threshold:
+                            skip = True
+                            break
+                if skip:
                     continue
-                seen_href_prefixes.add(clean_href)
+
+            # 5c 同 href 路径（去查询参数）只留第一个
+            if el.href:
+                clean_href = el.href.split("?")[0].rstrip("/")
+                if clean_href in seen_href_paths:
+                    continue
+                seen_href_paths.add(clean_href)
 
             seen_texts.append(el.text)
             deduped.append(el)
@@ -295,30 +305,38 @@ class DOMDistiller:
         return deduped
 
     def __assign_stable_ids(self, elements: List[DomElement]) -> List[DomElement]:
-        seen_selectors: Dict[str, int] = {}
+        """⑥ 稳定 selector + 唯一 uid"""
+        tag_counter: Dict[str, int] = {}
         for i, el in enumerate(elements):
-            # selector 生成
-            if el.selector.startswith("#"):
-                base = el.selector[1:]
+            sel = (el.selector or "").strip()
+
+            if sel.startswith("#") or sel.startswith(".") \
+                    or "." in sel or "[" in sel:
+                # JS 已经给了可用选择器（#id / tag.cls / 带属性）— 原样保留
+                base = sel
             elif el.aria_label:
                 base = f'{el.tag}[aria-label="{el.aria_label[:30]}"]'
+            elif el.xpath:
+                # 有 xpath 时优先用它（Playwright 支持 xpath= 前缀）
+                base = f"xpath={el.xpath}"
             else:
-                # nth-of-type 兜底
-                tag = el.tag
-                seen_selectors[tag] = seen_selectors.get(tag, 0) + 1
-                base = f"{tag}:nth-of-type({seen_selectors[tag]})"
+                tag_counter[el.tag] = tag_counter.get(el.tag, 0) + 1
+                base = f"{el.tag}:nth-of-type({tag_counter[el.tag]})"
 
-            el.selector = base[:80]
+            el.selector = base[:200]
             el.uid = f"pw-{i:03d}"
         return elements
 
     def _chunk_elements(self, elements: List[DomElement]) -> List[DomChunk]:
-        # 视口内优先排序
+        """⑦ 视口内优先排序 + 固定大小分块"""
         ordered = sorted(elements, key=lambda e: (not e.in_viewport, e.z_index))
-        chunks = []
+        chunks: List[DomChunk] = []
         for i in range(0, len(ordered), self.max_chunk_size):
             batch = ordered[i:i + self.max_chunk_size]
-            est = sum(max(1, len(f"{e.text}{e.aria_label}{e.href}{e.selector}") // 4) for e in batch)
+            est = sum(
+                max(1, len(f"{e.text}{e.aria_label}{e.href}{e.selector}") // 4)
+                for e in batch
+            )
             chunks.append(DomChunk(
                 chunk_index=len(chunks),
                 total_chunks=0,
@@ -329,12 +347,14 @@ class DOMDistiller:
             c.total_chunks = len(chunks)
         return chunks
 
+    # ═══════════════════════════════════════
+    #  元素转换
+    # ═══════════════════════════════════════
 
     def __element_to_dom(self, el, idx: int) -> DomElement:
         tag = el.tag.lower() if isinstance(el.tag, str) else "unknown"
-        text = (el.text_content() or "").strip().replace("\n", " ")[: self.max_text_length]
-        # 去多余空格
-        text = re.sub(r"\s+", " ", text)
+        text = (el.text_content() or "").strip().replace("\n", " ")
+        text = re.sub(r"\s+", " ", text)[: self.max_text_length]
 
         href = el.get("href", "") or ""
         aria = el.get("aria-label", "") or el.get("alt", "") or ""
@@ -342,28 +362,13 @@ class DOMDistiller:
         input_type = el.get("type", "") or ""
         role = el.get("role", "") or ""
 
-        # CSS selector 构建
         if el.get("id"):
             selector = f"#{el.get('id')}"
         elif el.get("class"):
-            cls = el.get("class", "").strip().split()[0]
+            cls = (el.get("class", "") or "").strip().split()[0] if el.get("class") else ""
             selector = f"{tag}.{cls}" if cls else tag
         else:
             selector = tag
-
-        # XPath
-        xpath = self.__build_xpath(el)
-
-        # 指纹
-        fp = f"{text}|{href}|{aria}"
-
-        # 深度
-        depth = self.__calc_depth(el)
-
-        # 可见性（input type=hidden 视为不可见）
-        is_visible = True
-        if input_type == "hidden":
-            is_visible = False
 
         return DomElement(
             uid=f"el_{idx}",
@@ -375,42 +380,45 @@ class DOMDistiller:
             input_type=input_type,
             role=role,
             selector=selector[:80],
-            xpath=xpath,
-            depth=depth,
-            is_visible=is_visible,
+            xpath=self.__build_xpath(el),
+            depth=self.__calc_depth(el),
+            is_visible=input_type != "hidden",
             is_interactive=(tag in INTERACTIVE_TAGS),
-            similarity_hash=fp[:200],
+            similarity_hash=f"{text}|{href}|{aria}"[:200],
         )
 
     def __dict_to_dom(self, raw: Dict, idx: int) -> DomElement:
         return DomElement(
             uid=raw.get("uid", f"el_{idx}"),
             tag=raw.get("tag", ""),
-            text=raw.get("text", "")[: self.max_text_length],
-            href=raw.get("href", "")[:200],
-            aria_label=raw.get("aria_label", "")[:120],
-            placeholder=raw.get("placeholder", ""),
-            input_type=raw.get("input_type", ""),
-            role=raw.get("role", ""),
-            selector=raw.get("selector", "")[:80],
-            xpath=raw.get("xpath", ""),
-            rect=raw.get("rect", {}),
-            in_viewport=raw.get("in_viewport", True),
-            z_index=raw.get("z_index", 0),
-            is_visible=raw.get("is_visible", True),
-            is_interactive=raw.get("is_interactive", True),
-            similarity_hash=raw.get("similarity_hash", "")[:200],
+            text=(raw.get("text", "") or "")[: self.max_text_length],
+            href=(raw.get("href", "") or "")[:200],
+            aria_label=(raw.get("aria_label", "") or "")[:120],
+            placeholder=raw.get("placeholder", "") or "",
+            input_type=raw.get("input_type", "") or "",
+            role=raw.get("role", "") or "",
+            selector=(raw.get("selector", "") or "")[:200],
+            xpath=raw.get("xpath", "") or "",
+            rect=raw.get("rect", {}) or {},
+            in_viewport=bool(raw.get("in_viewport", True)),
+            z_index=int(raw.get("z_index", 0) or 0),
+            is_visible=bool(raw.get("is_visible", True)),
+            is_interactive=bool(raw.get("is_interactive", True)),
+            similarity_hash=(raw.get("similarity_hash", "") or "")[:200],
         )
 
     def __build_xpath(self, el) -> str:
-        parts = []
-        cur: Optional[Any] = el
+        parts: List[str] = []
+        cur = el
         while cur is not None and cur.getparent() is not None:
             parent = cur.getparent()
             if parent is None:
                 break
-            siblings = [s for s in parent if s.tag == cur.tag]  # type: ignore
-            idx = siblings.index(cur) + 1 if siblings else 1
+            siblings = [s for s in parent if isinstance(s.tag, str) and s.tag == cur.tag]
+            try:
+                idx = siblings.index(cur) + 1
+            except ValueError:
+                idx = 1
             parts.append(f"{cur.tag}[{idx}]")
             cur = parent
         return "/" + "/".join(reversed(parts))
@@ -418,49 +426,55 @@ class DOMDistiller:
     def __calc_depth(self, el) -> int:
         depth = 0
         cur = el
-        while cur.getparent() is not None:
+        while cur is not None and cur.getparent() is not None:
             depth += 1
-            cur = cur.getparent()  # type: ignore
+            cur = cur.getparent()
         return depth
 
+    # ═══════════════════════════════════════
+    #  输出
+    # ═══════════════════════════════════════
+
     def format_for_llm(self, dom: DistilledDOM, chunk_index: int = 0) -> str:
+        """把某个分块渲染成 LLM 可直接读的文本。
+
+        每个元素一行：`uid | tag | 文本/aria | selector`。
+        LLM 输出命令时用 uid，执行侧再映射回 selector。
+        """
+        if not dom.chunks:
+            return f"# 页面: {dom.title or dom.url}\n# (无可交互元素)"
+
         if chunk_index >= len(dom.chunks):
             chunk_index = 0
         chunk = dom.chunks[chunk_index]
+
         lines = [
             f"# 页面: {dom.title or dom.url}",
             f"# URL: {dom.url}",
-            f"# 区块 {chunk.chunk_index+1}/{chunk.total_chunks} (~{chunk.total_tokens_estimate} tokens)",
+            f"# 分块: {chunk.chunk_index + 1}/{chunk.total_chunks}"
+            f" (共 {dom.total_after_filter} 个可交互元素,"
+            f"压缩率 {dom.compression_ratio * 100:.1f}%)",
+            "# 格式: uid | tag | 文本 | selector",
             "",
-            "可用元素：",
         ]
-        for el in chunk.elements:
-            parts = [f"[{el.uid}]", f"<{el.tag}>"]
-            if el.text:
-                parts.append(f'text="{el.text}"')
-            if el.aria_label:
-                parts.append(f'aria="{el.aria_label}"')
-            if el.placeholder:
-                parts.append(f'placeholder="{el.placeholder}"')
-            if el.href:
-                parts.append(f'href="{el.href[:80]}"')
-            if el.input_type:
-                parts.append(f'type="{el.input_type}"')
-            parts.append(f"sel={el.selector}")
-            lines.append("  " + " ".join(parts))
+        for e in chunk.elements:
+            label = e.text or e.aria_label or e.placeholder or e.input_type or e.role
+            if not label and e.href:
+                label = e.href
+            extra = []
+            if e.href:
+                extra.append(f"href={e.href[:60]}")
+            if e.input_type:
+                extra.append(f"type={e.input_type}")
+            if e.placeholder:
+                extra.append(f"ph={e.placeholder[:30]}")
+            tail = (" " + " ".join(extra)) if extra else ""
+            vp = "" if e.in_viewport else " (视口外)"
+            lines.append(f"{e.uid} | {e.tag} | {label}{tail}{vp}")
 
-        # 其他区块摘要
-        if len(dom.chunks) > 1:
-            lines.append("")
-            lines.append("[其他区块摘要]")
-            for c in dom.chunks:
-                if c.chunk_index != chunk_index:
-                    tags = [e.tag for e in c.elements[:5]]
-                    lines.append(f"  区块 {c.chunk_index+1}: {len(c.elements)} 元素 ({', '.join(tags)}…)")
         return "\n".join(lines)
 
-    def to_json(self, dom: DistilledDOM) -> str:
-        return json.dumps(asdict(dom), ensure_ascii=False, indent=2)
-
-
-
+    def format_all_for_llm(self, dom: DistilledDOM) -> str:
+        return "\n\n".join(
+            self.format_for_llm(dom, i) for i in range(len(dom.chunks))
+        )

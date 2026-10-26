@@ -41,10 +41,10 @@ def build_pipline_json_args(parser: argparse.ArgumentParser):
 
 def build_service_config_args(parser: argparse.ArgumentParser):
     #归属子命令generate:service
-    output_path="modules/defaults/services.yaml"
+    output_path="resources/defaults/services.yaml"
     subparsers = parser.add_subparsers(dest="subcommand", help="子命令")
     parser = subparsers.add_parser("generate:service", 
-        help="生成 modules/config/service.yaml 配置模板",
+        help="生成 services.yaml 配置模板",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )

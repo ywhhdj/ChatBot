@@ -1,60 +1,69 @@
+"""用户输入上下文（单例，跨事件循环安全）"""
+
 from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections import deque
 from datetime import datetime
-from threading import Lock
 from typing import Any, Callable, Deque, Dict, List, Optional
 from uuid import uuid4
-from ..types.common import Role
-from ..types.memory.context import Message
 
-class SafeSessionContext:
-    def __init__(self, session_id: str, max_history: int = 150):
-        self.session_id = session_id
-        self._lock = asyncio.Lock()
-        self._history = deque(maxlen=max_history)
-        self._closed = False
+from ..models import MessageContext, Role
 
-    async def add_interaction(
-        self,
-        user_msg: str,
-        system_response: str,
-        commands: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        if self._closed:
-            raise RuntimeError("Session already closed")
-        async with self._lock:
-            self._history.append({
-                "timestamp": datetime.now().isoformat(),
-                "user": user_msg[:500],
-                "response": system_response[:1000],
-                "commands": (commands or [])[:10],
-                "metadata": metadata or {},
-                "token_count": self._estimate_tokens(user_msg + system_response),
-            })
 
-    def _estimate_tokens(self, text: str) -> int:
-        chinese = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-        return int(chinese * 1.5 + (len(text) - chinese) * 0.33)
+class _LoopAwareLock:
+    """按事件循环惰性创建的 asyncio.Lock（C1 / CD1）。
 
-    def get_recent_history(self, n: int = 10) -> List[Dict[str, Any]]:
-        return list(self._history)[-n:]
+    - 首次 await 时绑定当前 running loop
+    - 若后续在另一个 loop 上使用，自动换成该 loop 专属的锁
+    - 没有 running loop 时（纯同步上下文）退化为 threading.Lock
+    """
 
-    async def cleanup(self) -> None:
-        async with self._lock:
-            self._closed = True
-            self._history.clear()
+    def __init__(self) -> None:
+        self._locks: Dict[int, asyncio.Lock] = {}
+        self._guard = threading.Lock()
+
+    def _current_loop_key(self) -> Optional[int]:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        return id(loop)
+
+    def _get_async_lock(self, key: int) -> asyncio.Lock:
+        with self._guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[key] = lock
+            return lock
+
+    async def __aenter__(self):
+        key = self._current_loop_key()
+        if key is None:
+            raise RuntimeError("[UserContext] 只能在有运行中事件循环的线程里 await 本锁")
+        await self._get_async_lock(key).acquire()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        key = self._current_loop_key()
+        if key is not None:
+            lock = self._locks.get(key)
+            if lock is not None and lock.locked():
+                lock.release()
+        return False
 
 
 class UserContext:
+    """保存本轮与近期的用户/助手消息，并按需接入记忆系统。"""
+
     _instance = None
-    _lock = Lock()
+    _cls_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
-        with cls._lock:
+        with cls._cls_lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
         return cls._instance
@@ -68,39 +77,59 @@ class UserContext:
             return
         self.max_message = max(20, int(max_message))
         self.compressed_callback = compressed_callback
-        self._messages: Deque[Message] = deque(maxlen=self.max_message * 2)
+        self._messages: Deque[MessageContext] = deque(maxlen=self.max_message * 2)
         self._memory_system = None
-        self.__lock = asyncio.Lock()
+        self.__lock = _LoopAwareLock()
         self._initialized = True
 
-    async def init_memory(
+    # ---------- 记忆系统 ----------
+
+    async def init_memory_async(
         self,
         session_id: Optional[str] = None,
         llm_client: Any = None,
         is_db: bool = False,
     ) -> None:
+        """可等待的记忆初始化"""
         from ..memory.main import HybridMemorySystem
-        self._memory_system = HybridMemorySystem(llm_client=llm_client, user_is_database=is_db)
+
+        if self._memory_system is not None:
+            return
+        self._memory_system = HybridMemorySystem(
+            llm_client=llm_client,
+            user_is_database=is_db
+        )
         await self.build_memory_messages(session_id=session_id or "default", query="")
 
-    def get_current_messages(self):
-        messgess=[]
-        for item in reversed(self._messages):
-            if item.role == Role.USER or item.role == Role.ASSISTANT:
-                messgess.append({
-                    "role": item.role,
-                    "content": item.content,
+    def get_current_messages(self) -> List[Dict[str, str]]:
+        """给 LLM 用的近期消息（role/content 形态）。"""
+        messages: List[Dict[str, str]] = []
+        for item in self._messages:
+            if item.role in (Role.USER, Role.ASSISTANT):
+                messages.append({
+                    "role": item.role, 
+                    "content": item.content
                 })
-        return messgess
+        return messages
+
+    def get_memory_snippets(self) -> List[Dict[str, str]]:
+        """给 PromptBuilder 用的记忆片段（title/content 形态，C2）。"""
+        snippets: List[Dict[str, str]] = []
+        for item in self._messages:
+            if item.role == Role.SYSTEM:
+                snippets.append({"title": "上下文", "content": item.content})
+        return snippets
 
     def clear_messages(self) -> None:
         self._messages.clear()
 
-    def find_cached_reply(self, content: str) -> Optional[Message]:
+    def find_cached_reply(self, content: str) -> Optional[MessageContext]:
         for item in reversed(self._messages):
             if item.role == Role.ASSISTANT and item.content == content:
                 return item
         return None
+
+    # ---------- 记忆注入 ----------
 
     async def build_memory_messages(self, session_id: str = "default", query: str = "") -> None:
         if self._memory_system is None:
@@ -134,6 +163,8 @@ class UserContext:
                     compress=False,
                 )
 
+    # ---------- 写入 ----------
+
     async def add_message(
         self,
         role: str,
@@ -145,9 +176,10 @@ class UserContext:
         compress: bool = True,
     ) -> None:
         now = datetime.now().timestamp()
-        tokens = self._memory_system.calculate_tokens(content) if self._memory_system else max(1, int(len(content) / 1.5))
+        tokens = self._estimate_tokens(content)
+
         async with self.__lock:
-            self._messages.append(Message(
+            self._messages.append(MessageContext(
                 id=self.__next_id(),
                 timestamp=now,
                 role=str(role),
@@ -158,12 +190,27 @@ class UserContext:
                 tool_calls=tool_calls,
                 tool_call_id=tool_call_id,
             ))
-            self.__remove_duplicates()
-        if compress and self._memory_system is not None:
-            self._messages = await self._memory_system.maybe_compress_context(
-                self._messages,
-                callback=self.compressed_callback,
-            )
+            self.__remove_adjacent_duplicates()
+            if self._memory_system is not None:
+                self._memory_system.note_new_message()
+            if compress and self._memory_system is not None:
+                try:
+                    compressed = await self._memory_system.maybe_compress_context(
+                        self._messages,
+                        callback=self.compressed_callback,
+                    )
+                    if compressed is not None:
+                        self._messages = deque(compressed, maxlen=self.max_message * 2)
+                except Exception as exc:
+                    print(f"[UserContext] compress failed: {exc}")
+
+    def _estimate_tokens(self, content: str) -> int:
+        if self._memory_system is not None:
+            try:
+                return int(self._memory_system.calculate_tokens(content))
+            except Exception:
+                pass
+        return max(1, int(len(content) / 1.5))
 
     async def add_user_message(self, content: str, session_id: str = "default", source: str = "text") -> None:
         await self.add_message(Role.USER, content[:500], source=source, session_id=session_id)
@@ -189,7 +236,13 @@ class UserContext:
                     "arguments": function.get("arguments", tool_call.get("arguments", "{}")),
                 },
             })
-        await self.add_message(Role.ASSISTANT, content, source="tool", session_id=session_id, tool_calls=normalized)
+        await self.add_message(
+            Role.ASSISTANT, 
+            content,
+            source="tool",
+            session_id=session_id,
+            tool_calls=normalized
+        )
 
     async def add_tool_call_message(
         self,
@@ -207,22 +260,49 @@ class UserContext:
             tool_call_id=tool_call.get("id", f"call_{turn}_{tool_call.get('name', 'tool')}"),
         )
 
+    # ---------- 关闭 ----------
+
+    async def close_async(self) -> None:
+        """可等待的关闭"""
+        async with self.__lock:
+            if self._memory_system is not None:
+                try:
+                    await self._memory_system.close_with_context(self._messages)
+                except Exception as exc:
+                    print(f"[UserContext] close memory failed: {exc}")
+            self._messages.clear()
+
+    def close_sync(self) -> None:
+        """退出流程用：无 loop 时安全关闭。"""
+        if self._memory_system is None:
+            self._messages.clear()
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                asyncio.run(self.close_async())
+            except Exception as exc:
+                print(f"[UserContext] close failed: {exc}")
+            return
+        raise RuntimeError("[UserContext] 当前线程有事件循环，请用 await close_async()")
+
+    # ---------- 内部 ----------
+
     def __next_id(self) -> str:
         return f"{int(datetime.now().timestamp() * 1000)}_{uuid4().hex[:6]}"
 
-    def __remove_duplicates(self) -> None:
-        seen: set[tuple[str, str]] = set()
-        unique: Deque[Message] = deque(maxlen=self.max_message * 2)
+    def __remove_adjacent_duplicates(self) -> None:
+        """只去掉相邻重复项"""
+        unique: Deque[MessageContext] = deque(maxlen=self.max_message * 2)
+        prev_key: Optional[tuple] = None
         for item in self._messages:
             key = (str(item.role), item.content)
-            if key in seen:
+            if key == prev_key:
                 continue
-            seen.add(key)
+            prev_key = key
             unique.append(item)
         self._messages = unique
-    from ..manager.task import decorator
-    @decorator.async_task_scheduler
-    async def close(self) -> None:
-        if self._memory_system is not None:
-            await self._memory_system.close_with_context(self._messages)
-        self._messages.clear()
+
+
+userContext = UserContext()

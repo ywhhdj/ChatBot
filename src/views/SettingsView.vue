@@ -6,56 +6,62 @@ const shouldShowOverlay = ref(false);
 const overlayOpacity = ref(0);
 
 // 组件映射表
-const componentMap: Record<UI.SettingsTab, any> = {
+const componentMap: Record<UI.SettingsTab, Component> = {
   general: defineAsyncComponent(() => import('@/components/settings/pages/GeneralSetting.vue')),
   history: defineAsyncComponent(() => import('@/components/settings/pages/HistorySetting.vue')),
   character: defineAsyncComponent(() => import('@/components/settings/pages/CharacterSetting.vue')),
-  sound: defineAsyncComponent(() => import('@/components/settings/pages/SoundSetting.vue')),
   background: defineAsyncComponent(() => import('@/components/settings/pages/BackgroundSetting.vue')),
+  sound: defineAsyncComponent(() => import('@/components/settings/pages/SoundSetting.vue')),
+  save: defineAsyncComponent(() => import('@/components/settings/pages/SaveSetting.vue')),
+  more: defineAsyncComponent(() => import('@/components/settings/pages/MoreSetting.vue')),
 }
 
 const currentComponent = computed(() => {
-  return componentMap[uiStore.currentSettingsTab] || null
+  return componentMap[uiStore.currentTab.settings] || null
 });
 
 const keepAliveInclude = computed(() => {
   return Object.keys(componentMap).join(',')
 });
 
+let hideTimer: number | null = null
 
 
 onMounted(() => {
-  if (!uiStore.currentSettingsTab) {
-    uiStore.setCurrentSettingsTab('general') // 假设 store 中有 setter
-  }
   shouldShowOverlay.value = true
   requestAnimationFrame(() => {
     overlayOpacity.value = 1
-  })
+  });
+  hideTimer = setTimeout(() => {
+    shouldShowOverlay.value = false;
+    hideTimer = null;
+  }, 300)
 });
 
 onUnmounted(() => {
-  overlayOpacity.value = 0
-  setTimeout(() => { shouldShowOverlay.value = false }, 300)
+  if (hideTimer) clearTimeout(hideTimer)
+  overlayOpacity.value = 0;
 });
 </script>
 
 <template>
-  <div
-    class="blur-overlay"
-    v-show="shouldShowOverlay"
-    :style="{ opacity: overlayOpacity }"
-  ></div>
-  <div class="settings-panel">
-    <div class="nav">
-      <SettingsNav />
-    </div>
-    <div class="pages">
-      <MenuPage width="80%">
-        <KeepAlive :include="keepAliveInclude">
-          <component :is="currentComponent" />
-        </KeepAlive>
-      </MenuPage>
+  <div v-bind="$attrs">
+    <div
+      class="blur-overlay"
+      v-show="shouldShowOverlay"
+      :style="{ opacity: overlayOpacity }"
+    ></div>
+    <div class="settings-panel">
+      <div class="nav">
+        <SettingsNav />
+      </div>
+      <div class="pages">
+        <MenuPage width="90%">
+          <KeepAlive :include="keepAliveInclude">
+            <component :is="currentComponent" />
+          </KeepAlive>
+        </MenuPage>
+      </div>
     </div>
   </div>
 </template>
@@ -86,20 +92,23 @@ onUnmounted(() => {
 
 .nav {
   display: grid;
-  grid-template-columns: 250px 2fr 50px;
+  grid-template-columns: 50px 1fr 32px;
+  grid-gap: 10px;
   align-items: center;
-  justify-content: center;
   width: 100%;
-  height: 7vh;
+  padding: 0 15px 0 15px;
   background: var(--accent-bg);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  position: sticky;
+  top: 0;
 }
 
 .pages {
   display: flex;
   justify-content: center;
-  height: 93vh;
   overflow: auto;
   width: 100%;
+  height: 100%;
 }
 
 .blur-overlay {
@@ -124,7 +133,7 @@ onUnmounted(() => {
 
 @media screen and (max-width: 768px) {
   .nav {
-    grid-template-columns: 10px 2fr 50px;
+    grid-template-columns: 1fr 32px;
   }
 }
 </style>

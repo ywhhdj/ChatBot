@@ -2,13 +2,13 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import os
-import pickle
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Optional, Sequence
 import faiss
 from numpy import ndarray,float32,array,int64,arange,empty
 import orjson
 
-from ....database.sqlite import AsyncSqlite
+from ...utils.file import pickle
+from ..database.sqlite import AsyncSqlite
 from .models import CompressedMemory, Memory,TimeRange
 from ...runtime import RuntimePath
 
@@ -17,6 +17,8 @@ class SQLiteMemory(AsyncSqlite):
         super().__init__(db_path)
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+        if not hasattr(self, "_SQLiteMemory__is_init"):
+            self.__is_init = False
 
     async def _init_db(self) -> None:
         if self.__is_init:
@@ -62,8 +64,8 @@ class SQLiteMemory(AsyncSqlite):
         return list(range(int(start), int(start) + len(rows)))
 
     async def add_compressed_memory(self, row: CompressedMemory) -> None:
-        start = row.time_range.get("start")
-        end = row.time_range.get("end")
+        start = row.time_range.start
+        end = row.time_range.end
         start_ts = start.timestamp()
         end_ts = end.timestamp()
         await self.insert("compressed_memories").set_fields([
@@ -144,7 +146,7 @@ class SQLiteMemory(AsyncSqlite):
         if not memory_ids:
             return []
         placeholders = ",".join("?" for _ in memory_ids)
-        query =await self.select("memory").where_in("id", memory_ids).query() # type: ignore
+        query =await self.select("memories").where_in("id", memory_ids).query() # type: ignore
         out = []
         if query:
             for r in query:
@@ -154,7 +156,7 @@ class SQLiteMemory(AsyncSqlite):
         return out
 
     async def get_recent(self, session_id: str, limit: int) -> list[dict[str, Any]]:
-        query = await self.select("memory").set_fields([
+        query = await self.select("memories").set_fields([
             "id",
             "session_id",
             "role",
@@ -179,17 +181,28 @@ class SQLiteMemory(AsyncSqlite):
         return out
 
     async def reinforce(self, memory_ids: Sequence[int], boost: float) -> None:
+        """强化：提升 importance 并累加 access_count"""
         if not memory_ids:
             return
         await self.update("memories").set({
-            "boost": f"boost + {float(boost)}",
-            "access_count": f"access_count + 1",
-        }).where_in("id", memory_ids).save() # type: ignore
+            "importance": f"importance + {float(boost)}",
+            "access_count": "access_count + 1",
+            "last_access_time": float(datetime.now().timestamp()),
+        }).where_in("id", list(memory_ids)).execute()
 
-    async def decay_importance(self, memory_ids: Sequence[int], decay_rate: float, min_importance: float = 0.0) -> None:
-        await self.update("memories").set({
+    async def decay_importance(
+        self,
+        decay_rate: float,
+        min_importance: float = 0.0,
+        memory_ids: Optional[Sequence[int]] = None,
+    ) -> None:
+        """全局或按 id 衰减"""
+        updater = self.update("memories").set({
             "importance": f"MAX({float(min_importance)}, importance * {float(decay_rate)})",
-        }).where_in("id", memory_ids).save() # type: ignore
+        })
+        if memory_ids:
+            updater = updater.where_in("id", list(memory_ids))
+        await updater.execute()
 
     async def count_rows(self) -> int:
         query = await self.select("memories").set_fields([
@@ -202,22 +215,37 @@ class SQLiteMemory(AsyncSqlite):
     async def lowest_ranked(self, n: int) -> list[dict[str, int]]:
         if n <= 0:
             return []
-        query = await self.select("memories").set_fields([
+        rows = await self.select("memories").set_fields([
             "id",
             "importance",
             "last_access_time"
-        ]).order_by("importance", "ASC").order_by("last_access_time", "ASC").limit(int(n)).query() # type: ignore
-        if not query:
+        ]).order_by("importance", "ASC").order_by("last_access_time", "ASC").limit(int(n)).query()
+        if not rows:
             return []
+        memory_ids = [int(r["id"]) for r in rows]
+        faiss_map = await self.get_faiss_ids_by_memory(memory_ids)
+        faiss_by_memory: dict[int, int] = {}
+        for mid in memory_ids:
+            pass
+        # get_faiss_ids_by_memory 只返回 id 列表，需要成对查询
+        pairs = await self.select("faiss_id_map").set_fields([
+            "faiss_id",
+            "memory_id"
+        ]).where_in("memory_id", memory_ids).query()
+        for r in pairs or []:
+            faiss_by_memory[int(r["memory_id"])] = int(r["faiss_id"])
         return [{
-            "memory_id": int(r["memory_id"]), 
-            "faiss_id": int(r["faiss_id"])
-        } for r in query]
+            "memory_id": mid,
+            "faiss_id": int(faiss_by_memory.get(mid, -1)),
+        } for mid in memory_ids]
 
     async def delete_memories(self, memory_ids: Sequence[int]) -> None:
         if not memory_ids:
             return
-        await self.delete("memories").where_in("id", memory_ids).delete_batch() # type: ignore
+        # C139：Delete 没有 delete_batch()，应为 execute()
+        await self.delete("memories").where_in("id", list(memory_ids)).execute()
+        # 同时清理 faiss 映射，避免孤儿记录
+        await self.delete("faiss_id_map").where_in("memory_id", list(memory_ids)).execute()
 
     async def max_faiss_id(self) -> int:
         query = await (self.select("faiss_id_map")
@@ -284,12 +312,8 @@ class FAISSMemory:
         if top_k > self._distance_buffer.shape[1]:
             self._distance_buffer = empty((1, int(top_k)), dtype=float32)
             self._index_buffer = empty((1, int(top_k)), dtype=int64)
-        
-        # 预分配输出数组
-        scores = empty((1, int(top_k)), dtype=float32)
-        ids = empty((1, int(top_k)), dtype=int64)
-        self.index.search(query, int(top_k), scores, ids)  # 注意第一个参数是 n=1
-        
+        scores, ids = self.index.search(query, int(top_k))
+
         out: list[tuple[int, float]] = []
         for idx, score in zip(ids[0].tolist(), scores[0].tolist()):
             if idx < 0:
@@ -304,12 +328,10 @@ class FAISSMemory:
 
     def save(self) -> None:
         faiss.write_index(self.index, self.index_path)
-        with open(self.map_path, "wb") as f:
-            pickle.dump({"next_faiss_id": self._next_faiss_id}, f)
+        pickle.write_pickle(self.map_path, {"next_faiss_id": self._next_faiss_id})
 
     def load_meta(self) -> None:
         if not os.path.exists(self.map_path):
             return
-        with open(self.map_path, "rb") as f:
-            data = pickle.load(f)
+        data = pickle.read_pickle(self.map_path)
         self._next_faiss_id = int(data.get("next_faiss_id", self._next_faiss_id))

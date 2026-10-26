@@ -1,6 +1,5 @@
 # Logs
 logs
-env
 .env
 *.log
 npm-debug.log*
@@ -17,6 +16,8 @@ dist
 dist-ssr
 coverage
 *.local
+pnpm-lock.yaml
+pnpm-workspace.yaml
 
 # Editor directories and files
 **/.vscode/*
@@ -28,6 +29,7 @@ coverage
 *.njsproj
 *.sln
 *.sw?
+*.lock
 
 **/dist/*
 **/__pycache__/*
