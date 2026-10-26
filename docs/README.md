@@ -1,347 +1,78 @@
-# 硬性约束（本项目执行约定）
+# ChatBot 工程设计索引
 
-- **不下载依赖、不执行构建/测试**：只产出工程源码与构建脚本
-- **分层解耦**
-- **可维护优先**：单一职责、接口隔离、模块边界清晰，禁止跨层反向依赖
-- **记录完成计划到Plan**
-- **先设计架构，根据架构执行，并且优化架构**
-- **开始执行先读取docs的*Plan,README,*Design，维护api.md,md文件**
+> 分支基线：dev（审阅提交 c5e6343ec4b3913caaa04e5f6af2c34327213314）
+> 范围：只更新设计文档和计划，不修改业务源码。
 
-# 项目目录结构
-```text
-📁 src_py/
-├── cli/
-│   ├── generates/
-│   │   ├── config.py
-│   │   └── pipline.py
-│   └── main.py
-├── modules/
-│   ├── api/
-│   │   ├── controllers/
-│   │   │   ├── websocket/
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── events.py
-│   │   │   │   └── models.py
-│   │   │   ├── __init__.py
-│   │   │   ├── config.py
-│   │   │   ├── logger.py
-│   │   │   ├── memory.py
-│   │   │   ├── pipline.py
-│   │   │   ├── request.py
-│   │   │   ├── save.py
-│   │   │   ├── service.py
-│   │   │   ├── skill.py
-│   │   │   ├── system.py
-│   │   │   └── task.py
-│   │   ├── _common.py
-│   │   ├── exceptions.py
-│   │   ├── requests.py
-│   │   ├── response.py
-│   │   └── server.py
-│   ├── characters/
-│   │   ├── __init__.py
-│   │   ├── models.py
-│   │   ├── orchestrator.py
-│   │   └── presets.py
-│   ├── config/
-│   │   ├── __init__.py
-│   │   ├── builder.py
-│   │   ├── manager.py
-│   │   └── models.py
-│   ├── context/
-│   │   ├── audio.py
-│   │   └── user.py
-│   ├── devices/
-│   │   ├── base.py
-│   │   ├── config.py
-│   │   └── keyboard.py
-│   ├── events/
-│   │   ├── __init__.py
-│   │   ├── bus.py
-│   │   ├── data.py
-│   │   └── types.py
-│   ├── logger/
-│   │   ├── __init__.py
-│   │   ├── animation.json
-│   │   ├── log.py
-│   │   └── types.py
-│   ├── manager/
-│   │   ├── saves/
-│   │   │   ├── manager.py
-│   │   │   └── models.py
-│   │   ├── service/
-│   │   │   ├── decorator.py
-│   │   │   └── manager.py
-│   │   ├── task/
-│   │   │   ├── decorator.py
-│   │   │   ├── reference.py
-│   │   │   └── schedular.py
-│   │   ├── websocket/
-│   │   │   ├── manager.py
-│   │   │   └── models.py
-│   │   ├── base.py
-│   │   ├── character.py
-│   │   ├── dispatcher.py
-│   │   ├── pipeline.py
-│   │   └── session.py
-│   ├── memory/
-│   │   ├── docs/
-│   │   │   └── design.md
-│   │   ├── emdedding/
-│   │   │   ├── __init__.py
-│   │   │   ├── adapters.py
-│   │   │   └── base.py
-│   │   ├── rag/
-│   │   │   ├── main.py
-│   │   │   ├── models.py
-│   │   │   ├── retriever.py
-│   │   │   └── store.py
-│   │   ├── storage/
-│   │   │   ├── base.py
-│   │   │   ├── database.py
-│   │   │   ├── markdown.py
-│   │   │   ├── models.py
-│   │   │   └── sqlite.py
-│   │   ├── compression.py
-│   │   ├── config.py
-│   │   ├── main.py
-│   │   ├── managers.py
-│   │   ├── token.py
-│   │   └── utils.py
-│   ├── pipeline/
-│   │   ├── adapters/
-│   │   │   ├── asr/
-│   │   │   │   └── adapter.py
-│   │   │   ├── landmarker/
-│   │   │   │   ├── face.py
-│   │   │   │   └── models.py
-│   │   │   ├── llm/
-│   │   │   │   ├── adapter.py
-│   │   │   │   ├── client.py
-│   │   │   │   └── types.py
-│   │   │   ├── ocr/
-│   │   │   │   └── adapter.py
-│   │   │   └── tts/
-│   │   │       ├── adapter.py
-│   │   │       ├── client.py
-│   │   │       └── models.py
-│   │   ├── downloads/
-│   │   │   ├── asr.py
-│   │   │   ├── landmarker.py
-│   │   │   └── ocr.py
-│   │   ├── emotion/
-│   │   │   └── predictor.py
-│   │   ├── chat.py
-│   │   ├── enum.py
-│   │   └── manager.py
-│   ├── routes/
-│   │   ├── intent.py
-│   │   ├── keywords.json
-│   │   ├── models.py
-│   │   └── words.py
-│   ├── services/
-│   │   ├── browser/
-│   │   │   ├── scripts/
-│   │   │   │   ├── distiller.js
-│   │   │   │   └── stealth.js
-│   │   │   ├── browser.py
-│   │   │   ├── distiller.py
-│   │   │   ├── driver.py
-│   │   │   └── models.py
-│   │   ├── game/
-│   │   │   └── minecraft.py
-│   │   ├── image/
-│   │   ├── knowledge/
-│   │   │   └── query/
-│   │   │       ├── adapter.py
-│   │   │       ├── models.py
-│   │   │       └── serach.py
-│   │   ├── live2d/
-│   │   │   ├── audio.py
-│   │   │   ├── canvas.py
-│   │   │   ├── components.py
-│   │   │   └── views.py
-│   │   ├── obs/
-│   │   │   ├── client.py
-│   │   │   ├── done_table.md
-│   │   │   └── models.py
-│   │   ├── qqbot/
-│   │   │   ├── client.py
-│   │   │   └── models.py
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   └── config.py
-│   ├── tools/
-│   │   ├── services/
-│   │   │   ├── exceute.py
-│   │   │   ├── formatter.py
-│   │   │   └── models.py
-│   │   ├── skills/
-│   │   │   ├── manager.py
-│   │   │   ├── models.py
-│   │   │   └── sandbox.py
-│   │   ├── ctl.py
-│   │   └── models.py
-│   ├── ui/
-│   │   ├── channel.py
-│   │   └── views.py
-│   ├── utils/
-│   │   ├── file/
-│   │   │   ├── __init__.py
-│   │   │   ├── common.py
-│   │   │   ├── env.py
-│   │   │   ├── json.py
-│   │   │   ├── pickle.py
-│   │   │   └── yaml.py
-│   │   ├── http/
-│   │   │   ├── __init__.py
-│   │   │   ├── async_.py
-│   │   │   ├── common.py
-│   │   │   └── sync.py
-│   │   ├── audio.py
-│   │   ├── audio_stream.py
-│   │   ├── decorators.py
-│   │   └── util.py
-│   ├── __init__.py
-│   ├── app.py
-│   ├── models.py
-│   └── runtime.py
-└── main.py
-```
+## 1. 项目现状
 
-# 线程模型
+ChatBot 是一个以 Python 为核心的本地/桌面 AI 助手，包含 FastAPI REST、SSE/WebSocket、Vue 3 + TypeScript 前端、模型管道适配器、工具/技能系统、会话与存档、混合记忆及本地文件存储。Qt 主线程、WebServer asyncio loop、任务调度器、事件总线和存储 worker 的边界，是后端正确性与性能的关键。
 
+| 路径 | 当前职责 |
+|---|---|
+| src_py/modules/api/ | FastAPI 服务、REST 控制器、统一响应、异常处理、WebSocket |
+| src_py/modules/manager/ | 会话、角色、服务、任务调度和存档运行时管理 |
+| src_py/modules/pipeline/ | LLM、TTS、ASR、OCR 适配器及对话路由 |
+| src_py/modules/memory/ | 混合记忆、embedding、Markdown/SQLite 存储、FAISS、RAG |
+| src_py/modules/context/ | 会话上下文和 prompt 数据 |
+| src_py/modules/events/ | 线程安全事件总线与事件类型 |
+| src_py/modules/tools/、services/ | 技能执行、工具编排和外部服务 |
+| resources/defaults/ | 默认配置、提示词、角色和记忆 SQL schema |
+| src/ | Vue 前端入口、页面、状态管理、API service |
+| scripts/api/、scripts/gen_api_types.mjs | API 生成/类型相关流程，需统一权威入口 |
 
-# 三条铁律
-  1. 主线程不跑 asyncio loop。​ `asyncio.run()` 只在「启动前」或「Qt 已退出后的清理阶段」一次性使用。
-  2. 主线程 join 任何线程时，必须一边 join 一边泵 Qt 事件（`join_with_pump`）。否则「主线程等线程、线程等主线程派发 Qt 任务」直接死锁。
-  3. `emit()` 不得在已有运行中 loop 的线程里调用 `asyncio.run()`。​ 有 loop 就排 task，没 loop 才 `asyncio.run()`。
-# 规范
-1. 私有属性应用_前缀，如 `_name, _age, _gender` 等。
-2. 私有方法应用__前缀，如 `__get_age(), __set_gender()` 等。（__为python真正的私有方法）
+## 2. 文档导航
 
-# 路由模型
+- [后端架构设计](BackendDesign.md)：模块边界、线程、编排、存档、性能与安全。
+- [后端实施计划](BackendPlan.md)：P0/P1/P2 任务、依赖、验收与回滚。
+- [前端架构设计](FrontendDesign.md)：Vue、Pinia、API service、桌面桥接和流式状态。
+- [前端实施计划](FrontendPlan.md)：契约修复、流式交互、状态一致性与性能。
+- [记忆系统设计](MemoryDesign.md)：现状、分层、模糊检索、衰减、压缩、归档和删除。
+- [API 契约](api.md)：REST、SSE、WebSocket、响应信封及差异记录。
+- [安全与审计设计](SecurityAndAuditDesign.md)：威胁模型、密钥、技能执行、事件审计和数据删除。
+- [架构决策记录](ArchitectureDecisionRecords.md)：需要评审的方案及其理由。
 
-## 三上下文分离
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                     全局共享空间                              │
-│                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
-│  │  角色上下文    │  │  工具上下文    │  │  用户输入上下文   │   │
-│  │              │  │              │  │                  │   │
-│  │ • 人设/性格   │  │ • OBS/Browser│  │ • 当前轮输入       │   │
-│  │ • 称呼/头衔   │  │ • Live2D/Shell│  │ • 对话记忆(每角色)│   │
-│  │ • 心情/好感   │  │ • Skills     │  │ • 任务队列        │   │
-│  │ • 随机词汇池  │  │ • 命令文档   │  │                   │   │
-│  └──────────────┘  └──────────────┘  └──────────────────┘   │
-│         ↓                ↓                    ↓             │
-│    CHAT prompt        TASK prompt         USER messages     │
-│    (省token)          (纯执行)           (动态注入)           │
-└─────────────────────────────────────────────────────────────┘
-```
+## 3. 工程硬约束
 
-## 双通道输出
-```
-用户输入
-  ↓
-IntentRouter 判断意图类型
-  ↓
-┌────────────┬────────────┐
-│ CHAT 通道   │ TASK 通道   │
-│            │            │
-│ 角色人设    │ 工具文档    │
-│ + 10条记忆  │ + 任务描述  │
-│ + 随机词汇  │            │
-│     ↓      │     ↓      │
-│  LLM       │  LLM       │
-│  直接回复   │  输出命令   │
-│  (省token)  │     ↓      │
-│            │  后台执行   │
-│            │     ↓      │
-│            │  结果回填   │
-│            │     ↓      │
-│            │  角色化总结  │
-└─────┬──────┴─────┬──────┘
-      ↓            ↓
-   给用户      给用户
-```
+1. 只依据真实源码断言现状；新机制必须标为目标方案，不能写成已经完成。
+2. 分层解耦：Controller 处理协议/输入校验/响应映射，领域逻辑留在应用与管理模块，供应商和存储细节放在适配器。
+3. 不跨层反向依赖；领域核心不得依赖 FastAPI、Vue、Qt UI 或具体模型供应商。
+4. 先检查 api.md 再改接口；保持路由、字段、错误码、事件名和流式语义兼容，破坏性变更必须有迁移窗口。
+5. Qt 主线程不运行常驻 asyncio loop；线程内已有运行中 loop 时不能嵌套 asyncio.run；跨线程派发要显式可追踪。
+6. 后台任务必须保存引用、回收异常、设置超时/取消策略并在 shutdown 时有界收尾。
+7. 安全检查由确定性代码执行；LLM 输出不得作为授权证明。
+8. 记忆元数据、FAISS index 和存档 revision 必须定义一致性、失败补偿、校验与恢复规则。
+9. 每个实施任务维护 Plan，写清影响面、验收、失败路径、回滚与数据迁移。
+10. 按仓库约定不自动下载依赖、不执行构建/测试；本轮只做 Markdown、链接和契约静态检查。
 
----
-# 输入模型
-## 输入流
-```text
-用户输入
-  ↓
-router_stream()                              [stream_task_scheduler -> 调度器 loop]
-  ├─ ensure_initialized_async()              一次性初始化 + 并发等待（C9）
-  ├─ GameSaveManager.get/create(指定 id)      （C5）
-  └─ CharacterOrchestrator.process_stream()
-       ├─ IntentRouter.route()                规则匹配（同步、零线程池 C32）
-       │    └─ 置信度不足 → 轻量 LLM（剥离 markdown 后解析 C14）
-       │         └─ 失败回退参数齐全（C13）+ 字段名正确（C57）
-       ├─ UserContext.add_user_message()      按 loop 取锁（C1）
-       ├─ PromptBuilder.build()               三上下文分离
-       │    └─ mood: int → emotion_map → modifiers（C16）
-       ├─ [TOOL_CALL/MIXED] _handle_task_stream（C6：不再是死代码）
-       │    ├─ ServiceOrchestrator._build_system_prompt
-       │    ├─ CommandParser.parse()          三种写法都支持（C58）
-       │    ├─ CommandValidator.validate()    tools 形态兼容（C61）
-       │    ├─ CommandExecutor.execute()      同步方法不堵 loop（C62）
-       │    └─ 结果回填 → 角色化总结（流式）
-       └─ [PURE_CHAT] _handle_chat_stream
-       ↓
-  result 经 result_holder 回填（C8：不读 _last_result）
-       ↓
-  chat.py emit LLM_FINAL_TEXT / TASK_EXECUTED
-       ↓
-  GameSaveManager.save_sync()                 （C22：同步落盘）
-       ↓
-  （用户显式存档）SaveSlotManager.save_slot() ← sync_from_sessions 打通
-```
+## 4. 当前源码审阅发现
 
-## 技能链路
+| 级别 | 问题 | 影响 |
+|---|---|---|
+| P0 | 后端成功 code 是 200，但 src/api/http.ts 的 desktop bridge 分支判断 code === 0 | 桌面请求可能把成功响应当作失败 |
+| P0 | controllers/__init__.py 给所有 router 加 /api；save.py、audit.py 的 router 自带 /api/save、/api/audit | 可能形成 /api/api/... 双前缀；必须用 FastAPI 实际注册路由核实后修正 |
+| P1 | api.md 有 SSE 路径示例笔误，未完整列出 PPT/审计等控制器 | 文档与实际注册路径可能漂移 |
+| P1 | 前端 HTTP 与 bridge 的信封解包逻辑分开实现 | 错误码、request_id 与通知语义容易分叉 |
+| P1 | API 生成脚本/生成产物权威来源待统一 | 后端 DTO、文档和 TS service/types 可能产生漂移 |
+| P1 | hash embedding、FAISS 映射、Markdown fallback 与删除传播缺少端到端验收契约 | 可能出现召回质量差、孤儿向量或后端语义不一致 |
+| P2 | 存档为 index.yaml + 每槽 data.yaml，缺少完整不可变 revision/恢复预演约定 | 失败恢复、追溯与旧快照删除保护不足 |
+| P2 | audit controller 主要列出服务/工具能力，不等于完整安全审计 | 必须另定义记录 actor、动作、决策、结果和保留期 |
 
-```text
-用户: "用天气技能查一下北京天气"
-  ↓
-IntentRouter -> TOOL_CALL
-  ↓
-TASK prompt（含 build_prompt() 输出的技能清单）
-  skill --id weather --des "查北京天气"
-  ↓
-CommandParser.parse    -> {"service":"skill","params":{"id":"weather","des":"..."}}
-                          （_parse_builtin 兼容 --id / --name）
-  ↓
-ServiceOrchestrator._execute_skill_command
-  ├─ params.get("id") or params.get("name")        <- A2
-  ├─ ExternalSkillManager.execute_skill(skill_id, params)
-  │    ├─ skill = self._skills.get(skill_id)
-  │    ├─ exec_type == 2 (shell) -> 直接拒绝      <- K14
-  │    ├─ exec_type == 1 (python) -> 沙盒执行 skill.code   <- K1/K2
-  │    └─ exec_type == 3 (javascript) -> 未实现
-  └─ 返回 {"ok":..., "data":...}
-  ↓
-结果回填 -> 角色化总结（流式）
-```
+以上是文档审阅发现，不代表本次已修复运行行为。涉及实际路由的判断需再以 app.routes/OpenAPI 清单确认。
 
-## 记忆链路
+## 5. 架构方向
 
-```
-UserContext.add_message()
-  ├─ 按 loop 取锁
-  ├─ append + 相邻去重
-  └─ maybe_compress_context()
-       ├─ 计数器触发
-       ├─ persist_context_detail() 
-       └─ ContextCompressor.compress_context()
-            ├─ prompt 模板缺失时回退内置模板
-            ├─ llm_manager.compress(prompt=..., system_prompt=...)  <- M3 参数名
-            └─ 失败 -> 规则压缩
-  ↓
-HybridMemorySystem.get_memory_layers()   -> {short_term, long_term, detailed}
-  ↓
-UserContext.build_memory_messages() -> SYSTEM 消息注入
-  ↓
-PromptBuilder.format_memory_context()
-```
+- 保持模块化单体，不为“先进”而提前拆微服务。
+- 以应用服务、明确的协议/存储端口和适配器降低耦合；拆进程必须由性能或故障隔离数据驱动。
+- 记忆按工作、情节、语义、摘要、冷档案划分逻辑层，底层初期继续使用现有 SQLite/FAISS/Markdown。
+- 存档借鉴 Memento：不可变版本、manifest、哈希校验、恢复预演、提交/回滚和删除墓碑。
+- 统一 request_id/trace_id、结构化任务状态与低基数指标；普通日志不写秘密、完整 prompt 或私人记忆。
+- API 契约只保留一个权威来源；生成类型/服务文件不得手工漂移。
+- 任何检索权重、缓存或 reranker 优化先建立基准，再决定是否启用。
+
+## 6. 推荐阅读顺序
+
+1. [API 契约](api.md)
+2. [后端架构](BackendDesign.md) 与 [前端架构](FrontendDesign.md)
+3. [记忆设计](MemoryDesign.md) 与 [安全审计](SecurityAndAuditDesign.md)
+4. [后端计划](BackendPlan.md) 与 [前端计划](FrontendPlan.md)
+5. [架构决策记录](ArchitectureDecisionRecords.md)
