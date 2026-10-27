@@ -102,3 +102,13 @@ Memento 全部流程、目录、manifest 示例与错误场景见 [GameSaveArchi
 - Snapshot 创建可并发读取但不能无限并发复制大型记忆/音频资产；使用有界队列和磁盘空间预检查。
 - 对 restore/provider switch/index rebuild 建立 operation_id 和 deadline，UI 轮询/订阅时不保持阻塞 HTTP 请求。
 - 仅在测量证实收益后启用缓存、批量 embedding、索引增量更新或 reranker。
+
+## 9. 记忆曲线、分层与存档整合任务
+
+新增任务 ID（`A*` 治理、`L*` 分层、`M*` 记忆曲线、`S2-*` 存档整合）及阶段、依赖、开关见 [OptimizationPlan.md](OptimizationPlan.md)。与本文既有任务的关系：
+
+- B2-05（记忆衰减/GC dry-run）对应 M2-07，其模型由 [MemoryCurveAndForgetting.md](MemoryCurveAndForgetting.md) 定义。
+- B2-04（自适应 token budget）与 M2-01（R 参与排序）联动，需一并评估。
+- B1-04/05/06 是 M2-08（GC apply）的前置。
+- C0-02（ContextStore 分桶）是强化/固化启用 character scope 的前置，在此之前只启用 session scope。
+- S1-02/03 完成后才能开展 S2-01（MemoryOriginator 含强度与时钟）。

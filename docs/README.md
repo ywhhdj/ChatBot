@@ -1,3 +1,8 @@
+# 硬性约束
+- 不下载依赖、不执行构建/测试：只产出工程源码与构建脚本，构建动作由使用者在本地执行。
+- 可维护优先：单一职责、接口隔离、模块边界清晰，禁止跨层反向依赖。
+- 每次完成一步必须记录进度PLAN.md 计划
+
 # ChatBot 工程架构设计索引
 
 > 本文档集以 \`dev\` 源码为事实基线。标记为“目标设计/提议”的内容尚需按实施计划落地；文档描述不代表相应运行功能已经实现。
@@ -93,3 +98,13 @@ ChatBot 是一个以 Python 为核心的本地/桌面 AI 助手，包含 FastAPI
 7. P2：建立审计事件与可观测性，梳理保留期、脱敏和导出策略。
 
 每一步必须在对应 Plan 中记录代码范围、迁移方案、测试、回滚和验收状态。
+
+## 架构优化增补文档
+
+| 文档 | 内容 |
+|---|---|
+| [OptimizationPlan.md](OptimizationPlan.md) | 总体计划：阶段、任务、依赖、开关、KPI、风险 |
+| [MemoryCurveAndForgetting.md](MemoryCurveAndForgetting.md) | 类人记忆曲线与遗忘机制（强度模型、状态机、固化、评估） |
+| [LayeredArchitecture.md](LayeredArchitecture.md) | 前后端分层、端口、依赖规则、迁移与自动检查 |
+| [MementoMemoryIntegration.md](MementoMemoryIntegration.md) | 存档与记忆强度/时钟整合、时间线与分支、自动存档 |
+| [reference/](reference/) | 强度模型参考实现与属性测试（仅标准库） |

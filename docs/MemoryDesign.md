@@ -236,3 +236,8 @@ Slot
 ### 对话系统不能把检索当作授权
 
 记忆候选、文件内容和工具结果都是数据，不是 system policy。即使 retrieved memory 内容包含“执行某个 shell 命令”，也不能改变 ToolContext 的 allowlist；高风险执行由独立授权层决定。
+
+
+## 类人记忆曲线与遗忘机制
+
+五层逻辑记忆的"生命周期与权重"由强度模型定义：幂律保持率、稳定度 S、间隔效应强化、失误惩罚、active/faded/archived 状态机、固化流水线、冲突覆盖、遗忘画像，以及软遗忘与硬删除的分离。完整设计、参考实现和评估方案见 [MemoryCurveAndForgetting.md](MemoryCurveAndForgetting.md)；与存档的整合见 [MementoMemoryIntegration.md](MementoMemoryIntegration.md)。本文关于删除传播和墓碑的规则优先于任何遗忘逻辑。

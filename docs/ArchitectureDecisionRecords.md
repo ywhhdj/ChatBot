@@ -88,3 +88,53 @@
 - 背景：Axios、SSE、WebSocket 和 Qt bridge 的协议包装存在差异，桌面 bridge 的成功码判断与后端不同。
 - 决策：共享 DTO/错误语义/decoder；transport 负责网络/消息编码，前端 service 表达领域操作，后端 application service 负责业务。
 - 验收：共享 contract matrix 覆盖成功、参数错误、未初始化、超时、取消、断连和重复请求。
+
+
+## ADR-012：记忆强度采用惰性计算的可解释遗忘曲线
+
+- 状态：提议，P2 影子、P3 生效。
+- 背景：记忆只有层级，没有随时间变化的强度；衰减/GC 仅为计划项（B2-05）。
+- 决策：强度作为派生状态存放在独立表（`memory_strength`），保持率 `R=(1+Δ/(9S))^-1`，读取时按注入的时钟计算；仅在被使用/纠正/固化时写入。详见 [MemoryCurveAndForgetting.md](MemoryCurveAndForgetting.md)。
+- 不采用：周期任务逐条改写强度；直接修改记忆正文或 FAISS 向量。
+- 代价：新增迁移与回填、使用事件管线、评估集。
+- 验收：影子模式不改变用户可见结果；评估集显示误注入率下降且召回不低于基线；关闭开关即回到旧行为。
+
+## ADR-013：遗忘不等于删除
+
+- 状态：提议。
+- 决策：软遗忘（active→faded→archived，可被线索唤醒）与硬删除（墓碑协议，不可逆）语义分离；GC 候选必须同时满足未置顶、低 R、足够年龄、已有摘要覆盖、低重要度，且默认只出 dry-run。
+- 原因：用户的删除请求必须真实生效，而淡忘是认知模拟，不满足删除义务。
+- 验收：archived 不进默认检索；GC apply 默认关闭且走 B1-05；UI 区分"已淡忘"与"已删除"。
+
+## ADR-014：引入 MemoryClock 抽象
+
+- 状态：提议。
+- 决策：所有强度计算使用注入的 `MemoryClock`（wall/active/game）；时钟状态属于存档快照 section；`Δ<0` 按 0 处理。
+- 原因：关机、回档和系统时间变更不应使角色异常遗忘或复活。
+- 验收：快照→推进时间→恢复后排序与快照时刻一致；测试不依赖系统时间。
+
+## ADR-015：后端五层与端口，保持模块化单体
+
+- 状态：提议，P1。
+- 决策：L1 Transport、L2 Application Service、L3 Domain、L4 Ports、L5 Adapters，依赖向内；单例仅限组合根/适配器；规则由架构适应度测试自动检查，采用 allowlist 逐步收紧。详见 [LayeredArchitecture.md](LayeredArchitecture.md)。
+- 不采用：一次性重写；为分层拆进程；预先创建无调用方的接口。
+- 验收：领域层可脱离 FastAPI/Qt/SQLite 单元测试；违规清单单调下降至 0。
+
+## ADR-016：前端分层与 per-session 状态
+
+- 状态：提议，P1/P5。
+- 决策：View → Composable → Store/Service → Transport → Contract；组件不得 import transport；会话 UI 状态按 sessionId 分片；流由带 requestId/sessionId 的 StreamSession 管理；长操作用 operation_id。
+- 验收：ESLint 规则生效；四 transport 通过同一契约矩阵；会话交错测试无串线。
+
+## ADR-017：存档时间线与分支
+
+- 状态：提议，P4。
+- 决策：revision 视作 DAG（`parent_revision` + `branch_id`）；回档后继续产生分支而非覆盖；`trigger` 区分 manual/quick/auto/pre-restore/pre-migration；强度表、时钟、遗忘画像作为快照 section。详见 [MementoMemoryIntegration.md](MementoMemoryIntegration.md)。
+- 代价：更多磁盘占用，需保留与 GC 策略。
+- 验收：分支恢复不覆盖原 revision；回档预览准确报告将丢弃的记忆；墓碑优先于快照。
+
+## ADR-018：新行为经特性开关与影子模式上线
+
+- 状态：建议接受。
+- 决策：记忆强度、遗忘过滤、固化、GC、快照 v2 均有独立开关，默认关闭；先影子后生效；`gc.apply` 永久默认关闭，需单独审批；开关登记负责人与清理期限。
+- 验收：关闭任一开关后行为回到上一阶段；无长期残留开关。

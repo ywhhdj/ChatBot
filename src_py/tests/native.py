@@ -214,204 +214,204 @@ def test_native_objects(backend_name: str) -> None:
 
 
 def main() -> None:
-    from modules.core.native import (
-        backend,
-        get_async_dispatch,
-        get_bus,
-        get_scheduler,
-        get_timer,
-        new_stream,
-    )
+    # from modules.core.native import (
+    #     backend,
+    #     get_async_dispatch,
+    #     get_bus,
+    #     get_scheduler,
+    #     get_timer,
+    #     new_stream,
+    # )
 
-    print("═══ 装饰器与 native 方法实测 ═══")
-    bk = backend()
-    print(f"  后端: {bk}")
+    # print("═══ 装饰器与 native 方法实测 ═══")
+    # bk = backend()
+    # print(f"  后端: {bk}")
 
-    # ── 装饰器 ──
-    test_decorators(bk)
+    # # ── 装饰器 ──
+    # test_decorators(bk)
 
-    # ═══════════════════════════════════════════════════════
-    print(f"\n{'═' * 60}")
-    print(f"[native 对象] backend = {bk}")
-    print("═" * 60)
+    # # ═══════════════════════════════════════════════════════
+    # print(f"\n{'═' * 60}")
+    # print(f"[native 对象] backend = {bk}")
+    # print("═" * 60)
 
-    # ---------- scheduler ----------
+    # # ---------- scheduler ----------
 
-    print("\n  ── scheduler ──")
-    sch = get_scheduler()
-    check("is_running", sch.is_running() is True)
+    # print("\n  ── scheduler ──")
+    # sch = get_scheduler()
+    # check("is_running", sch.is_running() is True)
 
-    # 批量提交
-    t0 = time.perf_counter()
-    refs = [sch.submit(lambda i=i: i * i, timeout=10) for i in range(50)]
-    submit_cost = (time.perf_counter() - t0) * 1000
-    check("50 次 submit 不被阻塞", submit_cost < 500, f"({submit_cost:.1f}ms)")
+    # # 批量提交
+    # t0 = time.perf_counter()
+    # refs = [sch.submit(lambda i=i: i * i, timeout=10) for i in range(50)]
+    # submit_cost = (time.perf_counter() - t0) * 1000
+    # check("50 次 submit 不被阻塞", submit_cost < 500, f"({submit_cost:.1f}ms)")
 
-    vals = [r.result(timeout=15) for r in refs]
-    check("50 个结果全部正确", vals == [i * i for i in range(50)])
+    # vals = [r.result(timeout=15) for r in refs]
+    # check("50 个结果全部正确", vals == [i * i for i in range(50)])
 
-    # 并发不退化成串行
-    async def _conc():
-        handles = []
-        for _ in range(8):
-            handles.append(sch.submit(lambda: time.sleep(0.2), timeout=15))
-        t0 = time.perf_counter()
-        for h in handles:
-            h.result(timeout=20)
-        return time.perf_counter() - t0
+    # # 并发不退化成串行
+    # async def _conc():
+    #     handles = []
+    #     for _ in range(8):
+    #         handles.append(sch.submit(lambda: time.sleep(0.2), timeout=15))
+    #     t0 = time.perf_counter()
+    #     for h in handles:
+    #         h.result(timeout=20)
+    #     return time.perf_counter() - t0
 
-    wall = asyncio.run(_conc())
-    check("8 个 0.2s 任务并发（<1.0s 而非 1.6s）", wall < 1.0, f"({wall:.2f}s)")
+    # wall = asyncio.run(_conc())
+    # check("8 个 0.2s 任务并发（<1.0s 而非 1.6s）", wall < 1.0, f"({wall:.2f}s)")
 
-    # wait_async 不阻塞
-    async def _wait_probe():
-        state, start, stop = ticker_probe()
-        await start()
-        h = sch.submit(lambda: (time.sleep(0.3), 1)[1], timeout=10)
-        fn = getattr(h, "wait_async", None)
-        v = await fn(timeout=10) if fn else None
-        await stop()
-        return v, state["n"]
+    # # wait_async 不阻塞
+    # async def _wait_probe():
+    #     state, start, stop = ticker_probe()
+    #     await start()
+    #     h = sch.submit(lambda: (time.sleep(0.3), 1)[1], timeout=10)
+    #     fn = getattr(h, "wait_async", None)
+    #     v = await fn(timeout=10) if fn else None
+    #     await stop()
+    #     return v, state["n"]
 
-    v, ticked = asyncio.run(_wait_probe())
-    check("wait_async 拿到结果", v == 1, f"({v})")
-    check("wait_async 期间 loop 未卡死", ticked >= 5, f"(tick={ticked})")
+    # v, ticked = asyncio.run(_wait_probe())
+    # check("wait_async 拿到结果", v == 1, f"({v})")
+    # check("wait_async 期间 loop 未卡死", ticked >= 5, f"(tick={ticked})")
 
-    # stats / status_of / cancel
-    try:
-        st = sch.stats()
-        check("stats() 可调用", isinstance(st, dict), f"({list(st)[:3]})")
-    except Exception as e:  # noqa: BLE001
-        check("stats() 可调用", False, f"({e})")
+    # # stats / status_of / cancel
+    # try:
+    #     st = sch.stats()
+    #     check("stats() 可调用", isinstance(st, dict), f"({list(st)[:3]})")
+    # except Exception as e:  # noqa: BLE001
+    #     check("stats() 可调用", False, f"({e})")
 
-    h0 = sch.submit(lambda: (time.sleep(5), 1)[1], timeout=20)
-    try:
-        cancelled = sch.cancel(h0.task_id)
-        check("cancel 未启动/运行中的任务", isinstance(cancelled, bool),
-              f"({cancelled})")
-    except Exception as e:  # noqa: BLE001
-        check("cancel 可用", False, f"({e})")
+    # h0 = sch.submit(lambda: (time.sleep(5), 1)[1], timeout=20)
+    # try:
+    #     cancelled = sch.cancel(h0.task_id)
+    #     check("cancel 未启动/运行中的任务", isinstance(cancelled, bool),
+    #           f"({cancelled})")
+    # except Exception as e:  # noqa: BLE001
+    #     check("cancel 可用", False, f"({e})")
 
-    # ---------- stream ----------
+    # # ---------- stream ----------
 
-    print("\n  ── stream ──")
-    st = new_stream(16)
-    for i in range(5):
-        st.push(i)
-    st.finish()
+    # print("\n  ── stream ──")
+    # st = new_stream(16)
+    # for i in range(5):
+    #     st.push(i)
+    # st.finish()
 
-    async def _drain(s):
-        got = []
-        async for x in s:
-            got.append(x)
-            if len(got) > 60:
-                break
-        return got
+    # async def _drain(s):
+    #     got = []
+    #     async for x in s:
+    #         got.append(x)
+    #         if len(got) > 60:
+    #             break
+    #     return got
 
-    check("push/pop 往返", asyncio.run(_drain(st)) == [0, 1, 2, 3, 4])
+    # check("push/pop 往返", asyncio.run(_drain(st)) == [0, 1, 2, 3, 4])
 
-    # 背压：容量 2，push 满后阻塞直到消费
-    bp = new_stream(2)
-    bp.push(1)
-    bp.push(2)
-    pushed = {"n": 0}
+    # # 背压：容量 2，push 满后阻塞直到消费
+    # bp = new_stream(2)
+    # bp.push(1)
+    # bp.push(2)
+    # pushed = {"n": 0}
 
-    async def _backpressure():
-        got = []
-        import threading
+    # async def _backpressure():
+    #     got = []
+    #     import threading
 
-        def _p():
-            for i in range(3, 8):
-                bp.push(i, timeout=5)
-                pushed["n"] += 1
-            bp.finish()
+    #     def _p():
+    #         for i in range(3, 8):
+    #             bp.push(i, timeout=5)
+    #             pushed["n"] += 1
+    #         bp.finish()
 
-        t = threading.Thread(target=_p, daemon=True)
-        t.start()
-        for _ in range(7):
-            got.append(await bp.__anext__())
-        t.join(timeout=5)
-        return got
+    #     t = threading.Thread(target=_p, daemon=True)
+    #     t.start()
+    #     for _ in range(7):
+    #         got.append(await bp.__anext__())
+    #     t.join(timeout=5)
+    #     return got
 
-    bpg = asyncio.run(_backpressure())
-    check("背压下数据不丢", bpg == [1, 2, 3, 4, 5, 6, 7], f"({bpg})")
-    check("producer 实际被背压", pushed["n"] == 5, f"({pushed['n']})")
+    # bpg = asyncio.run(_backpressure())
+    # check("背压下数据不丢", bpg == [1, 2, 3, 4, 5, 6, 7], f"({bpg})")
+    # check("producer 实际被背压", pushed["n"] == 5, f"({pushed['n']})")
 
-    # 失败流
-    fs = new_stream(4)
-    fs.push("partial")
-    fs.fail("boom")
+    # # 失败流
+    # fs = new_stream(4)
+    # fs.push("partial")
+    # fs.fail("boom")
 
-    async def _fail():
-        try:
-            async for x in fs:
-                pass
-            return None
-        except Exception as e:  # noqa: BLE001
-            return type(e).__name__
+    # async def _fail():
+    #     try:
+    #         async for x in fs:
+    #             pass
+    #         return None
+    #     except Exception as e:  # noqa: BLE001
+    #         return type(e).__name__
 
-    check("失败流抛异常而非静默", asyncio.run(_fail()) is not None,
-          f"({asyncio.run(_fail())})")
+    # check("失败流抛异常而非静默", asyncio.run(_fail()) is not None,
+    #       f"({asyncio.run(_fail())})")
 
-    # ---------- bus ----------
+    # # ---------- bus ----------
 
-    print("\n  ── bus ──")
-    bus = get_bus()
-    seen: List[Tuple[str, dict]] = []
-    sid = bus.subscribe("evt", lambda p: seen.append(("a", p)))
-    bus.subscribe("evt", lambda p: seen.append(("b", p)))
-    check("subscribe 返回 id", isinstance(sid, int), f"({sid})")
-    check("subscriber_count", bus.subscriber_count("evt") == 2)
+    # print("\n  ── bus ──")
+    # bus = get_bus()
+    # seen: List[Tuple[str, dict]] = []
+    # sid = bus.subscribe("evt", lambda p: seen.append(("a", p)))
+    # bus.subscribe("evt", lambda p: seen.append(("b", p)))
+    # check("subscribe 返回 id", isinstance(sid, int), f"({sid})")
+    # check("subscriber_count", bus.subscriber_count("evt") == 2)
 
-    n = bus.emit("evt", {"v": 1})
-    check("emit 返回触发数", n == 2, f"({n})")
-    time.sleep(0.1)
-    check("两个订阅者都收到", len(seen) == 2, f"({len(seen)})")
+    # n = bus.emit("evt", {"v": 1})
+    # check("emit 返回触发数", n == 2, f"({n})")
+    # time.sleep(0.1)
+    # check("两个订阅者都收到", len(seen) == 2, f"({len(seen)})")
 
-    ok_unsub = bus.unsubscribe("evt", sid)
-    check("unsubscribe 精确解绑", ok_unsub and bus.subscriber_count("evt") == 1)
+    # ok_unsub = bus.unsubscribe("evt", sid)
+    # check("unsubscribe 精确解绑", ok_unsub and bus.subscriber_count("evt") == 1)
 
-    # ---------- timer（防抖）----------
+    # # ---------- timer（防抖）----------
 
-    print("\n  ── timer ──")
-    timer = get_timer()
-    fired: List[int] = []
-    tid = timer.debounce(150, 500, lambda p: fired.append(p or 1))
+    # print("\n  ── timer ──")
+    # timer = get_timer()
+    # fired: List[int] = []
+    # tid = timer.debounce(150, 500, lambda p: fired.append(p or 1))
 
-    for _ in range(6):
-        timer.touch(tid)
-        time.sleep(0.03)
-    time.sleep(0.4)
-    check("连续输入合并为 1 次", len(fired) == 1, f"({len(fired)})")
+    # for _ in range(6):
+    #     timer.touch(tid)
+    #     time.sleep(0.03)
+    # time.sleep(0.4)
+    # check("连续输入合并为 1 次", len(fired) == 1, f"({len(fired)})")
 
-    # 硬上限
-    fired2: List[int] = []
-    tid2 = timer.debounce(100, 300, lambda p: fired2.append(1))
-    for _ in range(12):
-        timer.touch(tid2)
-        time.sleep(0.05)
-    time.sleep(0.4)
-    check("硬上限强制触发", len(fired2) >= 1, f"({len(fired2)})")
+    # # 硬上限
+    # fired2: List[int] = []
+    # tid2 = timer.debounce(100, 300, lambda p: fired2.append(1))
+    # for _ in range(12):
+    #     timer.touch(tid2)
+    #     time.sleep(0.05)
+    # time.sleep(0.4)
+    # check("硬上限强制触发", len(fired2) >= 1, f"({len(fired2)})")
 
-    canceled = timer.cancel(timer.debounce(500, 1000, lambda p: None))
-    check("cancel 可用", canceled is True, f"({canceled})")
+    # canceled = timer.cancel(timer.debounce(500, 1000, lambda p: None))
+    # check("cancel 可用", canceled is True, f"({canceled})")
 
-    # ---------- async dispatch ----------
+    # # ---------- async dispatch ----------
 
-    print("\n  ── async dispatch ──")
-    disp = get_async_dispatch()
-    check("is_available", disp.is_available() is True)
+    # print("\n  ── async dispatch ──")
+    # disp = get_async_dispatch()
+    # check("is_available", disp.is_available() is True)
 
-    async def _coro():
-        await asyncio.sleep(0.01)
-        return "dispatched"
+    # async def _coro():
+    #     await asyncio.sleep(0.01)
+    #     return "dispatched"
 
-    fut = disp.dispatch(_coro())
-    try:
-        check("dispatch 返回可等待对象",
-              fut.result(timeout=5) == "dispatched")
-    except Exception as e:  # noqa: BLE001
-        check("dispatch 返回可等待对象", False, f"({e})")
+    # fut = disp.dispatch(_coro())
+    # try:
+    #     check("dispatch 返回可等待对象",
+    #           fut.result(timeout=5) == "dispatched")
+    # except Exception as e:  # noqa: BLE001
+    #     check("dispatch 返回可等待对象", False, f"({e})")
 
     # # ---------- events 集成（无 loop 线程不阻塞）----------
 

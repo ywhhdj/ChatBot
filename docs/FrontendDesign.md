@@ -125,3 +125,7 @@ FastAPI contract (docs/api.md)
 - \`activeSessionId\`：当前展示状态，不能作为后端请求的隐式 session_id 唯一来源。
 
 该结构仅供前端展示/交互，不取代后端 session/memory 的权威数据。
+
+## 前端分层与契约
+
+前端分层（View → Composable → Store/Service → Transport → Contract）、规则 F1–F8、per-session UI 状态、StreamSession 流守卫、operation_id 长操作和自动检查见 [LayeredArchitecture.md](LayeredArchitecture.md) 第 3 节。记忆保持率提示与存档时间线 UI 的任务见 [OptimizationPlan.md](OptimizationPlan.md) 的 FX-06/FX-07。
