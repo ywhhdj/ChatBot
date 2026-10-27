@@ -163,3 +163,11 @@ Controller 只构造输入 DTO 并调用用例；应用服务负责业务流程�
 - 对修改状态的用例定义 precondition、执行点、补偿动作和可重放性。
 - Save restore、provider switch、记忆重建等长操作需要 operation/task id，阶段状态可查询。
 - 持久化失败必须区别“业务动作成功但日志写失败”和“业务事务未成功”；审计不能作为主状态的唯一真相。
+
+## 14. 分层、记忆曲线与存档整合
+
+- 分层规则、端口清单、与现有模块的映射、迁移顺序和自动检查见 [LayeredArchitecture.md](LayeredArchitecture.md)。第 12 节的"应用服务边界"对应其中的 L2。
+- 记忆强度（惰性计算的遗忘曲线）、状态机、固化与 GC 见 [MemoryCurveAndForgetting.md](MemoryCurveAndForgetting.md)。强化只发生在请求成功完成之后，经有界队列异步执行，不进入请求关键路径，不持有会话锁。
+- 存档与记忆强度/时钟的整合、时间线与分支见 [MementoMemoryIntegration.md](MementoMemoryIntegration.md)。
+- 总体路线与任务依赖见 [OptimizationPlan.md](OptimizationPlan.md)。
+- 降级顺序补充：固化与 GC 先于 reranker 关闭；任何降级都不得影响会话隔离、删除语义和存档校验。

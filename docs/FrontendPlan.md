@@ -80,3 +80,7 @@ idle → previewing → ready_to_restore → restoring
 ~~~
 
 前端只根据服务端 operation 状态更新 UI。用户点击“保存”后不能立刻显示已保存；应等待 committed。恢复遇到 partial_failure 时必须呈现明确警告和操作记录，不得当作普通失败 toast 隐藏。
+
+## 增补任务（与总体计划对齐）
+
+任务 FX-01~FX-09（共享 decoder、会话分片、流守卫、services 整理与 ESLint 限制、operation 轮询、存档时间线 UI、保持率 UI、契约单一来源、四 transport 契约矩阵）及依赖见 [OptimizationPlan.md](OptimizationPlan.md) 第 5.5 节。合并时需与本文既有任务 ID 去重。

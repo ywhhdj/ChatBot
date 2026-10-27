@@ -245,3 +245,7 @@ revision 状态：
 - [ ] 路径穿越、超大文件、损坏 hash、缺失 artifact 和并发 restore 均有测试。
 - [ ] 记忆删除墓碑在 restore 之后仍生效，不从旧 snapshot 复活。
 - [ ] API/UI 明确区分 Slot、Checkpoint 和 Full snapshot。
+
+## 12. 与记忆强度、时钟的整合
+
+记忆强度表、`MemoryClock` 状态和遗忘画像作为快照 section 的方式、恢复时的时间语义、回档对记忆的影响（含 `RestorePlan.memory_impact`）、revision 时间线/分支和自动存档策略见 [MementoMemoryIntegration.md](MementoMemoryIntegration.md)。本文的事务阶段与验收清单仍然适用，新增验收项见该文第 9 节。
