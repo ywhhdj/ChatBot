@@ -1,0 +1,425 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chatbot.local/schemas/provider-config.schema.json",
+  "title": "Provider Config",
+  "description": "统一供应商配置 schema，覆盖 asr/llm/ocr/tts/embedding.json",
+  "type": "object",
+  "required": [
+    "schema_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "配置文件格式版本"
+    }
+  },
+  "propertyNames": {
+    "anyOf": [
+      {
+        "const": "schema_version"
+      },
+      {
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "description": "provider ID：小写字母开头，仅含小写字母/数字/下划线/连字符"
+      }
+    ]
+  },
+  "unevaluatedProperties": {
+    "$ref": "#/$defs/provider"
+  },
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "required": [
+        "meta",
+        "endpoint",
+        "models"
+      ],
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/meta"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/model"
+          }
+        },
+        "params": {
+          "$ref": "#/$defs/params"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/rule_cloud_implies_http"
+        }
+      ]
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "label",
+        "tags",
+        "deployment"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "能力/属性标签：llm / tts / asr / ocr / embedding / local / cloud / paid / free"
+        },
+        "deployment": {
+          "type": "string",
+          "enum": [
+            "local",
+            "cloud"
+          ]
+        },
+        "region": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "docs_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false
+    },
+    "endpoint": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/endpointHttp"
+        },
+        {
+          "$ref": "#/$defs/endpointLocal"
+        }
+      ]
+    },
+    "endpointHttp": {
+      "type": "object",
+      "required": [
+        "transport",
+        "base_url"
+      ],
+      "properties": {
+        "transport": {
+          "const": "http"
+        },
+        "base_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "HTTP 基址；允许 ${ENV_VAR} 模板"
+        },
+        "chat_path": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string",
+          "description": "协议方言；空 = 按 transport 推断",
+          "examples": [
+            "openai",
+            "ollama",
+            "generic"
+          ]
+        },
+        "auth": {
+          "$ref": "#/$defs/auth"
+        },
+        "timeout": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "endpointLocal": {
+      "type": "object",
+      "required": [
+        "transport",
+        "runtime"
+      ],
+      "properties": {
+        "transport": {
+          "const": "local"
+        },
+        "runtime": {
+          "type": "string",
+          "minLength": 1,
+          "description": "本地推理运行时名，如 faster-whisper / paddleocr / tesseract",
+          "examples": [
+            "faster-whisper",
+            "paddleocr",
+            "tesseract",
+            "easyocr",
+            "umiocr"
+          ]
+        },
+        "model_dir": {
+          "type": "string",
+          "description": "模型目录；允许 ${MODEL_ROOT} 模板"
+        },
+        "device": {
+          "type": "string",
+          "description": "计算设备",
+          "examples": [
+            "auto",
+            "cpu",
+            "cuda",
+            "cuda:0",
+            "mps",
+            "dml"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "auth": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "bearer",
+            "none",
+            "basic",
+            "header"
+          ]
+        },
+        "header": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "bearer"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "header",
+              "field"
+            ]
+          }
+        }
+      ]
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "params": {
+          "type": "object",
+          "description": "该模型的默认参数覆盖值，形状为 { param_name: { default: ... } }",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "params": {
+      "type": "object",
+      "description": "provider 暴露的通用参数；键为参数名，值为参数描述符",
+      "additionalProperties": {
+        "$ref": "#/$defs/paramDef"
+      }
+    },
+    "paramDef": {
+      "type": "object",
+      "required": [
+        "type",
+        "label"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "integer",
+            "number",
+            "boolean",
+            "array",
+            "object"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "default": {},
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "init",
+            "request"
+          ],
+          "default": "request",
+          "description": "init=创建时生效；request=每次请求可覆盖"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enum": {
+          "$ref": "#/$defs/enumOptions"
+        },
+        "items": {
+          "$ref": "#/$defs/paramDef"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/paramDef"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "enumOptions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "枚举值：原语，或 {value, label} 对象",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "label"
+            ],
+            "properties": {
+              "value": {},
+              "label": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "rule_cloud_implies_http": {
+      "description": "deployment=cloud 时 endpoint.transport 必须是 http",
+      "if": {
+        "required": [
+          "meta",
+          "endpoint"
+        ],
+        "properties": {
+          "meta": {
+            "type": "object",
+            "required": [
+              "deployment"
+            ],
+            "properties": {
+              "deployment": {
+                "const": "cloud"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "endpoint": {
+            "type": "object",
+            "required": [
+              "transport"
+            ],
+            "properties": {
+              "transport": {
+                "const": "http"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

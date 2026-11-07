@@ -65,6 +65,7 @@ async def download_file(
                                     await progress_callback(progress)
                                 else:
                                     progress_callback(progress)
+
 @http_exceptions(exception_message="POST request failed")
 async def async_post(
     url: str,
@@ -72,13 +73,16 @@ async def async_post(
     headers: Optional[dict] = None,
     dtype:dtype="bytes",
     follow_redirects: bool = True,
-    max_redirects: int = 5
+    max_redirects: int = 5,
+    client: Optional[httpx.AsyncClient] = None
 ):
-    async with create_httpx_async_client(
-        follow_redirects=follow_redirects,
-        max_redirects=max_redirects
-    )as session:
-        response=await session.post(url,json=data, headers=headers)
+    if client is None:
+        client = create_httpx_async_client(
+            follow_redirects=follow_redirects,
+            max_redirects=max_redirects
+        )
+    async with client:
+        response=await client.post(url,json=data, headers=headers)
         response.raise_for_status()
         return parse_response(response,dtype)
 
@@ -89,12 +93,15 @@ async def async_get(
     headers: Optional[dict] = None,
     dtype:dtype="bytes",
     follow_redirects: bool = True,
-    max_redirects: int = 5
+    max_redirects: int = 5,
+    client: Optional[httpx.AsyncClient] = None
 ):
-    async with create_httpx_async_client(
-        follow_redirects=follow_redirects,
-        max_redirects=max_redirects
-    )as session:
-        response=await session.get(url,params=params, headers=headers)
+    if client is None:
+        client = create_httpx_async_client(
+            follow_redirects=follow_redirects,
+            max_redirects=max_redirects
+        )
+    async with client:
+        response=await client.get(url,params=params, headers=headers)
         response.raise_for_status()
         return parse_response(response,dtype)

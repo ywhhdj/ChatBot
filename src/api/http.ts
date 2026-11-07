@@ -1,3 +1,12 @@
+declare module "axios" {
+  interface AxiosRequestConfig {
+    /** 桌面端 bridge 用的 op 名，由代码生成器提供 */
+    opName?: string;
+    /** 路径参数，桌面端 bridge 会注入 payload */
+    pathParams?: Record<string, string | number>;
+  }
+}
+
 import axios, {
   type AxiosInstance,
   type AxiosRequestConfig,
@@ -85,7 +94,7 @@ class Http {
   private initialized: boolean = false;
   private useBridge: boolean = false;
 
-  constructor() {}
+  constructor() { }
 
   public async create(config: Partial<AxiosRequestConfig> = {}): Promise<void> {
     if (this.initialized && this.instance) {
@@ -156,52 +165,41 @@ class Http {
   async desktopRequest<T = any, D = any, H = {}>(
     config: AxiosRequestConfig<D>
   ): Promise<AxiosResponse<T, D, H>> {
-    const { url, method, params, data } = config;
+    const { url, method, params, data, opName, pathParams } = config;
     const path = url || "";
-    // 不再需要 method，直接生成纯 op 名
-    const opName = getOpName(path);
+    // 优先用生成器给的 op 名，运行时推导只作兜底
+    const op = opName || getOpName(path);
 
-    // 构造 payload
     const payload: any = {};
-    if (method?.toLowerCase() === "get") {
-      Object.assign(payload, params || {});
-    } else {
-      Object.assign(payload, data || {});
+    // 1) 路径参数（桌面端唯一来源）
+    if (pathParams) Object.assign(payload, pathParams);
+    // 2) query（GET 和 POST 都可能带）
+    if (params) Object.assign(payload, params);
+    // 3) body（仅非 GET）
+    if (method?.toLowerCase() !== "get" && data) {
+      Object.assign(payload, data);
     }
-    // 注入原始路径中的路径参数（如 session_id）
-    // 例如 /session/{session_id}/messages → payload.session_id = xxx
-    this.injectPathParams(payload, path);
 
     const bridgeCall = getBridgeCall();
     if (!bridgeCall) {
       throw new HttpError(500, "Bridge call not available");
     }
 
-    try {
-      const timeout = config.timeout || 60000; // 后端默认 60s
-      const result = await bridgeCall(opName, payload, timeout);
+    const timeout = config.timeout || 60000;
+    const result = await bridgeCall(op, payload, timeout);
 
-      // 后端统一信封 { ok, code, message, data, request_id, ts }
-      if (result && result.ok === true && result.code === 0) {
-        return {
-          data: result.data as T,
-          status: 200,
-          statusText: "OK",
-          headers: {},
-          config: config as InternalAxiosRequestConfig<D>,
-          request: {},
-        } as AxiosResponse<T, D, H>;
-      } else {
-        throw new HttpError(
-          result?.code || 500,
-          result?.message || "Desktop API failed",
-          undefined
-        );
-      }
-    } catch (error: any) {
-      if (error instanceof HttpError) throw error;
-      throw new HttpError(500, error.message || "Desktop API error");
+    // 统一信封：ok === true && code === 0
+    if (result && result.ok === true && result.code === 0) {
+      return {
+        data: result.data as T,
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config: config as InternalAxiosRequestConfig<D>,
+        request: {},
+      } as AxiosResponse<T, D, H>;
     }
+    throw new HttpError(result?.code ?? 500, result?.message || "Desktop API failed");
   }
 
   // ---------- 拦截器 ----------
@@ -226,11 +224,7 @@ class Http {
     this.responseInterceptorId = this.instance.interceptors.response.use(
       (response) => {
         const apiResponse = response.data as API.ApiResponse<unknown>;
-        if (
-          apiResponse &&
-          typeof apiResponse === "object" &&
-          "ok" in apiResponse
-        ) {
+        if (apiResponse && typeof apiResponse === "object" && "ok" in apiResponse) {
           if (apiResponse.ok === true && apiResponse.code === 200) {
             return apiResponse.data;
           }
@@ -337,15 +331,22 @@ http.create(DEFAULT_CONFIG);
 export default http;
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 
+export interface RequestOptions {
+  opName?: string;
+  pathParams?: Record<string, string | number>;
+  config?: AxiosRequestConfig;
+}
+
 export async function request<T = any>(
   method: HttpMethod,
   url: string,
-  params?: any
+  params?: any,
+  options?: RequestOptions
 ): Promise<T> {
-  try {
-    const data = await http[method](url, params);
-    return data;
-  } catch (err: any) {
-    return Promise.reject(err);
-  }
+  const cfg: AxiosRequestConfig = {
+    ...(options?.config || {}),
+    opName: options?.opName,
+    pathParams: options?.pathParams,
+  };
+  return http[method](url, params, cfg) as Promise<T>;
 }

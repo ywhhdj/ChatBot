@@ -3,7 +3,7 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from ..pipeline.models import ServiceTool
+from ..core.pipeline.models import ServiceTool
 from .config import BaseServiceConfig
 
 

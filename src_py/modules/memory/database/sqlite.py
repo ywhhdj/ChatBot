@@ -4,7 +4,6 @@
 """
 
 from __future__ import annotations
-# 原位于 modules/memory/storage/sqlite.py；按 database.py 的 `from ...database.sqlite` 归位到此处
 
 import asyncio
 import sqlite3
@@ -36,17 +35,16 @@ class AsyncSqlite:
         return cls._instance
 
     def __init__(self, db: str = "", batch_size: int = 500, max_workers: int = 1) -> None:
-        # C116：初始化守卫。否则每次实例化都会丢掉已有连接并新建线程池
         if not getattr(self, "_fresh", False):
             return
         self._fresh = False
 
         self.db = db
         self.conn: Optional[sqlite3.Connection] = None
-        # C113/C115：单线程 executor + threading.Lock。
-        # 串行执行本身就保证了连接安全，锁只是防止其它调用路径并发。
-        self.executor = ThreadPoolExecutor(max_workers=max_workers,
-                                           thread_name_prefix="SqliteWorker")
+        self.executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="SqliteWorker"
+        )
         self._lock = threading.RLock()
         self.default_batch_size = batch_size
 
@@ -59,7 +57,9 @@ class AsyncSqlite:
             db_path = Path(self.db)
             if db_path.parent and str(db_path.parent) not in ("", "."):
                 db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            self.conn = sqlite3.connect(
+                str(db_path), check_same_thread=False, isolation_level=""
+            )
             self.conn.row_factory = sqlite3.Row
 
     async def connect(self) -> None:
@@ -70,7 +70,7 @@ class AsyncSqlite:
         if self.conn is None:
             await self.connect()
 
-    # ---------- 执行（C113：单下划线，供 Query/Insert 调用） ----------
+    # ---------- 执行 ----------
 
     async def _execute(self, sql: str, params: tuple = ()) -> Optional[List[Any]]:
         await self._ensure_conn()
@@ -88,9 +88,6 @@ class AsyncSqlite:
             return await loop.run_in_executor(self.executor, _run)
         except Exception as exc:
             raise RuntimeError(f"SQLite error: {exc}") from exc
-
-    # 保留旧名，避免外部已有调用断裂
-    __execute = _execute
 
     async def _execute_many(self, sql: str, params_list: List[tuple]) -> int:
         if not params_list:
@@ -110,6 +107,89 @@ class AsyncSqlite:
             return await loop.run_in_executor(self.executor, _run)
         except Exception as exc:
             raise RuntimeError(f"SQLite batch error: {exc}") from exc
+
+    # ---------- 事务----------
+
+    async def commit(self) -> None:
+        """显式提交。**不提交的话 conn.close() 会回滚所有写入**
+        """
+        if self.conn is None:
+            return
+        loop = asyncio.get_running_loop()
+
+        def _run() -> None:
+            with self._lock:
+                if self.conn is not None:
+                    self.conn.commit()
+
+        await loop.run_in_executor(self.executor, _run)
+
+    async def transaction(self, work) -> Any:
+        """在**同一个 executor 任务**里原子执行一组同步 DB 操作。
+
+        提交由本方法负责；work 内**不要**自己 commit/rollback。
+        """
+        await self._ensure_conn()
+        loop = asyncio.get_running_loop()
+
+        def _run() -> Any:
+            with self._lock:
+                assert self.conn is not None
+                conn = self.conn
+                # isolation_level="" 时 DML 会隐式开事务；若上一条
+                # 语句遗留了未提交事务，先收敛掉再 BEGIN，否则 SQLite
+                # 报 "cannot start a transaction within a transaction"。
+                if conn.in_transaction:
+                    conn.commit()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    result = work(conn)
+                    conn.commit()
+                    return result
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    raise
+
+        return await loop.run_in_executor(self.executor, _run)
+
+    async def insert_batch_returning_ids(
+        self, 
+        sql: str,
+        params_list: "List[tuple]"
+    ) -> "List[int]":
+        """批量插入并返回每行真实的自增 id
+        """
+        if not params_list:
+            return []
+        await self._ensure_conn()
+        loop = asyncio.get_running_loop()
+
+        def _run() -> "List[int]":
+            with self._lock:
+                assert self.conn is not None
+                conn = self.conn
+                ids: list[int] = []
+                if conn.in_transaction:
+                    conn.commit()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    for params in params_list:
+                        cursor = conn.execute(sql, tuple(params))
+                        ids.append(int(cursor.lastrowid or 0))
+                        cursor.close()
+                    conn.commit()
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    raise
+                return ids
+
+        return await loop.run_in_executor(self.executor, _run)
 
     async def get_lastrowid(self) -> int:
         if self.conn is None:
@@ -157,7 +237,6 @@ class AsyncSqlite:
         placeholders = ",".join(["?" for _ in data[0]])
         sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
         values_list = [tuple(d.values()) for d in data]
-        # C118：先确保连接
         await self._ensure_conn()
         loop = asyncio.get_running_loop()
 
@@ -175,7 +254,6 @@ class AsyncSqlite:
             raise RuntimeError(f"SQLite error: {exc}") from exc
 
     async def execute_sql_file(self, file_path: Union[str, Path], encoding: str = "utf-8") -> None:
-        # C117：同步读文件放到 executor，避免阻塞事件循环
         def _read() -> str:
             with open(file_path, "r", encoding=encoding) as f:
                 return f.read()
@@ -194,7 +272,7 @@ class AsyncSqlite:
         except Exception as exc:
             raise RuntimeError(f"SQLite script execution error: {exc}") from exc
 
-    # ---------- 关闭（C119） ----------
+    # ---------- 关闭----------
 
     async def close(self) -> None:
         if self.conn is not None:
@@ -210,7 +288,6 @@ class AsyncSqlite:
             self.executor.shutdown(wait=False)
         except Exception:
             pass
-        # C119：清真正的类属性，而不是实例属性
         AsyncSqlite._instance = None
         self._fresh = True
 
@@ -231,7 +308,6 @@ class Query:
     def __init__(self, db: AsyncSqlite, table_name: str) -> None:
         self.db = db
         self.table_name = table_name
-        # C114：统一用单下划线，读写一致
         self._conditions: List[str] = []
         self._params: List[Any] = []
         self._limit: Optional[int] = None
@@ -317,7 +393,6 @@ class Query:
         return results[0] if results else None
 
     async def count(self, alias: str = "count") -> int:
-        # 不要在已设置字段上覆盖（count 可能与其他聚合连用）
         self._columns = [f"COUNT(*) as {alias}"]
         result = await self.first()
         if result is None:
@@ -412,6 +487,7 @@ class Insert:
                 cursor = self.db.conn.execute(self.sql, self._data or ())
                 last_id = cursor.lastrowid
                 cursor.close()
+                self.db.conn.commit()
                 return last_id or 0
 
         return await loop.run_in_executor(self.db.executor, _run)
@@ -458,20 +534,18 @@ class Insert:
         return self
 
     async def save_batch(self) -> int:
-        """真正执行批量插入（原实现只有累积没有落盘入口）。"""
         if not self._batch_context.params:
             return 0
         affected = await self.db._execute_many(
             self._batch_context.sql, self._batch_context.params
         )
+        await self.db.commit()
         self._batch_context.params.clear()
         self._pending_count = 0
         return affected
 
 
 class Update:
-    """极简 Update 构造器（原实现缺失）。"""
-
     def __init__(self, db: AsyncSqlite, table_name: str) -> None:
         self.db = db
         self.table_name = table_name
@@ -521,13 +595,13 @@ class Update:
                 cursor = self.db.conn.execute(sql, tuple(self._params))
                 affected = cursor.rowcount
                 cursor.close()
+                self.db.conn.commit()
                 return affected
 
         return await loop.run_in_executor(self.db.executor, _run)
 
 
 class Delete:
-    """极简 Delete 构造器"""
 
     def __init__(self, db: AsyncSqlite, table_name: str) -> None:
         self.db = db
@@ -569,6 +643,7 @@ class Delete:
                 cursor = self.db.conn.execute(sql, tuple(self._params))
                 affected = cursor.rowcount
                 cursor.close()
+                self.db.conn.commit()
                 return affected
 
         return await loop.run_in_executor(self.db.executor, _run)

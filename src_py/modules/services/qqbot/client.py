@@ -6,15 +6,15 @@ import httpx
 from websockets import connect,ClientConnection
 from websockets.exceptions import ConnectionClosed
 
-from ...pipeline.models import ToolFunction, ToolFunctionParameters
+from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
 from ...events.data import BaseEvent
 from ...logger import logger
 from ..config import QQBotConfig
 from .. import base
 from . import models
 from ...events import emit, types as eventType, on_event_class
-from ...manager.service.decorator import Service
-from ..keys import ServiceKeys
+from ..service.decorator import Service
+from ... import keys
 
 # QQ Bot API 端点
 #域名
@@ -26,7 +26,7 @@ GATEWAY_URL = f"https://{BASE_DOMAIN}/gateway"  # 正式环境，沙箱用 sandb
     (eventType.QQBotEventType.QQ_BOT_STOP, "stop"),
     (eventType.QQBotEventType.QQ_BOT_INFO, "get_bot_info")
 ])
-@Service(id=ServiceKeys.QQBOT)
+@Service(id=keys.ServiceKeys.QQBOT)
 class QQBotClient(base.BaseService):
     """
         Reference:

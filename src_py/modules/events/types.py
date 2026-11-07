@@ -120,3 +120,9 @@ class DownloadEventType:
 
 class CharacterEventType:
     MOOD_CHANGED = "character.mood_changed"
+
+class ProviderEventType:
+    LLM_GENERATE = "llm.generate"
+    OCR_RECOGNIZE = "ocr.recognize"
+    TTS_GENERATE = "tts.generate"
+    ASR_RECOGNIZE = "asr.recognize"

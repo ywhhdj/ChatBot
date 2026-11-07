@@ -101,7 +101,7 @@ def _memory_stats() -> Dict[str, Any]:
 
 def _services_stats() -> Dict[str, Any]:
     try:
-        from ...manager.service.manager import service_manager
+        from ...services.service.manager import service_manager
 
         infos = service_manager.get_all_service_infos() or []
         running = sum(

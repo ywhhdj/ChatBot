@@ -1,7 +1,5 @@
 """应用主控（主线程 = 纯 Qt；Web/服务/音频各自独立线程）。
 
-修复对应清单：A1 A2 B1–B7 / D1 D3
-
 线程模型（详见《调用链修复清单》第 0 节）::
 
     主线程（纯 Qt，不跑 asyncio）
@@ -26,6 +24,7 @@ import threading
 from .logger import logger
 from .config import load_config
 from . import runtime
+
 
 
 class Application:

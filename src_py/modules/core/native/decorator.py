@@ -14,7 +14,8 @@ from typing import (
 
 from ...types.common import P, R
 from .protocol import StreamLike, TaskHandleLike
-from . import get_scheduler, get_async_dispatch,new_stream
+from . import get_scheduler, new_stream
+from .common.async_dispatch import get_async_dispatch
 
 __all__ = [
     "sync_task_scheduler",
@@ -179,7 +180,18 @@ def stream_task_scheduler(
                 finally:
                     if auto_close:
                         stream.finish()
-            get_async_dispatch().dispatch(_producer())
+            fut=get_async_dispatch().dispatch(_producer())
+            def _on_producer_done(f):
+                if f.cancelled():
+                    stream.cancel()
+                    return
+                exc = f.exception()
+                if exc is not None:
+                    stream.fail(str(exc))
+
+            if hasattr(fut, "add_done_callback"):
+                fut.add_done_callback(_on_producer_done)
+
             return stream
         return wrapper
 

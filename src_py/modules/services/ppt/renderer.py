@@ -190,7 +190,10 @@ class PptRenderService:
         p.font.name = tpl.font_body
         p.font.color.rgb = _rgb(tpl.colors.muted, "6B7280")
 
-    def _text(self, slide, text: str, left: float, top: float,
+    def _text(
+        self,
+        slide,
+        text: str, left: float, top: float,
               width: float, height: float, tpl: TemplateSpec,
               size: int = 18, bold: bool = False,
               color: Optional[str] = None, align: str = "left") -> None:
@@ -336,12 +339,28 @@ class PptRenderService:
         from pptx.util import Pt
 
         text = spec.quote or (spec.points[0] if spec.points else spec.title)
-        box = self._text(slide, f"“{text}”", 1.4, 2.4, 10.5, 2.4,
-                         tpl, size=28, color=tpl.colors.primary, align="center")
+        box = self._text(
+            slide,
+            f"“{text}”",
+            1.4,
+            2.4,
+            10.5,
+            2.4,
+            tpl,
+            size=28,
+            color=tpl.colors.primary,
+            align="center"
+        )
         box.text_frame.paragraphs[0].font.italic = True
         if spec.source:
-            self._text(slide, f"— {spec.source}", 1.4, 5.0, 10.5, 0.5,
-                       tpl, size=14, color=tpl.colors.muted, align="center")
+            self._text(
+                slide,
+                f"— {spec.source}", 1.4, 5.0, 10.5, 0.5,
+                tpl,
+                size=14,
+                color=tpl.colors.muted,
+                align="center"
+            )
 
     def _table(self, slide, spec: SlideSpec, tpl: TemplateSpec) -> None:
         from pptx.util import Inches
@@ -413,13 +432,26 @@ class PptRenderService:
         from pptx.util import Pt
 
         text = spec.title or "谢谢"
-        self._text(slide, text, 1.0, 2.9, 11.3, 1.4,
-                   tpl, size=tpl.title_size + 8, bold=True,
-                   color=tpl.colors.primary, align="center")
+        self._text(
+            slide,
+            text, 1.0, 2.9, 11.3, 1.4,
+            tpl,
+            size=tpl.title_size + 8, bold=True,
+            color=tpl.colors.primary,
+            align="center"
+        )
         if spec.subtitle:
-            self._text(slide, spec.subtitle, 1.0, 4.4, 11.3, 0.8,
-                       tpl, size=tpl.body_size + 2,
-                       color=tpl.colors.muted, align="center")
+            self._text(
+                slide,
+                spec.subtitle,
+                1.0,
+                4.4,
+                11.3,
+                0.8,
+                tpl,
+                size=tpl.body_size + 2,
+                color=tpl.colors.muted, align="center"
+            )
 
     # ---------- 读取（校验产物） ----------
 

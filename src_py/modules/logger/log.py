@@ -1,17 +1,4 @@
-"""批量日志处理器 + Logger 门面。
-
-修复对应清单：L1 L8 L9 L10 L15–L22
-
-关键设计
-────────
-1. **日志只在 LoggerThread 里做重活**（格式化、打印、落盘、emit 事件）。
-   业务线程调用 `logger.info()` 时，Handler.emit() 只做「必要字段提取 + 入队」。
-2. **写文件不依赖 TaskSchedular**（L8）。
-   原实现用 `@sync_task_scheduler` 装饰写文件方法，而 app 关闭时调度器
-   先于 logger 停止 —— 导致退出时的最后一批日志（往往包含退出原因）全部丢失。
-   现在改用 logger 自有的单线程 IO 池。
-3. **队列用阻塞 get，零忙轮询**（L15）。
-4. **退出前排空队列**（L9）。
+"""批量日志处理器 + Logger 门面
 """
 
 from __future__ import annotations
@@ -71,8 +58,6 @@ class OptimizedBatchLogHandler(logging.Handler):
         self.log_level = log_level
         self.enable_log_file = enable_log_file
         self.log_dir = Path(log_dir)
-
-        # L22：下界保护，避免 batch_size 被算成 0 后退化
         self.max_length = max(_MIN_QUEUE_LENGTH, int(max_length))
         self.batch_size = max(_MIN_BATCH_SIZE, min(int(batch_size), self.max_length // 2))
         self.flush_interval = max(0.05, float(flush_interval))
@@ -81,7 +66,6 @@ class OptimizedBatchLogHandler(logging.Handler):
         self.__current_batch: List[models.LoggerRecord] = []
         self.__batch_lock = threading.RLock()
 
-        # L16：统计值从多线程更新，必须加锁
         self.__stats_lock = threading.Lock()
         self.stats: Dict[str, int] = {
             "logs_processed": 0,
@@ -144,7 +128,6 @@ class OptimizedBatchLogHandler(logging.Handler):
                 os.makedirs(self.log_dir, exist_ok=True)
             except Exception as e:
                 print(f"Log dir create error: {e}", file=sys.stderr)
-            # L8：自有 IO 池，与 TaskSchedular 解耦
             self.__io_pool = ThreadPoolExecutor(
                 max_workers=1, thread_name_prefix="LogWriter"
             )
@@ -263,7 +246,7 @@ class OptimizedBatchLogHandler(logging.Handler):
     # ---------- 落盘（IO 线程） ----------
 
     def __get_file_handle(self, filepath: Path):
-        """L10：句柄表 + 锁，避免跨线程重建导致句柄泄漏。"""
+        """句柄表 + 锁，避免跨线程重建导致句柄泄漏。"""
         with self.__file_lock:
             fh = self.__file_handles.get(filepath)
             if fh is None:
@@ -273,7 +256,6 @@ class OptimizedBatchLogHandler(logging.Handler):
             return fh, self.__file_locks[filepath]
 
     def __write_batch_to_file(self, batch: List[models.LoggerRecord]) -> None:
-        """L8：在 IO 线程同步写，不再经过 TaskSchedular。"""
         if not self.enable_log_file or not batch:
             return
         try:
@@ -325,8 +307,6 @@ class OptimizedBatchLogHandler(logging.Handler):
         if not ok:
             print("[Logger] processor thread did not stop within 5s", file=sys.stderr)
         self.__processor_thread = None
-
-        # L9：线程退出后仍可能有残留，再排一次
         self.__drain_remaining()
         self.flush()
         self.__close_files()
@@ -386,7 +366,6 @@ class Logger:
         format: str = DEFAULT_FORMAT,
         datefmt: str = DEFAULT_DATE_FORMAT,
     ):
-        # L19：统一用 _initialized（原 _intialized 拼写错误）
         if getattr(self, "_initialized", False):
             return
         self._initialized = True
@@ -454,10 +433,6 @@ class Logger:
         return list(lg.handlers) if lg is not None else []
 
     def __get_logger(self) -> logging.Logger:
-        """L20：未 init 时惰性初始化，避免 AttributeError。
-
-        最坏情况下退化为 root logger，保证日志不会整个崩掉。
-        """
         if self.__logger is None:
             with self.__init_lock:
                 if self.__logger is None:

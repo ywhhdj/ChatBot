@@ -1,127 +1,151 @@
+"""RAG 检索：BM25 稀疏 + 稠密内积"""
+
+from __future__ import annotations
+
 import asyncio
 import time
-from typing import Any, Callable, List, Optional
-
-import numpy as np
+from typing import Any, Callable, List, Optional, Sequence
 
 from ...logger import logger
+from ..compute.kernel import get_kernel
 from .models import Document, RetrievalResult
 
+#: 中文/日文无空格文本的最小切分单位
+def _tokens(text: str) -> List[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    words = raw.split()
+    if len(words) > 1 or all(len(w) > 3 for w in words):
+        return words
+    # 单段 CJK：按字符 bigram 切，兼顾召回与精度
+    compact = "".join(words)
+    if len(compact) <= 1:
+        return [compact] if compact else []
+    return [compact[i:i + 2] for i in range(len(compact) - 1)]
 
-async def _await_coro(coro):
-    return await coro
 
 class BM25Retriever:
-    def __init__(self, documents: List[Document]):
-        self.corpus = [doc.content for doc in documents]
+    """稀疏检索。缺 rank_bm25 时降级为确定性词频打分，不抛异常。"""
+
+    def __init__(self, documents: List[Document]) -> None:
         self.documents = documents
-        self.tokenized_corpus = [doc.split() for doc in self.corpus]
+        self.corpus = [doc.content for doc in documents]
+        self.tokenized_corpus = [_tokens(text) for text in self.corpus]
         self.bm25 = None
         if self.tokenized_corpus:
             try:
                 from rank_bm25 import BM25Okapi  # type: ignore
 
                 self.bm25 = BM25Okapi(self.tokenized_corpus)
-            except Exception as exc:
-                logger.warning(f"[RAG] BM25 初始化失败，稀疏检索降级: {exc}")
-                self.bm25 = None
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"[RAG] BM25 初始化失败，用词频降级: {type(exc).__name__}")
+
+    def _scores(self, query: str) -> List[float]:
+        q = _tokens(query)
+        if self.bm25 is not None:
+            try:
+                return [float(x) for x in self.bm25.get_scores(q)]
+            except Exception:  # noqa: BLE001
+                pass
+        # 确定性降级：查询 token 在文档里的命中比例
+        qset = set(q)
+        out = []
+        for tokens in self.tokenized_corpus:
+            if not qset or not tokens:
+                out.append(0.0)
+                continue
+            hits = sum(1 for t in tokens if t in qset)
+            out.append(hits / max(1, len(tokens)))
+        return out
 
     def retrieve(self, query: str, top_k: int = 5) -> RetrievalResult:
-        start = time.time()
-        if self.bm25 is None or not self.documents:
-            return RetrievalResult(
-                query=query,
-                documents=[],
-                total_time_ms=0.0,
-                method="bm25"
-            )
-        tokenized_query = query.split()
-        scores = self.bm25.get_scores(tokenized_query)
-        # 取 top_k
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
+        started = time.time()
+        if not self.documents:
+            return RetrievalResult(query=query, documents=[], total_time_ms=0.0,
+                                   method="bm25")
+        scores = self._scores(query)
+        indices = sorted(
+            range(len(scores)), key=lambda i: scores[i], reverse=True
+        )[:max(1, int(top_k))]
         docs = []
-        for idx in top_indices:
+        for idx in indices:
             doc = self.documents[idx]
             doc.score = float(scores[idx])
             docs.append(doc)
-        elapsed = (time.time() - start) * 1000
         return RetrievalResult(
-            query=query,
-            documents=docs,
-            total_time_ms=elapsed,
-            method="bm25"
+            query=query, documents=docs,
+            total_time_ms=(time.time() - started) * 1000.0, method="bm25",
         )
 
-import numpy as np
-from typing import List
-import faiss
-from .models import Document, RetrievalResult
-import time
+
+def _encode_sync(
+    texts: Sequence[str], embed_fn: Optional[Callable[[List[str]], Any]]
+) -> List[List[float]]:
+    """**同步**编码。调用方必须保证当前线程没有运行中的 loop。"""
+    if embed_fn is None:
+        from ..utils import embed_texts_sync
+
+        rows = embed_texts_sync(list(texts))
+    else:
+        rows = embed_fn(list(texts))
+        if asyncio.iscoroutine(rows) or isinstance(rows, asyncio.Future):
+            raise RuntimeError(
+                "同步检索不能接收异步 embed_fn，请改用 await retrieve_async()"
+            )
+    return [[float(x) for x in list(row)] for row in (rows or [])]
 
 
 class DenseRetriever:
-    """密集检索。
+    """稠密检索：批量内积（Rust kernel 优先）。
 
-    改为接收一个 embed_fn（与记忆系统同一套嵌入接口），
-    既支持同步函数也支持协程（内部用一次性 loop 跑完）。
+    `retrieve()` 是**同步**方法，用于离线回放与非异步上下文；
+    `retrieve_async()` 把整段计算 offload 到线程池，避免阻塞 Web loop。
     """
 
     def __init__(
         self,
         documents: List[Document],
         embed_fn: Optional[Callable[[List[str]], Any]] = None,
-    ):
+    ) -> None:
         self.documents = documents
         self.embed_fn = embed_fn
-        self.embeddings = None
-        self.index = None
-        self._build_index()
+        self.embeddings: List[List[float]] = []
+        self.kernel = get_kernel()
+        if documents:
+            self._build_index()
 
-    def _encode(self, texts: List[str]) -> np.ndarray:
-        if self.embed_fn is None:
-            from ..utils import embed_texts_sync
-            return embed_texts_sync(texts)
-        result = self.embed_fn(texts)
-        if asyncio.iscoroutine(result) or isinstance(result, asyncio.Future):
-            result = asyncio.run(_await_coro(result))
-        return np.asarray(result, dtype=np.float32)
-
-    def _build_index(self):
-        if not self.documents:
-            self.embeddings = np.empty((0, 0), dtype=np.float32)
-            self.index = None
-            return
+    def _build_index(self) -> None:
         texts = [doc.content for doc in self.documents]
-        self.embeddings = self._encode(texts)
-        if self.embeddings.ndim == 1:
-            self.embeddings = self.embeddings.reshape(1, -1)
-        dim = self.embeddings.shape[1]
-        self.index = faiss.IndexFlatIP(dim)  # 内积（cosine 近似）
-        self.index.add(self.embeddings.astype(np.float32))
+        encoded = _encode_sync(texts, self.embed_fn)
+        self.embeddings = self.kernel.normalize_batch(encoded)
+
+    def _score(self, query: str) -> List[float]:
+        q = _encode_sync([query], self.embed_fn)
+        if not q:
+            return [0.0] * len(self.documents)
+        query_vec = self.kernel.normalize_batch([q[0]])[0]
+        return list(self.kernel.dot_batch(query_vec, self.embeddings))
 
     def retrieve(self, query: str, top_k: int = 5) -> RetrievalResult:
-        start = time.time()
-        if self.index is None or self.index.ntotal == 0:
-            return RetrievalResult(
-                query=query,
-                documents=[],
-                total_time_ms=0.0,
-                method="dense"
-            )
-        query_vec = self._encode([query])
-        # C166：同上，faiss Python 接口 search 只接受 2 个参数
-        scores, indices = self.index.search(query_vec.astype(np.float32), top_k)
+        started = time.time()
+        if not self.documents or not self.embeddings:
+            return RetrievalResult(query=query, documents=[], total_time_ms=0.0,
+                                   method="dense")
+        scores = self._score(query)
+        indices = sorted(
+            range(len(scores)), key=lambda i: scores[i], reverse=True
+        )[:max(1, int(top_k))]
         docs = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(self.documents):
-                continue
+        for idx in indices:
             doc = self.documents[idx]
-            doc.score = float(score)
+            doc.score = float(scores[idx])
             docs.append(doc)
-        elapsed = (time.time() - start) * 1000
         return RetrievalResult(
-            query=query,
-            documents=docs,
-            total_time_ms=elapsed,
-            method="dense"
+            query=query, documents=docs,
+            total_time_ms=(time.time() - started) * 1000.0, method="dense",
         )
+
+    async def retrieve_async(self, query: str, top_k: int = 5) -> RetrievalResult:
+        """把批量内积放到线程池，不在协程里阻塞事件循环。"""
+        return await asyncio.to_thread(self.retrieve, query, top_k)

@@ -7,10 +7,10 @@ from __future__ import annotations
 import os
 from typing import List, Optional
 
-from src_py.modules.runtime import RuntimePath
+from ..runtime import RuntimePath
 
 from .models import Character, CharacterAttributes, CharacterState
-from ..pipeline.emotion.predictor import id_to_name
+from ..core.pipeline.emotion.predictor import id_to_name
 from..utils.file import yaml
 
 def create_custom(

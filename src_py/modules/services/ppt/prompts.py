@@ -87,8 +87,7 @@ SLIDES_ARTIFACT_SKILL = """## 产物技能：PPT 内容规格（Slides Spec）
       "quote": "引言原文",
       "source": "出处",
       "table": {"headers": ["列1", "列2"], "rows": [["a", "b"]]},
-      "chart": {"type": "column|bar|pie|line", "title": "图表标题",
-                "categories": ["A", "B"], "series": [{"name": "系列", "values": [1, 2]}]},
+      "chart": {"type": "column|bar|pie|line", "title": "图表标题","categories": ["A", "B"], "series": [{"name": "系列", "values": [1, 2]}]},
       "notes": "演讲者备注"
     }
   ]
@@ -126,7 +125,7 @@ def build_outline_system(template: Any = None) -> str:
                 f"- 正文版式框架：{frame}\n"
                 "内容组织要贴合上述风格，但不要输出颜色、字号等排版参数。\n"
             )
-    return "\n".join(parts)
+    return "\n".join(parts).strip()
 
 
 def build_outline_user(

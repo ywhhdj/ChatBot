@@ -9,8 +9,8 @@ from typing import Dict, List, Literal, Optional
 
 from ...events import on_event_class, types
 from ...logger import logger
-from ...manager.service.decorator import Service
-from ...pipeline.models import ToolFunction, ToolFunctionParameters
+from ..service.decorator import Service
+from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
 from ..keys import ServiceKeys
 from ..base import BaseService, ServiceState
 

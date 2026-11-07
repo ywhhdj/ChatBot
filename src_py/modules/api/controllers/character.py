@@ -91,8 +91,6 @@ def _info(char: Any) -> CharacterInfoData:
         state=_state_of(char),
     )
 
-
-@router.get("", response_model=ApiResponse[CharacterListData])
 async def list_characters() -> ApiResponse[CharacterListData]:
     """角色列表。"""
     mgr = _mgr()
@@ -106,7 +104,6 @@ async def list_characters() -> ApiResponse[CharacterListData]:
     )
 
 
-@router.get("/presets", response_model=ApiResponse[Dict[str, Any]])
 async def presets() -> ApiResponse[Dict[str, Any]]:
     """可用预设模板。"""
     from ...characters import presets as _p
@@ -133,7 +130,6 @@ async def presets() -> ApiResponse[Dict[str, Any]]:
     })
 
 
-@router.get("/current", response_model=ApiResponse[CharacterInfoData])
 async def current() -> ApiResponse[CharacterInfoData]:
     """当前角色。"""
     char = _mgr().get_current()
@@ -141,8 +137,6 @@ async def current() -> ApiResponse[CharacterInfoData]:
         raise ApiError.not_found("当前角色（角色注册表为空）")
     return success(_info(char))
 
-
-@router.get("/{character_id}", response_model=ApiResponse[CharacterInfoData])
 async def get_character(character_id: str) -> ApiResponse[CharacterInfoData]:
     """角色详情。"""
     char = _mgr().get(character_id)
@@ -151,7 +145,6 @@ async def get_character(character_id: str) -> ApiResponse[CharacterInfoData]:
     return success(_info(char))
 
 
-@router.post("", response_model=ApiResponse[CharacterInfoData])
 async def create_character(payload: CharacterCreateRequest) -> ApiResponse[CharacterInfoData]:
     """创建角色。"""
     mgr = _mgr()
@@ -161,8 +154,6 @@ async def create_character(payload: CharacterCreateRequest) -> ApiResponse[Chara
     char = mgr.create(**payload.model_dump(exclude_none=True))
     return success(_info(char), message=f"角色 {char.id} 已创建")
 
-
-@router.put("/{character_id}", response_model=ApiResponse[CharacterInfoData])
 async def update_character(
     character_id: str,
     payload: CharacterUpdateRequest,
@@ -206,7 +197,7 @@ async def get_state(character_id: str) -> ApiResponse[CharacterStateData]:
     return success(_state_of(char))
 
 
-@router.post("/{character_id}/state", response_model=ApiResponse[CharacterStateData])
+@router.put("/{character_id}/state", response_model=ApiResponse[CharacterStateData])
 async def update_state(
     character_id: str,
     payload: CharacterStateUpdateRequest,

@@ -39,41 +39,41 @@ export const apiService = {
 
   /** Tree */
   async Tree(): Promise<API.AuditTreeData> {
-    return request<API.AuditTreeData>("get", "/api/audit/tree");
+    return request<API.AuditTreeData>("get", "/audit/tree");
   },
 
   /** Create Slot */
   async createSlot(body: API.SlotCreateRequest): Promise<API.SlotInfoData> {
-    return request<API.SlotInfoData>("post", "/api/save/slots", body);
+    return request<API.SlotInfoData>("post", "/save/slots", body);
   },
 
   /** Delete Slot */
   async deleteSlot(slot_id: string): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("delete", `/api/save/slots/${slot_id}`);
+    return request<API.SlotActionData>("delete", `/save/slots/${slot_id}`);
   },
 
   /** Get Slot */
   async getSlot(slot_id: string): Promise<API.SlotInfoData> {
-    return request<API.SlotInfoData>("get", `/api/save/slots/${slot_id}`);
+    return request<API.SlotInfoData>("get", `/save/slots/${slot_id}`);
   },
 
   /** List Slots */
   async listSlots(): Promise<API.SlotListData> {
-    return request<API.SlotListData>("get", "/api/save/slots");
+    return request<API.SlotListData>("get", "/save/slots");
   },
 
   /** Load Slot */
   async loadSlot(slot_id: string): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("post", `/api/save/slots/${slot_id}/load`);
+    return request<API.SlotActionData>("post", `/save/slots/${slot_id}/load`);
   },
 
   /** Save Slot */
   async saveSlot(slot_id: string): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("post", `/api/save/slots/${slot_id}/save`);
+    return request<API.SlotActionData>("post", `/save/slots/${slot_id}/save`);
   },
 
   /** Toggle Slot */
   async toggleSlot(slot_id: string): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("post", `/api/save/slots/${slot_id}/toggle`);
+    return request<API.SlotActionData>("post", `/save/slots/${slot_id}/toggle`);
   },
 };

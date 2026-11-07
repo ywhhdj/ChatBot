@@ -24,7 +24,7 @@ EXEC_TIMEOUT = 30.0
 
 
 def _manager():
-    from ...tools.skills.manager import ExternalSkillManager
+    from ...core.tools.skills.manager import ExternalSkillManager
 
     return ExternalSkillManager()
 

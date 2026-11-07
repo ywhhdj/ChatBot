@@ -5,7 +5,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ...manager.saves.models import SaveSlot, SaveSlotMeta, Section, default_section, section_from_dict
 from ...utils.file import yaml
+from ...utils.file.atomic import atomic_write_json, atomic_write_yaml
 from ...logger import logger
+from . import memento
+from . import binary
 
 
 class SaveSlotManager:
@@ -51,9 +54,9 @@ class SaveSlotManager:
         return os.path.join(self.base_path, "slots", str(slot_id))
 
     def _data_path(self, slot_id: str) -> str:
-        return os.path.join(self._slot_dir(slot_id), "data.yaml")
+        return os.path.join(self.base_path, f"{slot_id}.save")
 
-    # ---------- A1：index.yaml ----------
+    # ---------- index.yaml ----------
 
     def _read_index(self) -> None:
         """读 index.yaml（只含元数据，列表展示用）。"""
@@ -83,39 +86,84 @@ class SaveSlotManager:
             payload[slot_id] = entry
             self._next_id = int(slot_id.split("_")[-1])+1
         try:
-            yaml.write_yaml(self._index_path, payload)
+            atomic_write_yaml(self._index_path, payload)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[SaveSlot] 写 index.yaml 失败: {exc}")
 
-    # ---------- A2：data.yaml ----------
+    # ---------- .save 二进制存档 ----------
 
     def _read_data(self, slot: SaveSlot) -> bool:
-        """读 `{id}/data.yaml`，槽进入已加载状态。"""
-        raw = yaml.read_yaml(self._data_path(slot.id)) or {}
-        if not isinstance(raw, dict):
-            raw = {}
-        for name in Section.all():
-            slot.data[name] = section_from_dict(name, raw.get(name))
-        slot.loader = True
-        return True
+        """读槽的当前状态。优先二进制，读不到再回退旧 data.yaml。
+
+        二进制校验失败**直接返回 False**，绝不"尽力解析"出一个缺字段的槽 ——
+        静默降级比明确拒绝危险得多：用户会以为存档完好，直到恢复时才发现。
+        """
+        path = self._data_path(slot.id)
+        if os.path.exists(path):
+            archive, code, msg = binary.read_archive(path)
+            if archive is None:
+                logger.error(
+                    f"[SaveSlot] 存档 {slot.id} 校验失败 [{code.value}]: {msg}"
+                )
+                return False
+            for name in Section.all():
+                slot.data[name] = section_from_dict(name, archive.section(name))
+            slot.loader = True
+            return True
+
+        legacy = self._legacy_data_path(slot.id)
+        if os.path.exists(legacy):
+            try:
+                raw = yaml.read_yaml(legacy) or {}
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"[SaveSlot] 旧 data.yaml 读取失败: {exc}")
+                return False
+            if not isinstance(raw, dict):
+                raw = {}
+            for name in Section.all():
+                slot.data[name] = section_from_dict(name, raw.get(name))
+            slot.loader = True
+            return True
+
+        return False
 
     def _write_data(self, slot: SaveSlot) -> bool:
-        """写 `{id}/data.yaml`。"""
+        """写 `saves/<id>.save`。原子写 + 整体/分段双重校验和。
+        """
+        os.makedirs(self.base_path, exist_ok=True)
+        # 路径指针段仍需要各自的目录（角色/会话/记忆真实数据归各自管理器）
         os.makedirs(self._slot_dir(slot.id), exist_ok=True)
+
         payload: Dict[str, Any] = {}
         for name in Section.all():
             value = slot.data.get(name)
             if hasattr(value, "to_dict"):
-                payload[name] = value.to_dict()   # type: ignore[union-attr]
+                item = value.to_dict()   # type: ignore[union-attr]
             elif isinstance(value, dict):
-                payload[name] = value
+                item = dict(value)
             else:
-                payload[name] = default_section(name)
-        try:
-            return bool(yaml.write_yaml(self._data_path(slot.id), payload))
-        except Exception as exc:  # noqa: BLE001
-            logger.error(f"[SaveSlot] 写 data.yaml 失败: {exc}")
-            return False
+                item = default_section(name)
+            if name == Section.SERVER:
+                item = _sanitize_config(item if isinstance(item, dict) else {})
+            payload[name] = item
+
+        create_time = getattr(slot.meta, "create_time", None)
+        created_at = (
+            float(create_time.timestamp()) if hasattr(create_time, "timestamp") else 0.0
+        )
+        ok = binary.write_archive(
+            self._data_path(slot.id),
+            slot_id=slot.id,
+            name=slot.name,
+            sections=payload,
+            kinds={n: Section.kind(n) for n in Section.all()},
+            reference_only={n: n in Section.PATH_SECTIONS for n in Section.all()},
+            created_at=created_at,
+            meta={"section_count": len(payload)},
+        )
+        if not ok:
+            logger.error(f"[SaveSlot] 写 .save 失败: {slot.id}")
+        return ok
 
     # ---------- 槽操作 ----------
 
@@ -291,6 +339,152 @@ class SaveSlotManager:
 
     def sync_from_sessions(self) -> bool:
         return self.save_slot()
+
+    # ---------- 快照----------
+
+    @property
+    def snapshots_root(self) -> str:
+        return self.base_path
+
+    def _next_revision(self, slot_id: str) -> str:
+        """下一个 revision 号。基于已有 revision 最大值 +1。
+
+        不基于目录数量：删掉中间 revision 后序号会重用，
+        而"同号不同内容"会让恢复预演的结论失去意义。
+        """
+        existing = memento.list_revisions(self.base_path, slot_id)
+        max_n = 0
+        for item in existing:
+            raw = str(item.get("revision", ""))
+            digits = "".join(ch for ch in raw if ch.isdigit())
+            if digits:
+                max_n = max(max_n, int(digits))
+        return f"rev-{max_n + 1:06d}"
+
+    def create_snapshot(
+        self,
+        slot_id: str = "",
+        consistency_level: "memento.ConsistencyLevel" = None,
+        *,
+        branch_id: str = "main",
+        label: str = "",
+        trigger: str = "manual",
+        parent_revision: str = "",
+    ) -> Dict[str, Any]:
+        """为槽创建一个快照 revision。
+
+        **诚实性**：memory / characters / chat_history 三段在 data.yaml 里
+        只是路径指针，所以快照默认只能是 `checkpoint` 级。
+        调用方传 `FULL` 也不会被接受 —— `SnapshotManifest.effective_level()`
+        会把含引用型 section 的快照降级回 checkpoint，并记入 warning。
+
+        流程走 memento 的 staging → 校验 → 原子发布；
+        中途失败时旧 current 完全不受影响（B1-02）。
+        """
+        with self._lock:
+            sid = slot_id or self._current_slot_id
+            slot = self._slots.get(sid or "")
+            if slot is None:
+                return {"ok": False, "code": memento.RejectCode.MISSING_FIELD.value,
+                        "message": f"槽不存在: {sid}"}
+
+            level = consistency_level or memento.ConsistencyLevel.CHECKPOINT
+            # S2-02：从旧 revision 恢复后继续保存，parent 指向**被恢复者**，
+            # 自然形成分支，不覆盖旧 revision。
+            parent = parent_revision or self._current_revision(sid) or ""
+            manifest = memento.new_manifest(
+                slot_id=sid,
+                revision=self._next_revision(sid),
+                parent_revision=parent,
+                consistency_level=level,
+                redactions=("provider_secrets",),
+                branch_id=branch_id,
+                label=label,
+                trigger=trigger,
+            )
+
+            staging = memento.prepare_staging(self.base_path, sid, manifest.operation_id)
+
+            entries = []
+            for name in Section.all():
+                value = slot.data.get(name)
+                payload = value.to_dict() if hasattr(value, "to_dict") else dict(value or {})
+                # 路径指针段不能声称是完整数据
+                reference_only = name in Section.PATH_SECTIONS
+                entries.append(memento.write_section(
+                    staging, name, payload,
+                    kind=Section.kind(name),
+                    reference_only=reference_only,
+                ))
+
+            # 写 manifest（status=prepared）
+            prepared = manifest.with_sections(tuple(entries))
+            atomic_write_json(
+                memento.manifest_path(staging), prepared.to_dict()
+            )
+
+            published, code, msg = memento.publish_revision(
+                self.base_path, sid, staging, prepared.revision
+            )
+            if published is None:
+                return {"ok": False, "code": code.value, "message": msg}
+
+            return {
+                "ok": True,
+                "code": memento.RejectCode.OK.value,
+                "revision": published.revision,
+                "consistency_level": published.effective_level().value,
+                "declared_level": published.consistency_level,
+                "sections": sorted(e.name for e in published.sections),
+                "parent_revision": published.parent_revision,
+                "branch_id": published.branch_id,
+                "label": published.label,
+                "trigger": published.trigger,
+                "warnings": (
+                    ["声明等级与实际不符，已按实际等级记录"]
+                    if published.level_is_overstated() else []
+                ),
+            }
+
+    def _current_revision(self, slot_id: str) -> str:
+        current, _, _ = memento.read_current(self.base_path, slot_id)
+        return current.revision if current else ""
+
+    def list_snapshots(self, slot_id: str = "") -> List[Dict[str, Any]]:
+        sid = slot_id or self._current_slot_id
+        if not sid:
+            return []
+        return memento.list_revisions(self.base_path, sid)
+
+    def preview_restore(
+        self, slot_id: str = "", revision: str = "", *, memory_probe=None
+    ) -> Dict[str, Any]:
+        """恢复预演。**只读**，不改任何运行态（B1-03 / S2-04）。"""
+        sid = slot_id or self._current_slot_id
+        if not sid:
+            return {"ok": False, "code": memento.RejectCode.MISSING_FIELD.value,
+                    "message": "未指定槽"}
+        plan = memento.preview_restore(
+            self.base_path, sid, revision, memory_probe=memory_probe
+        )
+        result = plan.as_dict()
+        result["ok"] = plan.safe
+        return result
+
+    def revision_graph(self, slot_id: str = "") -> Dict[str, Any]:
+        """revision DAG（S2-02）：节点/边/分支/叶子/current。只读。"""
+        sid = slot_id or self._current_slot_id
+        if not sid:
+            return {
+                "slot_id": "",
+                "nodes": [],
+                "edges": [],
+                "branches": {},
+                "heads": [], 
+                "current": "",
+                "protected": ""
+            }
+        return memento.revision_graph(self.base_path, sid)
     
     @property
     def character(self) -> Dict[str, Any]:
@@ -318,16 +512,7 @@ class SaveSlotManager:
         self._write_index()
 
 
-# 落盘前需要脱敏的字段名片段
-_SENSITIVE_KEYS = (
-    "api_key",
-    "apikey",
-    "secret",
-    "password",
-    "token",
-    "access_key",
-    "passwd"
-)
+from ...constaints import SENSITIVE_KEYS
 
 
 def _sanitize_config(data: Dict[str, Any], _depth: int = 0) -> Dict[str, Any]:
@@ -336,7 +521,7 @@ def _sanitize_config(data: Dict[str, Any], _depth: int = 0) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for k, v in data.items():
         key = str(k).lower()
-        if any(s in key for s in _SENSITIVE_KEYS) and isinstance(v, str) and v:
+        if any(s in key for s in SENSITIVE_KEYS) and isinstance(v, str) and v:
             out[k] = "***"
         elif isinstance(v, dict):
             out[k] = _sanitize_config(v, _depth + 1)

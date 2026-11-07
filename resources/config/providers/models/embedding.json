@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "sentence": {
+    "meta": {
+      "label": "Sentence ONNX",
+      "tags": [
+        "local",
+        "free",
+        "embedding",
+        "text"
+      ],
+      "deployment": "local",
+      "description": "本地 ONNX 向量编码器（emotion_classifier.models.encoder.ONNXEncoder）"
+    },
+    "endpoint": {
+      "transport": "local",
+      "runtime": "onnx-encoder",
+      "model_dir": "${EMBEDDING_MODEL_ROOT}/embedding",
+      "device": "auto"
+    },
+    "models": [
+      {
+        "id": "all-MiniLM-L6-v2",
+        "label": "All-MiniLM-L6-v2",
+        "params": {
+          "model_path": {
+            "default": "${EMBEDDING}/embedding/all-MiniLM-L6-v2"
+          }
+        }
+      },
+      {
+        "id": "bge-small-zh-v1.5",
+        "label": "BGE Small ZH v1.5",
+        "params": {
+          "model_path": {
+            "default": "${EMBEDDING}/embedding/bge-small-zh-v1.5"
+          }
+        }
+      }
+    ],
+    "params": {
+      "model_path": {
+        "type": "string",
+        "label": "模型目录",
+        "description": "ONNX 模型目录，需包含模型文件与 tokenizer 子目录",
+        "default": "${EMBEDDING}/embedding/all-MiniLM-L6-v2",
+        "required": true,
+        "scope": "init"
+      },
+      "device": {
+        "type": "string",
+        "label": "计算设备",
+        "description": "auto 表示自动检测 CUDA，否则回退 CPU",
+        "default": "auto",
+        "required": false,
+        "scope": "init",
+        "enum": [
+          {
+            "value": "auto",
+            "label": "自动"
+          },
+          {
+            "value": "cpu",
+            "label": "CPU"
+          },
+          {
+            "value": "cuda",
+            "label": "CUDA"
+          },
+          {
+            "value": "cuda:0",
+            "label": "CUDA:0"
+          },
+          {
+            "value": "mps",
+            "label": "MPS"
+          }
+        ]
+      },
+      "thread_pool_size": {
+        "type": "integer",
+        "label": "线程池大小",
+        "default": 4,
+        "required": false,
+        "scope": "init",
+        "min": 1,
+        "max": 32
+      },
+      "normalize": {
+        "type": "boolean",
+        "label": "L2 归一化",
+        "default": true,
+        "required": false,
+        "scope": "request"
+      },
+      "batch_size": {
+        "type": "integer",
+        "label": "批处理大小",
+        "default": 32,
+        "required": false,
+        "scope": "request",
+        "min": 1,
+        "max": 512
+      }
+    }
+  },
+  "openai": {
+    "meta": {
+      "label": "OpenAI",
+      "tags": [
+        "cloud",
+        "paid",
+        "embedding",
+        "text"
+      ],
+      "deployment": "cloud",
+      "region": "us",
+      "description": "OpenAI 官方 Embedding API",
+      "docs_url": "https://platform.openai.com/docs/guides/embeddings"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.openai.com/v1",
+      "chat_path": "/embeddings",
+      "protocol": "openai",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 30.0,
+      "max_retries": 3
+    },
+    "models": [
+      {
+        "id": "text-embedding-3-small",
+        "label": "text-embedding-3-small",
+        "tags": [
+          "text"
+        ]
+      },
+      {
+        "id": "text-embedding-3-large",
+        "label": "text-embedding-3-large",
+        "tags": [
+          "text"
+        ]
+      },
+      {
+        "id": "text-embedding-ada-002",
+        "label": "text-embedding-ada-002",
+        "tags": [
+          "text"
+        ]
+      }
+    ],
+    "params": {
+      "organization": {
+        "type": "string",
+        "label": "组织 ID",
+        "default": null,
+        "required": false,
+        "scope": "init"
+      },
+      "normalize": {
+        "type": "boolean",
+        "label": "L2 归一化",
+        "default": true,
+        "required": false,
+        "scope": "request"
+      },
+      "batch_size": {
+        "type": "integer",
+        "label": "批处理大小",
+        "description": "OpenAI 单次请求的 input 上限较大，此处仅控制客户端分批",
+        "default": 16,
+        "required": false,
+        "scope": "request",
+        "min": 1,
+        "max": 2048
+      }
+    }
+  },
+  "ollama": {
+    "meta": {
+      "label": "Ollama",
+      "tags": [
+        "local",
+        "free",
+        "embedding",
+        "text"
+      ],
+      "deployment": "local",
+      "description": "本机 Ollama Embedding 服务"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "http://localhost:11434",
+      "chat_path": "/api/embeddings",
+      "protocol": "ollama",
+      "auth": {
+        "type": "none"
+      },
+      "timeout": 60.0,
+      "max_retries": 3
+    },
+    "models": [
+      {
+        "id": "nomic-embed-text",
+        "label": "Nomic Embed Text",
+        "tags": [
+          "text"
+        ]
+      },
+      {
+        "id": "mxbai-embed-large",
+        "label": "MXBai Embed Large",
+        "tags": [
+          "text"
+        ]
+      },
+      {
+        "id": "bge-m3",
+        "label": "BGE-M3",
+        "tags": [
+          "text",
+          "multilingual"
+        ]
+      }
+    ],
+    "params": {
+      "normalize": {
+        "type": "boolean",
+        "label": "L2 归一化",
+        "default": true,
+        "required": false,
+        "scope": "request"
+      },
+      "batch_size": {
+        "type": "integer",
+        "label": "批处理大小",
+        "description": "Ollama 不支持批量，固定为 1（内部逐条请求）",
+        "default": 1,
+        "required": false,
+        "scope": "request",
+        "min": 1,
+        "max": 1
+      }
+    }
+  }
+}

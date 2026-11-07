@@ -21,7 +21,7 @@ SECRET_KEYS = ("api_key", "token", "secret", "password")
 
 
 def _adapter_type(value: str):
-    from ...pipeline.enum import AdapterType
+    from ...core.pipeline.enum import AdapterType
 
     try:
         return AdapterType(value)
@@ -46,7 +46,7 @@ def _manager():
 @router.get("/adapters", response_model=ApiResponse[Dict[str, Any]])
 async def list_adapters() -> ApiResponse[Dict[str, Any]]:
     """列出所有适配器类型、可选 provider 与当前 provider。"""
-    from ...pipeline.enum import AdapterType
+    from ...core.pipeline.enum import AdapterType
 
     pm = _manager()
     out: Dict[str, Any] = {}
@@ -58,7 +58,7 @@ async def list_adapters() -> ApiResponse[Dict[str, Any]]:
             providers = []
         current = None
         try:
-            from ...pipeline.manager import LLM, TTS
+            from ...core.pipeline.manager import LLM, TTS
 
             mapping = {"llm": LLM, "tts": TTS}
             cls = mapping.get(key)

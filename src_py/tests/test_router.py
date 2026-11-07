@@ -10,7 +10,7 @@ sys.path.insert(0, project_root)
 
 if __name__ == "__main__":
     # 创建增强版路由器
-    from modules.routes.intent import IntentRouter
+    from src_py.modules.core.routes.intent import IntentRouter
     router = IntentRouter()
     
     # 测试用例

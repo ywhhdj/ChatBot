@@ -3,7 +3,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import models
-from ..utils.file import env
+from . import loader
 
 CONFIG_BINDINGS: List[Tuple[str, List[str]]] = [
     ("SYSTEM", ["log", "network"]),
@@ -31,7 +31,7 @@ class ConfigLoader:
         if not file_path:
             return config
         try:
-            config_dict = env.read_env(file_path)
+            config_dict = loader.read_app_config(file_path)
         except Exception as exc:
             from ..logger import logger
 
@@ -59,11 +59,6 @@ class ConfigLoader:
 
     @staticmethod
     def _get_binding_attrs(section: str) -> List[str]:
-        """C10：比较前把**两侧**都规范化成大写。
-
-        原实现只把配置文件的 section 转大写，绑定表却是小写的 ->
-        除了恰好叫 "MCP" 的那一项，其余全部匹配失败。
-        """
         wanted = _normalize_section(section)
         for bind_section, attrs in CONFIG_BINDINGS:
             if _normalize_section(bind_section) == wanted:
@@ -82,12 +77,6 @@ class ConfigManager:
         return cls.__instance
 
     def initialize(self, config_file_path: Optional[str] = None, debug: bool = False) -> models.AppConfig:
-        """C12：debug 不再决定是否读文件。
-
-        原实现 `if config_file_path is None or debug: self.__config = AppConfig()`，
-        导致以 debug 启动时全部配置回落默认值（空 api_key），LLM 无法工作。
-        debug 现在只影响默认日志级别。
-        """
         self.__loader = ConfigLoader(config_file_path)
         if config_file_path is None:
             self.__config = models.AppConfig()
@@ -118,10 +107,9 @@ class ConfigManager:
         if not file_path:
             raise ValueError("Config file path is required")
         serialized = self.__serialize_config(self.get_config())
-        env.write_env(file_path, serialized)
+        loader.write_app_config(file_path, serialized)
 
     def __serialize_config(self, config: models.AppConfig) -> Dict[str, Dict[str, Any]]:
-        """把 attr 的字段**平铺**进 section。"""
         result: Dict[str, Dict[str, Any]] = {}
         for section, attrs in CONFIG_BINDINGS:
             section_data: Dict[str, Any] = {}

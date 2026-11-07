@@ -6,6 +6,7 @@ pub mod scheduler;
 pub mod stream;
 pub mod task;
 pub mod timer;
+pub mod memory;
 
 use pyo3::prelude::*;
 use pyo3::types::PyModuleMethods;
@@ -33,6 +34,12 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("PRIORITY_NORMAL", Priority::NORMAL)?;
     m.add("PRIORITY_HIGH", Priority::HIGH)?;
     m.add("PRIORITY_CRITICAL", Priority::CRITICAL)?;
+
+    // ── 记忆重计算内核（L2 归一化 / RRF / 遗忘曲线 / embedding 后端契约）──
+    m.add_class::<crate::memory::PyMemoryKernel>()?;
+    m.add_function(wrap_pyfunction!(crate::memory::has_memory_kernel, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::memory::has_embedding_backend, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::memory::memory_kernel_constants, m)?)?;
 
     Ok(())
 }

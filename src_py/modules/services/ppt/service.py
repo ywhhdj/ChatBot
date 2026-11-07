@@ -17,30 +17,28 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from ...pipeline.enum import AdapterType
 from ...events import on_event_class, types
 from ...logger import logger
-from ...manager.service.decorator import Service
-from ...pipeline.models import ToolFunction, ToolFunctionParameters
-from .. import ServiceId
+from ..service.decorator import Service
+from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
+
 from ..base import BaseService, ServiceState
 from .models import DeckSpec, RenderResult, TemplateSpec
 from .renderer import PptRenderService
-from .template import get_template_service
+from .template import get_template_service,DEFAULT_TEMPLATE_ID
+from .prompts import build_outline_system, build_outline_user,OFFICIAL_CONVENTIONS
+
+from ... import keys
+from ... import events
 
 # 任务表：task_id -> {...}
 _JOBS: Dict[str, Dict[str, Any]] = {}
 _JOB_LOCK = threading.RLock()
 
-def get_llm() -> Any:
-    from ...manager.pipeline import pipeline_manager
-    return pipeline_manager.__get_adapter_manager(AdapterType.LLM)
-
-
 @on_event_class([
     (types.PptEventType.PPT_STOP, "stop"),
 ])
-@Service(id=ServiceId.PPT)
+@Service(id=keys.ServiceKeys.PPT)
 class PptService(BaseService):
     """PPT 生成服务。
 
@@ -71,6 +69,26 @@ class PptService(BaseService):
         self.renderer = PptRenderService(output_dir=output_dir or None)
         self.running = True
         self.set_status()
+        self.context_profile = {
+            "dedicated_stage": True,
+            # 只带"沟通策略 + 产出物约定"，不带设计师人设 ——
+            # 人设属于服务内部的大纲生成阶段，由 prompts.build_outline_system 提供
+            "system_prompt": "\n".join([
+                "## PPT 服务作业约定",
+                OFFICIAL_CONVENTIONS.strip(),
+            ]),
+            "keep_character": False,
+            "keep_history": False,
+            "directives": [
+                "回复只讲产出了什么、放在哪里，用相对路径列出文件。",
+                "不要汇报中间用了哪些命令和库，不要输出 JSON 或代码。",
+            ],
+            "budget": {
+                # 大纲/渲染阶段的正文更长，常规 3000 会截断
+                "total_tokens": 8000,
+                "reserve_for_input": 1024,
+            },
+        }
 
     # ---------- 状态 ----------
 
@@ -101,14 +119,10 @@ class PptService(BaseService):
         template_id: Optional[str] = None,
     ) -> DeckSpec:
         """调 Kimi 生成结构化大纲。"""
-        from .prompts import build_outline_system, build_outline_user
-
-        tpl = self.resolve_template(template_id, style)
-        llm = get_llm()
-        if not llm.is_init:
-            raise RuntimeError("LLM 未配置：缺少 MOONSHOT_API_KEY")
-
+        tpl =self.resolve_template(template_id, style)
         system = build_outline_system(tpl)
+        #更新上下文
+        self.context_profile["system_prompt"]=system
         user = build_outline_user(
             topic=topic,
             pages=int(pages or self.default_pages),
@@ -117,7 +131,9 @@ class PptService(BaseService):
             style=style,
             material=material,
         )
-        data = llm.complete_json(system, user)
+        data=events.emit(events.types.ProviderEventType.LLM_GENERATE)
+        if not data:
+            raise RuntimeError("LLM 未返回任何信息")
         deck = DeckSpec.from_dict(data)
         if not deck.slides:
             raise RuntimeError("LLM 未返回任何页面")
@@ -134,6 +150,7 @@ class PptService(BaseService):
         file_name: Optional[str] = None,
     ) -> RenderResult:
         tpl = self.resolve_template(template_id, style, colors)
+        logger.info(f"PPT 渲染：{len(deck.slides)} 页，模板 {tpl.name}，输出目录 {self.output_dir}")
         return self.renderer.render(deck, tpl, file_name)
 
     def generate(
@@ -145,11 +162,11 @@ class PptService(BaseService):
         material: str = "",
         audience: str = "",
         scenario: str = "",
-        file_name: Optional[str] = None,
-    ) -> RenderResult:
+        file_name: Optional[str] = None
+    ) -> str:
         """一步到位：大纲 + 渲染。"""
         deck = self.outline(topic, pages, audience, scenario, style, material, template_id)
-        return self.render(deck, template_id, style, file_name=file_name)
+        return self.render(deck, template_id, style, file_name=file_name).prompt()
 
     @staticmethod
     def _ensure_edges(deck: DeckSpec, topic: str) -> None:
@@ -183,7 +200,7 @@ class PptService(BaseService):
                 "created_at": time.time()
             }
 
-        def _job() -> RenderResult:
+        def _job() -> str:
             return self.generate(**kwargs)
 
         ref = runtime.manager.task_manager.submit(_job, timeout=600.0, task_type="sync")  # type: ignore[union-attr]

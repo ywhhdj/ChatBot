@@ -176,4 +176,13 @@ class RenderResult:
             "template_id": self.template_id,
             "message": self.message,
         }
-
+    
+    def prompt(self) -> str:
+        """返回官方约定的提示词，告诉大模型任务完成，产出什么、放在哪里。"""
+        p=[
+            "你已经完成了 PPT 渲染任务，信息如下：",
+            f"- 渲染结果：{'成功' if self.ok else '失败'}",
+            f"- 文件路径：{self.file_path}",
+            f"- 文件名：{self.file_name}",
+        ]
+        return "\n".join(p).strip()

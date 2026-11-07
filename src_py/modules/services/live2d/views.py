@@ -8,7 +8,7 @@ from ...runtime import RuntimePath
 from .. import base
 from ...logger import logger
 from ...events import emit, off, on_event_class, types as eventType, on
-from ...manager.service.decorator import Service
+from ..service.decorator import Service
 from PyQt6.QtCore import QObject
 from ..keys import ServiceKeys
 
