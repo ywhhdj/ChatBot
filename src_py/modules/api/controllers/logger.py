@@ -1,5 +1,3 @@
-﻿"""日志接口：级别读写、统计、近期记录、强制落盘。"""
-
 from __future__ import annotations
 
 import logging

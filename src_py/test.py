@@ -6,7 +6,7 @@ import httpx
 import os
 import sys
 
-from modules.context.audio import AudioContext
+from src_py.modules.core.context.audio import AudioContext
 from src_py.modules.core.native import decorator
 
 

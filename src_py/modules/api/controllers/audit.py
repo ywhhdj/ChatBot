@@ -43,7 +43,7 @@ def _tool_to_audit(service: str, tool: Any) -> Dict[str, Any]:
 
 
 def _collect() -> Dict[str, Any]:
-    from ...manager.service.manager import service_manager
+    from ...services.service.manager import service_manager
 
     services: List[Dict[str, Any]] = []
     total = 0
@@ -104,17 +104,3 @@ async def tools() -> ApiResponse[Dict[str, Any]]:
             flat.append(t)
     flat.extend(data["skills"])
     return success({"tools": flat, "total": len(flat)})
-
-
-# --------------------------------------------------------------------------
-# 路由
-# --------------------------------------------------------------------------
-
-@router.get("/tree", response_model=ApiResponse[AuditTreeData])
-async def _tree() -> ApiResponse[AuditTreeData]:
-    return await tree()
-
-
-@router.get("/tools", response_model=ApiResponse[Dict[str, Any]])
-async def _tools() -> ApiResponse[Dict[str, Any]]:
-    return await tools()

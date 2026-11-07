@@ -1,12 +1,4 @@
-"""各服务的 UI 配置描述。
-
-`manager/service/manager.py` 里 `from ...services import ServiceId, config`
-随后 `config.ObsConfig().get_ui_config_items()` —— 这个子模块在源码中缺失，
-服务 UI 描述接口一调用就 ImportError。
-
-这里提供最小可用实现：每个 Config 用 `get_ui_config_items()` 返回
-一组「字段描述」，供前端渲染设置面板，不依赖真实服务是否启动。
-"""
+"""各服务的 UI 配置描述。"""
 
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Type, TypeVar

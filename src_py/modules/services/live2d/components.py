@@ -381,7 +381,7 @@ class FaceTrackerComponent:
     B39 QTimer 没有 parent，改为由本组件长期持有（组件 -> controller -> view
         的引用链足够长），并在 stop()/close() 里显式停表，避免静默失效。
     """
-    from ...pipeline.adapters.landmarker.face import ResultFaceData
+    from ...core.pipeline.adapters.landmarker.face import ResultFaceData
 
     def __init__(self,
             model_path: Optional[Union[str, Path]]=None,
@@ -408,7 +408,7 @@ class FaceTrackerComponent:
             raise ValueError("FaceTrackerTask is not initialized")
         if self.__face_tracker:
             return
-        from ...pipeline.adapters.landmarker.face import FaceTracker
+        from ...core.pipeline.adapters.landmarker.face import FaceTracker
         self.__face_tracker = FaceTracker(
             str(self.model_path),
             source=self.__source,

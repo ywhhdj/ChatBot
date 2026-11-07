@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 from typing import Any, Callable, Dict, Literal, Optional
+
 from .common.async_dispatch import get_async_dispatch
 from ...logger import logger
 
@@ -39,12 +40,10 @@ class _Handle:
         return bool(self._sch._raw.wait(self._id, timeout))
 
     def result(self, timeout: Optional[float] = None) -> Any:
-        if timeout is not None:
-            if not self.wait(timeout):
-                raise TimeoutError(f"任务 {self._id} 超时")
-        st = self.status
-        if st in ("pending", "running"):
-            self.wait(None)
+        if timeout is None:
+            timeout = ASYNC_EXEC_TIMEOUT       # 默认给安全上限，绝不无限等
+        if not self.wait(timeout):
+            raise TimeoutError(f"任务 {self._id} 超时（{timeout}s）")
         return self._sch._raw.result(self._id)
 
     def cancel(self) -> bool:
@@ -61,8 +60,12 @@ class _Handle:
         绝不能在调用方 loop 上直接阻塞。
         """
         from .common._await import wait_async_generic
-
-        return await wait_async_generic(self.done, self.result, timeout)
+        t = timeout if timeout is not None else ASYNC_EXEC_TIMEOUT
+        return await wait_async_generic(
+            self.done,
+            lambda: self.result(t),        # ← 显式绑定 timeout
+            t,
+        )
     
     def then(
         self,
@@ -159,7 +162,9 @@ class PyScheduler:
         return bool(self._raw.wait(task_id, timeout))
 
     def result_of(self, task_id: str, timeout: Optional[float] = None) -> Any:
-        if timeout is not None and not self.wait(task_id, timeout):
+        if timeout is None:
+            timeout = ASYNC_EXEC_TIMEOUT
+        if not self.wait(task_id, timeout):
             raise TimeoutError(f"任务 {task_id} 超时")
         return self._raw.result(task_id)
 

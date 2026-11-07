@@ -2,8 +2,6 @@ import weakref
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar
 
-from regex import R
-
 from .. import runtime
 from .data import BaseEvent
 from . import types
@@ -67,7 +65,7 @@ def on_event_class(events: list[tuple[str, str]]):
                     raise ValueError(f"方法 {method_name} 不是可调用的")
                 # B12：弱引用注册，避免总线强持有实例
                 if hasattr(method, "__self__"):
-                    runtime.manager.event_bus.on(event_type, weakref.WeakMethod(method), weak=True)  # type: ignore[union-attr]
+                    runtime.manager.event_bus.on(event_type, method, weak=True)  # type: ignore[union-attr]
                 else:
                     runtime.manager.event_bus.on(event_type, method)  # type: ignore[union-attr]
 

@@ -1,3 +1,4 @@
+import threading
 from typing import Any, Optional
 from ....logger import logger
 
@@ -5,44 +6,43 @@ class _NativeAsyncDispatch:
     """把协程送到长期存活的 loop —— 给 `events` 用。"""
 
     def __init__(self) -> None:
-        self._submitter = None       # 外部注入的优先
+        self._submitter = None
         self._own_loop = None
         self._own_thread = None
-
-    def set_submitter(self, fn) -> None:
-        self._submitter = fn
+        self._loop_lock = threading.Lock()      # 新增
 
     def _ensure_own_loop(self):
-        """没有注入时自建一个后台 loop —— 保证 `is_available()` 恒为真。"""
         import asyncio
-        import threading
 
         if self._own_loop is not None:
             return self._own_loop
-        loop = asyncio.new_event_loop()
-        ready = threading.Event()
+        with self._loop_lock:
+            if self._own_loop is not None:      # 双重检查
+                return self._own_loop
+            loop = asyncio.new_event_loop()
+            ready = threading.Event()
 
-        def _run():
-            asyncio.set_event_loop(loop)
-            loop.call_soon(ready.set)
-            try:
-                loop.run_forever()
-            finally:
+            def _run():
+                asyncio.set_event_loop(loop)
+                loop.call_soon(ready.set)
                 try:
-                    loop.close()
-                except Exception:  # noqa: BLE001
-                    pass
+                    loop.run_forever()
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
 
-        t = threading.Thread(
-            target=_run,
-            name="native-async-dispatch",
-            daemon=True
-        )
-        t.start()
-        ready.wait(5.0)
-        self._own_loop = loop
-        self._own_thread = t
-        return loop
+            t = threading.Thread(
+                target=_run,
+                name="native-async-dispatch",
+                daemon=True,
+            )
+            t.start()
+            ready.wait(5.0)
+            self._own_loop = loop
+            self._own_thread = t
+            return loop
 
     def dispatch(self, coro) -> Any:
         fn = self._submitter

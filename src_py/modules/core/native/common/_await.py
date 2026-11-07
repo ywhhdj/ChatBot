@@ -221,7 +221,7 @@ def then_generic(
             print(f"[native.then] success_callback 抛异常: {cb_exc}")
 
     # 延迟导入，避免 _await → native 的模块级环
-    from .. import get_async_dispatch
+    from .async_dispatch import get_async_dispatch
 
     get_async_dispatch().dispatch(_run())
     return handle

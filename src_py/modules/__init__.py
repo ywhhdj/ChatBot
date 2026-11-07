@@ -1,6 +1,4 @@
 from typing import Literal
-from .app import Application
-
 __version__ = "0.1.2"
 
 _app = None
@@ -12,6 +10,7 @@ def create_app(
 ):
     global _app
     if _app is None:
+        from .app import Application
         _app = Application(app_name, debug, debug_modules)
     return _app
 

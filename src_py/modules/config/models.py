@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 from pydantic import BaseModel, Field, ValidationError
 
 from ..runtime import RuntimePath
-from ..pipeline.enum import ASRProviderType, LLMProviderType, TTSProviderType
 
 
 class _BaseConfig(BaseModel):
@@ -112,7 +111,8 @@ class WebConfig(_BaseConfig):
 
 
 class TTSConfig(_BaseConfig):
-    provider: str = Field(default=TTSProviderType.GPTSoVITS.value, description="语音合成供应商")
+    enabled: bool = Field(default=False, description="是否启用语音合成")
+    provider: str = Field(default="GPTSovits", description="语音合成供应商")
     output_type: str = Field(default="mp3", description="输出文件类型")
     base_url: str = Field(default="http://127.0.0.1:9880", description="语音合成服务 URL")
     api_key: str = Field(default="", description="语音合成 API key")
@@ -123,7 +123,7 @@ class TTSConfig(_BaseConfig):
 
 class LLMConfig(_BaseConfig):
     enabled: bool = Field(default=True, description="是否启用 LLM")
-    provider: str = Field(default=LLMProviderType.DeepSeek.value, description="LLM 供应商")
+    provider: str = Field(default="deepseek", description="LLM 供应商")
     model: str = Field(default="deepseek-v4-flash", description="LLM 模型")
     api_key: str = Field(default="", description="LLM API key")
     base_url: str = Field(default="https://api.deepseek.com", description="LLM 服务 URL")
@@ -139,7 +139,7 @@ class LLMConfig(_BaseConfig):
 class ASRConfig(_BaseConfig):
     enabled: bool = Field(default=True, description="是否启用语音识别")
     provider: str = Field(
-        default=ASRProviderType.OPENAI_WISPER.value, description="语音识别供应商"
+        default="ope", description="语音识别供应商"
     )
     model: str = Field(default="base", description="语音识别模型")
     api_key: str = Field(default="", description="语音识别 API key")

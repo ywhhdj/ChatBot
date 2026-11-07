@@ -4,6 +4,12 @@ from pathlib import Path
 
 FileType = str|Path
 
+def file_size(path: FileType) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
 def remove_file(file_path:FileType) -> None:
     if check_exists(file_path):
         os.remove(file_path)

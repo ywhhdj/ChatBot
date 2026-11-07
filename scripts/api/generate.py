@@ -74,6 +74,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "folder":    ("folder.ts",    "folderService"),
         "status":    ("status.ts",    "statusService"),
     },
+    "op_name_style": "strip_params",
 }
 
 
@@ -476,6 +477,7 @@ class ServiceGenerator:
         # 2) 参数
         path_params: List[dict] = []
         query_params: List[dict] = []
+        
         for p in op.get("parameters", []) or []:
             loc = p.get("in")
             entry = {
@@ -518,6 +520,7 @@ class ServiceGenerator:
             "return_inner": inner,
             "return_kind": kind,
             "summary": (op.get("summary") or "").strip(),
+            "op_name": self._op_name(path, method),
         }
 
     # ---------- 返回类型解析 ----------
@@ -555,7 +558,6 @@ class ServiceGenerator:
 
     # ---------- 渲染单个方法 ----------
     def _render_method(self, m: dict) -> str:
-         # 参数列表
         params: List[str] = []
         for p in m["path_params"]:
             params.append(f"{p['name']}: {self.type_gen._schema_to_ts(p['schema'], 0)}")
@@ -573,8 +575,6 @@ class ServiceGenerator:
         if m["body_type"]:
             params.append(f"body: {m['body_type']}")
 
-        # 返回 & 泛型
-        # http.ts 的响应拦截器已经解包了 ApiResponse，这里直接声明 data 的类型
         inner = m["return_inner"]
         if inner and inner != "unknown":
             promise = f"Promise<{inner}>"
@@ -583,21 +583,62 @@ class ServiceGenerator:
             promise = "Promise<unknown>"
             request_generic = ""
 
-        # 调用参数
+        # ── 调用参数：URL / 合并后的 data / options ──
         call_args = [f'"{m["http"]}"', m["path_expr"]]
-        if m["body_type"]:
+
+        # Web 端：GET 用 query，其它用 body（保持 axios 语义）
+        # 桌面端：adapter 会把 query + body + pathParams 合并进 payload
+        if m["body_type"] and m["query_params"]:
+            # 两者都有：Web 端把 query 拼到 URL 上，body 作为 data
+            call_args.append("body")
+            # 拼 query 到 URL 由适配器在 Web 端处理；这里先把 query 放到 options
+        elif m["body_type"]:
             call_args.append("body")
         elif m["query_params"]:
             call_args.append("query")
+        else:
+            call_args.append("undefined")
+
+        # options：opName + pathParams + 可能的 query
+        opts: List[str] = [f'opName: "{m["op_name"]}"']
+        if m["path_params"]:
+            kv = ", ".join(f'{p["name"]}: {p["name"]}' for p in m["path_params"])
+            opts.append(f"pathParams: {{ {kv} }}")
+        # 有 body 也有 query：把 query 放进 options，adapter 合并
+        if m["body_type"] and m["query_params"]:
+            opts.append("query: query")
+
+        call_args.append("{ " + ", ".join(opts) + " }")
 
         call = f"request{request_generic}({', '.join(call_args)})"
-
         doc = f"  /** {m['summary']} */\n" if m["summary"] else ""
         return (
             f"{doc}  async {m['name']}({', '.join(params)}): {promise} {{\n"
             f"    return {call};\n"
             f"  }},"
         )
+    
+    def _op_name(self, path: str, method: str) -> str:
+        """从路径模板和 method 算出与后端 gateway 对齐的 op 名。"""
+        p = path
+        if self.strip_prefix and p.startswith(self.strip_prefix):
+            p = p[len(self.strip_prefix):]
+        parts = [x for x in p.split("/") if x]
+
+        # 跳过版本号段
+        if parts and re.match(r"^v\d+$", parts[0]):
+            parts = parts[1:]
+
+        style = self.config.get("op_name_style", "strip_params")
+        if style == "keep_params":
+            segs = parts
+        elif style == "method_path":
+            # GET:session.messages 形式
+            segs = [x for x in parts if not (x.startswith("{") and x.endswith("}"))]
+            return f"{method.upper()}:" + ".".join(segs)
+        else:  # strip_params
+            segs = [x for x in parts if not (x.startswith("{") and x.endswith("}"))]
+        return ".".join(segs)
 
 
 # ============================================================

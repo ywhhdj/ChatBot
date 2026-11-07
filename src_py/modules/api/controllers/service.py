@@ -24,7 +24,7 @@ router = APIRouter(prefix="/service", tags=["service"])
 
 
 def _sm():
-    from ...manager.service.manager import service_manager
+    from ...services.service.manager import service_manager
 
     return service_manager
 

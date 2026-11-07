@@ -51,7 +51,7 @@ STREAM_TIMEOUT = 600.0
 def _route_type(value: Optional[str]):
     if not value:
         return None
-    from ...routes.models import RouteType
+    from ...core.routes.models import RouteType
 
     try:
         return RouteType(value)
@@ -93,7 +93,7 @@ def open_folder(type: str):
 @router.get("/status", response_model=ApiResponse[RequestStatusData])
 async def status() -> ApiResponse[RequestStatusData]:
     """LLM / TTS / ASR 的初始化状态。"""
-    from ...pipeline import chat
+    from ...core.pipeline import chat
 
     data = RequestStatusData()
 
@@ -129,7 +129,7 @@ async def status() -> ApiResponse[RequestStatusData]:
 @router.post("/chat", response_model=ApiResponse[ChatResultData])
 async def chat_once(payload: ChatRequest) -> ApiResponse[ChatResultData]:
     """非流式对话。"""
-    from ...pipeline import chat
+    from ...core.pipeline import chat
 
     if not payload.text.strip():
         raise ApiError.bad_request("text 不能为空")
@@ -166,7 +166,7 @@ async def chat_stream(payload: ChatRequest) -> StreamingResponse:
     每帧 `data: {"type":"chunk","text":"..."}`，结束帧
     `data: {"type":"done","elapsed_ms":...}`。
     """
-    from ...pipeline import chat
+    from ...core.pipeline import chat
 
     if not payload.text.strip():
         raise ApiError.bad_request("text 不能为空")
@@ -238,7 +238,7 @@ class _suppress:
 @router.post("/tts", response_model=ApiResponse[TTSResultData])
 async def tts(payload: TTSRequest) -> ApiResponse[TTSResultData]:
     """文本转语音，返回 base64 音频。"""
-    from ...pipeline import chat
+    from ...core.pipeline import chat
 
     if not payload.text.strip():
         raise ApiError.bad_request("text 不能为空")
@@ -267,7 +267,7 @@ async def tts(payload: TTSRequest) -> ApiResponse[TTSResultData]:
 @router.post("/asr", response_model=ApiResponse[ASRResultData])
 async def asr(payload: ASRRequest) -> ApiResponse[ASRResultData]:
     """语音转文本，audio 为 base64 编码的音频字节。"""
-    from ...pipeline import chat
+    from ...core.pipeline import chat
 
     try:
         audio = base64.b64decode(payload.audio)

@@ -18,6 +18,6 @@ __all__ = [
 
 def __getattr__(name):
     if name == "CharacterOrchestrator":
-        from ..pipeline.orchestrator import CharacterOrchestrator
+        from ..core.pipeline.orchestrator import CharacterOrchestrator
         return CharacterOrchestrator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

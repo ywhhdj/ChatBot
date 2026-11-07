@@ -5,7 +5,7 @@ from src_py.modules.runtime import RuntimePath
 
 from .... import events
 from .manager import get_websocket_manager
-from ....pipeline import chat
+from ....core.pipeline import chat
 
 async def handle_download_model(client_id: str, model_name: str, save_path: str = ""):
     manager = get_websocket_manager()
@@ -69,7 +69,7 @@ async def handle_download_model(client_id: str, model_name: str, save_path: str 
             )
                 return
 
-            from ....pipeline.downloads.landmarker import download_google_facelandmarker as downloader
+            from ....core.pipeline.downloads.landmarker import download_google_facelandmarker as downloader
         elif model_name == "paddle_ocr":
             path=RuntimePath.get_models_path("paddleocr/paddleocr.task")
             if path.exists():
@@ -83,9 +83,9 @@ async def handle_download_model(client_id: str, model_name: str, save_path: str 
             )
                 return
 
-            from ....pipeline.downloads.ocr import download_paddle_ocr as downloader
+            from ....core.pipeline.downloads.ocr import download_paddle_ocr as downloader
         elif model_name == "umi_ocr":
-            from ....pipeline.downloads.ocr import download_umi_ocr as downloader
+            from ....core.pipeline.downloads.ocr import download_umi_ocr as downloader
         else:
             # W13：不支持的模型 -> 报错后返回，不能再发 "开始下载"
             await _send(

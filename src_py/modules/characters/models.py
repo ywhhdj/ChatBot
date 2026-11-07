@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, TypedDict
 from enum import Enum
-from ..routes.models import RouteType
+from ..core.routes.models import RouteType
 
 
 def _jsonable(value: Any) -> Any:
@@ -91,7 +91,7 @@ class CharacterState:
 
     C55：与 UserContext 分工明确，避免两套历史各自裁剪导致不一致：
         - CharacterState.messages —— 该角色的**长期**对话记忆
-        - UserContext._messages   —— 本轮/近期上下文 + 记忆系统注入
+        - UserContext.messages   —— 本轮/近期上下文 + 记忆系统注入
     """
     character_id: str = ""
     status: CharacterStatus = CharacterStatus.IDLE

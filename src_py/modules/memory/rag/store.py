@@ -15,6 +15,10 @@ class DocumentStore:
         self.storage_path = Path(storage_path)
         self.documents: Dict[str, Document] = {}
         self._load()
+    
+    def get_document(self, id: str) -> Document | None:
+        #懒加载，获取才加载
+        return self.documents.get(id)
 
     def _load(self):
         data=json.read_json(self.storage_path)

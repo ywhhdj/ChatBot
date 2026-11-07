@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional
 
 from ...events import on_event_class, types as eventType
 from ...logger import logger
-from ...manager.service.decorator import Service
-from ...pipeline.models import ToolFunction, ToolFunctionParameters
+from ..service.decorator import Service
+from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
 from ...utils import util
 from ..keys import ServiceKeys
 from ..base import BaseService, ServiceState

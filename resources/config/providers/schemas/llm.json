@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "capability": "llm",
+  "params": {
+    "temperature": {
+      "type": "number",
+      "label": "温度",
+      "description": "采样随机性，越大越发散",
+      "default": 0.7,
+      "min": 0,
+      "max": 2,
+      "step": 0.1,
+      "ui": "slider",
+      "required": false,
+      "scope": "request"
+    },
+    "max_tokens": {
+      "type": "integer",
+      "label": "最大 token",
+      "description": "单次生成上限",
+      "default": 1024,
+      "min": 1,
+      "ui": "number",
+      "required": false,
+      "scope": "request"
+    },
+    "top_p": {
+      "type": "number",
+      "label": "Top P",
+      "default": 1.0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "ui": "slider",
+      "required": false,
+      "scope": "request"
+    },
+    "presence_penalty": {
+      "type": "number",
+      "label": "存在惩罚",
+      "default": 0.0,
+      "min": -2,
+      "max": 2,
+      "step": 0.1,
+      "ui": "slider",
+      "required": false,
+      "scope": "request"
+    },
+    "frequency_penalty": {
+      "type": "number",
+      "label": "频率惩罚",
+      "default": 0.0,
+      "min": -2,
+      "max": 2,
+      "step": 0.1,
+      "ui": "slider",
+      "required": false,
+      "scope": "request"
+    }
+  }
+}

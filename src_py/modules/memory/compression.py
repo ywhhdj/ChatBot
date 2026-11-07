@@ -7,7 +7,6 @@ import json
 from datetime import datetime
 from typing import Any, Generic, List, Optional, TypeVar
 
-from ..config.builder import prompt_builder
 from ..logger import logger
 from ..models import Role,TimeRange,CompressedContext,MessageContext
 
@@ -15,7 +14,7 @@ T=TypeVar("T",bound=MessageContext)
 
 
 
-# C106：兜底模板，prompts 里没有 compressor 时使用
+# 兜底模板，prompts 里没有 compressor 时使用
 _FALLBACK_TEMPLATE = """请将以下对话压缩为结构化摘要。
 
 要求：
@@ -44,10 +43,10 @@ class ContextCompressor(Generic[T]):
 
     def __load_template(self) -> str:
         try:
-            prompts = getattr(prompt_builder, "prompts", None) or {}
-            template = prompts.get("compressor")
-            if template:
-                return str(template)
+            # # template = prompts.get("compressor")
+            # # if template:
+            #     return str(template)
+            pass
         except Exception as exc:
             logger.debug(f"[Compressor] 读取压缩模板失败: {exc}")
         return _FALLBACK_TEMPLATE

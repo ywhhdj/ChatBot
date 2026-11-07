@@ -1,0 +1,163 @@
+{
+  "groups": {
+    "audit": {
+      "label": "audit",
+      "ops": [
+        "audit.tree",
+        "audit.tools"
+      ]
+    },
+    "character": {
+      "label": "character",
+      "ops": [
+        "character.presets",
+        "character.current",
+        "character.get",
+        "character.update",
+        "character.delete",
+        "character.switch",
+        "character.state.get",
+        "character.state.update"
+      ]
+    },
+    "config": {
+      "label": "config",
+      "ops": [
+        "config.patch.section",
+        "config.reload",
+        "config.save",
+        "config.schema"
+      ]
+    },
+    "device": {
+      "label": "device",
+      "ops": [
+        "device.device.info"
+      ]
+    },
+    "logger": {
+      "label": "logger",
+      "ops": [
+        "logger.get.level",
+        "logger.set.level",
+        "logger.list.levels",
+        "logger.stats",
+        "logger.records",
+        "logger.flush"
+      ]
+    },
+    "memory": {
+      "label": "memory",
+      "ops": [
+        "memory.layers",
+        "memory.short.term",
+        "memory.long.term",
+        "memory.search",
+        "memory.compressed",
+        "memory.stats",
+        "memory.decay",
+        "memory.flush",
+        "memory.delete.memory"
+      ]
+    },
+    "pipeline": {
+      "label": "pipeline",
+      "ops": [
+        "pipeline.list.adapters",
+        "pipeline.list.providers",
+        "pipeline.get.provider",
+        "pipeline.switch",
+        "pipeline.stop.adapter",
+        "pipeline.all.configs"
+      ]
+    },
+    "ppt": {
+      "label": "ppt",
+      "ops": [
+        "ppt.templates",
+        "ppt.outline",
+        "ppt.render",
+        "ppt.render_async",
+        "ppt.status",
+        "ppt.download"
+      ]
+    },
+    "常规请求": {
+      "label": "常规请求",
+      "ops": [
+        "open.folder",
+        "request.status",
+        "chat.once",
+        "chat.stream",
+        "request.tts",
+        "request.asr",
+        "progress.stream"
+      ]
+    },
+    "save": {
+      "label": "save",
+      "ops": [
+        "save.list.slots",
+        "save.slot.create",
+        "save.slot.get",
+        "save.slot.delete",
+        "save.slot.toggle",
+        "save.slot.save",
+        "save.slot.load"
+      ]
+    },
+    "service": {
+      "label": "service",
+      "ops": [
+        "service.tools",
+        "service.get",
+        "service.service.tools",
+        "service.service.ui",
+        "service.start",
+        "service.stop",
+        "service.config.get",
+        "service.config.update",
+        "service.apply.config"
+      ]
+    },
+    "session": {
+      "label": "session",
+      "ops": [
+        "session.get.session",
+        "session.delete.session",
+        "session.switch.session",
+        "session.messages",
+        "session.append.message",
+        "session.flush"
+      ]
+    },
+    "skill": {
+      "label": "skill",
+      "ops": [
+        "skill.prompt",
+        "skill.get",
+        "skill.reload",
+        "skill.activate",
+        "skill.deactivate",
+        "skill.execute"
+      ]
+    },
+    "system": {
+      "label": "system",
+      "ops": [
+        "system.health",
+        "system.info",
+        "system.stats",
+        "system.gc",
+        "system.ping"
+      ]
+    },
+    "task": {
+      "label": "task",
+      "ops": [
+        "task.get.task",
+        "task.cancel.task"
+      ]
+    }
+  }
+}

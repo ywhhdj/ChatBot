@@ -240,14 +240,16 @@ class JsApiBridge:
 
 async def _await_reference(ref: Any, timeout: float) -> Any:
     """await TaskReference（优先 wait_async，退化到同步等待）。"""
-    scheduler = get_scheduler()
-    if wait_async is not None:
+    if hasattr(ref, "wait_async"):
         try:
-            return await scheduler.wait_async(timeout=timeout)
+            return await asyncio.wait_for(ref.wait_async(), timeout=timeout)
         except TypeError:
             pass
-    result = scheduler.result_of(ref)
-    return result() if callable(result) else None
+    from ..core.native import get_scheduler
+    return await asyncio.get_running_loop().run_in_executor(
+        None,
+        lambda: get_scheduler().result_of(getattr(ref, "task_id", ref), timeout),
+    )
 
 
 # --------------------------------------------------------------------------
