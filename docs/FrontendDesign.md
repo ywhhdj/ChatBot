@@ -71,7 +71,7 @@ FastAPI contract (docs/api.md)
 | Character | 当前角色、角色状态显示 | 在组件里直接修改领域对象 |
 | Pipeline/Service | provider/服务状态、任务状态 | 取代后端状态机 |
 | Settings | 表单草稿、字段校验 | 将密钥存进 localStorage 或 URL |
-| Memory/Save | 查询、用户确认的删除/保存/恢复 | 自动加载存档或将低置信记忆当事实 |
+|  memory/Save | 查询、用户确认的删除/保存/恢复 | 自动加载存档或将低置信记忆当事实 |
 
 后端是业务状态的权威。成功操作后用响应数据更新或重新获取；不能仅因按钮点击就显示成功。
 

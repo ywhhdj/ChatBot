@@ -1,0 +1,140 @@
+{
+  "$schema": "../../../schemas/providers.schema.json",
+  "schema_version": 1,
+  "paddle": {
+    "meta": {
+      "label": "PaddleOCR (本地)",
+      "tags": [
+        "local",
+        "free",
+        "ocr",
+        "vision"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "local",
+      "runtime": "paddleocr",
+      "model_dir": "${OCR_MODEL_ROOT}/paddleocr",
+      "download": {
+        "strategy": "http-archive",
+        "archive": "tar",
+        "files": {
+          "det": "https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_det_infer.tar",
+          "rec": "https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_rec_infer.tar",
+          "cls": "https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar"
+        },
+        "size_mb": 12,
+        "license": "Apache-2.0",
+        "source": "https://github.com/PaddlePaddle/PaddleOCR",
+        "docs_url": "https://www.paddleocr.ai/"
+      }
+    },
+    "models": [
+      {
+        "id": "ppocr",
+        "label": "PP-OCR"
+      }
+    ],
+    "params": {}
+  },
+  "tesseract": {
+    "meta": {
+      "label": "Tesseract (本地)",
+      "tags": [
+        "local",
+        "free",
+        "ocr",
+        "vision"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "local",
+      "runtime": "tesseract",
+      "model_dir": ""
+    },
+    "models": [
+      {
+        "id": "tesseract",
+        "label": "Tesseract"
+      }
+    ],
+    "params": {
+      "lang": {
+        "type": "string",
+        "default": "chi_sim+eng",
+        "scope": "request"
+      }
+    }
+  },
+  "easy": {
+    "meta": {
+      "label": "EasyOCR (本地)",
+      "tags": [
+        "local",
+        "free",
+        "ocr",
+        "vision"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "local",
+      "runtime": "easyocr",
+      "model_dir": "${OCR_MODEL_ROOT}/easyocr"
+    },
+    "models": [
+      {
+        "id": "easy",
+        "label": "EasyOCR"
+      }
+    ],
+    "params": {
+      "languages": {
+        "type": "array",
+        "default": [
+          "ch_sim",
+          "en"
+        ],
+        "scope": "init",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "umi": {
+    "meta": {
+      "label": "UmiOCR (本地)",
+      "tags": [
+        "local",
+        "free",
+        "ocr",
+        "vision"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "local",
+      "runtime": "umiocr",
+      "model_dir": "${OCR_MODEL_ROOT}/umiocr",
+      "download": {
+        "strategy": "http-archive",
+        "archive": "zip",
+        "files": {
+          "models": "https://github.com/hiroi-sora/Umi-OCR/releases/latest/download/models.zip"
+        },
+        "license": "MIT",
+        "source": "https://github.com/hiroi-sora/Umi-OCR"
+      }
+    },
+    "models": [
+      {
+        "id": "umi",
+        "label": "UmiOCR"
+      }
+    ],
+    "params": {}
+  }
+}

@@ -284,11 +284,11 @@ forgetting_profile:
 
 | 方法 | 路径 | 职责 |
 |---|---|---|
-| GET | `/api/memory/{id}/retention` | 返回 `state / retrievability / stability_days / pinned`（调试与 UI 提示） |
-| POST | `/api/memory/{id}/pin` · `/unpin` | 置顶/取消置顶 |
-| POST | `/api/memory/{id}/revive` | 用户手动"让她想起来" |
-| POST | `/api/memory/consolidate` | 触发固化，返回 `operation_id`（长操作，不阻塞） |
-| GET | `/api/memory/retention/dry-run` | 返回 GC 候选清单，只读 |
+| GET | `/api/ memory/{id}/retention` | 返回 `state / retrievability / stability_days / pinned`（调试与 UI 提示） |
+| POST | `/api/ memory/{id}/pin` · `/unpin` | 置顶/取消置顶 |
+| POST | `/api/ memory/{id}/revive` | 用户手动"让她想起来" |
+| POST | `/api/ memory/consolidate` | 触发固化，返回 `operation_id`（长操作，不阻塞） |
+| GET | `/api/ memory/retention/dry-run` | 返回 GC 候选清单，只读 |
 
 现有 memory DTO 仅**追加**可选字段 `retention`，不破坏旧客户端。所有端点先更新 `api.md` 再生成前端类型（ADR-002）。
 

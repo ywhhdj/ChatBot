@@ -60,7 +60,7 @@
 ## ADR-008：性能优化必须先测量
 
 - 状态：建议接受。
-- 决策：先建立 latency/queue/memory/retrieval-quality baseline，再启用缓存、批量 embedding、reranker 或额外索引。
+- 决策：先建立 latency/queue/ memory/retrieval-quality baseline，再启用缓存、批量 embedding、reranker 或额外索引。
 - 验收：每项优化报告基线、实际收益、内存成本和降级路径。
 
 

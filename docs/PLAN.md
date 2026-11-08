@@ -162,7 +162,7 @@
 |---|---|
 | 新建 `modules/context/prompt.py`（正文迁此） | `[x]` |
 | `config/builder.py` 收敛为兼容 shim | `[x]` |
-| `memory/compression.py`、`pipeline/orchestrator.py` 改走新路径 | `[x]` |
+| ` memory/compression.py`、`pipeline/orchestrator.py` 改走新路径 | `[x]` |
 
 保留 shim 而不是直接删除：存量 import（`tests/teset-roles.py` 等）
 不会立刻断裂，迁移可以分批做。shim 已标注"新代码请用 context.prompt"。
@@ -295,7 +295,7 @@ Rust 侧单测写在各模块 `#[cfg(test)]` 内（`tokenizer.rs` / `sampler.rs`
 | `src_py/modules/utils/file/atomic.py` | 原子写 + 路径安全原语 |
 | `src_py/modules/manager/saves/memento.py` | 快照 manifest / revision 发布 / 恢复预演 |
 | `src_py/tests/test_save_memento.py` | 存档快照回归集（含故障注入） |
-| `src_py/modules/memory/integrity.py` | 墓碑 / 索引对齐诊断 / embedding 指纹（纯函数） |
+| `src_py/modules/ memory/integrity.py` | 墓碑 / 索引对齐诊断 / embedding 指纹（纯函数） |
 | `src_py/tests/test_memory_integrity.py` | 记忆索引完整性回归集 |
 | `src_py/modules/core/task_state.py` | 任务状态机（纯函数） |
 | `src_py/modules/logger/audit.py` | 结构化审计事件（脱敏 + sink 抽象） |
@@ -317,18 +317,18 @@ Rust 侧单测写在各模块 `#[cfg(test)]` 内（`tokenizer.rs` / `sampler.rs`
 | `src_py/tests/test_endpoint_config.py` | 端点配置静态校验 |
 | `src_py/native/src/memory.rs` | Rust 记忆重计算内核（向量/RRF/遗忘曲线/embedding trait） |
 | `src_py/native/src/lib.rs` / `Cargo.toml` | 注册 `core.MemoryKernel` + `embedding-backend` feature |
-| `src_py/modules/memory/domain/layers.py` | 五层逻辑记忆、层策略、旧字段映射、常数表 |
-| `src_py/modules/memory/domain/strength.py` | §6 全套遗忘公式、状态机、门控、GC 条件 |
-| `src_py/modules/memory/domain/scoring.py` | RRF、CJK 友好词法打分、归一化 |
-| `src_py/modules/memory/ports/protocols.py` / `clock.py` | 端口定义 + 三种时钟与假时钟 |
-| `src_py/modules/memory/compute/kernel.py` | Rust 优先 / Python 回退 / 常数一致性校验 |
-| `src_py/modules/memory/vector/` | Milvus、按 session 分片的 FAISS、内存降级、组合根 |
-| `src_py/modules/memory/application/` | 检索编排、使用事件队列、固化 dry-run |
-| `src_py/modules/memory/features.py` | 特性开关（默认全关，gc 永久默认关） |
-| `src_py/modules/memory/migrations.py` | schema v2 版本化迁移与可重入回填 |
-| `src_py/modules/memory/config.py` / `config/memory.json` | 记忆配置改为 json 驱动 |
-| `src_py/modules/memory/managers.py` | 接入 Rust embedding 前向；修非 ndarray 静默归零(C113) |
-| `src_py/modules/memory/main.py` | 组合根装配（构造期不连 Milvus） |
+| `src_py/modules/ memory/domain/layers.py` | 五层逻辑记忆、层策略、旧字段映射、常数表 |
+| `src_py/modules/ memory/domain/strength.py` | §6 全套遗忘公式、状态机、门控、GC 条件 |
+| `src_py/modules/ memory/domain/scoring.py` | RRF、CJK 友好词法打分、归一化 |
+| `src_py/modules/ memory/ports/protocols.py` / `clock.py` | 端口定义 + 三种时钟与假时钟 |
+| `src_py/modules/ memory/compute/kernel.py` | Rust 优先 / Python 回退 / 常数一致性校验 |
+| `src_py/modules/ memory/vector/` | Milvus、按 session 分片的 FAISS、内存降级、组合根 |
+| `src_py/modules/ memory/application/` | 检索编排、使用事件队列、固化 dry-run |
+| `src_py/modules/ memory/features.py` | 特性开关（默认全关，gc 永久默认关） |
+| `src_py/modules/ memory/migrations.py` | schema v2 版本化迁移与可重入回填 |
+| `src_py/modules/ memory/config.py` / `config/memory.json` | 记忆配置改为 json 驱动 |
+| `src_py/modules/ memory/managers.py` | 接入 Rust embedding 前向；修非 ndarray 静默归零(C113) |
+| `src_py/modules/ memory/main.py` | 组合根装配（构造期不连 Milvus） |
 | `resources/defaults/memory.sql` | v2 列 + 强度/事件/时钟/迁移进度表 |
 | `src_py/tests/test_memory_layers.py` | 分层/公式/内核/迁移/向量/影子模式回归集 |
 | `src_py/modules/context/assembly.py` | 动态装配：阶段机 + 装配计划（纯函数） |
@@ -356,8 +356,8 @@ Rust 侧单测写在各模块 `#[cfg(test)]` 内（`tokenizer.rs` / `sampler.rs`
 | `src_py/modules/services/ppt/service.py` | 声明 `context_profile`，切换专属上下文 |
 | `src_py/modules/app.py` | 关闭幂等改用终态标志 `_closed` |
 | `src_py/modules/manager/saves/manager.py` | index/data 改原子写；新增 create/list/preview 快照方法 |
-| `src_py/modules/memory/storage/database.py` | 墓碑读写、指纹读写、对齐取样、`index_ids()` |
-| `src_py/modules/memory/storage/sqlite.py` | 隐私删除立碑、检索/压缩复活闸门、指纹核对、`health_report()` |
+| `src_py/modules/ memory/storage/database.py` | 墓碑读写、指纹读写、对齐取样、`index_ids()` |
+| `src_py/modules/ memory/storage/sqlite.py` | 隐私删除立碑、检索/压缩复活闸门、指纹核对、`health_report()` |
 | `resources/defaults/memory.sql` | 新增 `memory_tombstones`、`embedding_meta` 表与索引 |
 | `src_py/modules/pipeline/orchestrator.py` | 任务状态记录、流式守卫、终态审计、额度感知摘要 |
 | `src_py/modules/pipeline/models.py` | `OrchestrationResult.stop_reason` |
@@ -377,9 +377,9 @@ Rust 侧单测写在各模块 `#[cfg(test)]` 内（`tokenizer.rs` / `sampler.rs`
 | B1-01 | 定义 snapshot schema/version/manifest | `[x]` | `modules/manager/saves/memento.py` |
 | B1-02 | 原子发布存档 revision | `[x]` | `utils/file/atomic.py` + `memento.publish_revision()` + `manager` 改原子写 |
 | B1-03 | 恢复预演和回滚 | `[~]` | `memento.preview_restore()` + `RestorePlan`；**Prepare/Commit/Rollback 未做**，见 §6 |
-| B1-04 | SQLite/FAISS 对齐诊断 | `[x]` | `memory/integrity.py::analyze_alignment` + `storage.health_report()` |
-| B1-05 | 记忆删除完整传播 | `[x]` | `memory/integrity.py` 墓碑/压缩引用 + `database.py` + `storage/sqlite.py` |
-| B1-06 | embedding 版本化 | `[x]` | `memory/integrity.py::EmbeddingFingerprint` + `embedding_meta` 表 |
+| B1-04 | SQLite/FAISS 对齐诊断 | `[x]` | ` memory/integrity.py::analyze_alignment` + `storage.health_report()` |
+| B1-05 | 记忆删除完整传播 | `[x]` | ` memory/integrity.py` 墓碑/压缩引用 + `database.py` + `storage/sqlite.py` |
+| B1-06 | embedding 版本化 | `[x]` | ` memory/integrity.py::EmbeddingFingerprint` + `embedding_meta` 表 |
 | B1-07 | 统一任务状态机 | `[x]` | `core/task_state.py`；接线 `orchestrator.process_stream` |
 | B1-08 | 结构化日志和审计 | `[x]` | `logger/audit.py`；接线 tools 拒绝、记忆删除、任务终态 |
 
@@ -390,7 +390,7 @@ Rust 侧单测写在各模块 `#[cfg(test)]` 内（`tokenizer.rs` / `sampler.rs`
 不做"尽力解析"——猜错字段语义比拒绝更危险。
 
 **一致性等级必须诚实**：`consistency_level` 声明 S2(full) 但含
-引用型 section（memory/characters/chat_history 在 data.yaml 里只是路径指针）
+引用型 section（ memory/characters/chat_history 在 data.yaml 里只是路径指针）
 时，`effective_level()` 会降级回 checkpoint 并记入 warning。
 声明与实际不符是虚假承诺——"data.yaml 写成功"不等于"状态已冻结"。
 
@@ -670,7 +670,7 @@ M1-06 评估集是硬门槛：`OptimizationPlan` §6 明确"评估集推迟则 P
 
 ### 3.8.2 分层：五层是逻辑分区，不是五个数据库
 
-`memory/domain/layers.py` 定义 L1 WORKING / L2 EPISODIC / L3 SEMANTIC /
+` memory/domain/layers.py` 定义 L1 WORKING / L2 EPISODIC / L3 SEMANTIC /
 L4 SUMMARY / L5 ARCHIVE 与每层 `BASE_S / S_MAX / rank_floor / retention /
 inject_by_default / max_inject_tokens`。共用同一存储，靠查询期
 `scope + layer` 过滤隔离；强行拆五库只会带来五份一致性问题。
@@ -688,7 +688,7 @@ M0-01 核实结论（写入 `normalize_layer()`）：
 `ARCHIVE` 只在 `explicit_recall=True`（"你还记得…吗"）才进候选，
 且仍要过高置信门控 —— 放进候选不等于注入。
 
-### 3.8.3 按公式实现的强度模型（`memory/domain/strength.py`）
+### 3.8.3 按公式实现的强度模型（` memory/domain/strength.py`）
 
 `MemoryCurveAndForgetting.md` §6 的公式全部落成**纯函数**（所有时间由
 调用方传入，模块不持有任何时钟，属性测试可复现）：
@@ -749,7 +749,7 @@ fingerprint 不会变，旧新向量混进同一索引）。未启用时
 Python 侧 `compute/kernel.py` 是薄门面：Rust 优先、纯 Python 回退、
 `status()` 给出 `backend / constants_ok / fallback_reason`，降级可见。
 
-### 3.8.5 向量库改 Milvus（`memory/vector/`）
+### 3.8.5 向量库改 Milvus（` memory/vector/`）
 
 定义 `VectorStore` 端口，三个实现共协议：
 

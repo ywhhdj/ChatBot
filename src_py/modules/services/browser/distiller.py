@@ -148,7 +148,7 @@ class DOMDistiller:
         return False
 
     def __has_hidden_ancestor(self, el) -> bool:
-        """祖先隐藏 → 自己也隐藏（原实现用 id() 集合，遍历重复）"""
+        """祖先隐藏 → 自己也隐藏"""
         cur = el.getparent()
         while cur is not None:
             if isinstance(cur.tag, str) and (
@@ -159,7 +159,7 @@ class DOMDistiller:
         return False
 
     def __filter_obscured(self, elements: List[Any]) -> List[Any]:
-        """② 遮挡检测：S36 原实现三个分支都 append，等于没过滤。
+        """2. 遮挡检测：S36 原实现三个分支都 append，等于没过滤。
 
         有 modal（aria-modal=true 或 <dialog>）时，页面其余部分被遮住，
         只保留 modal 及其后代。
@@ -183,7 +183,7 @@ class DOMDistiller:
         return keep
 
     def __filter_interactive(self, elements: List[Any]) -> List[Any]:
-        """③ 只保留可交互元素或有语义信息的元素"""
+        """3. 只保留可交互元素或有语义信息的元素"""
         result = []
         for el in elements:
             tag = el.tag.lower() if isinstance(el.tag, str) else ""
@@ -249,7 +249,7 @@ class DOMDistiller:
         )
 
     def __collapse_redundant(self, elements: List[DomElement]) -> List[DomElement]:
-        """④ 移除无语义的纯包装容器"""
+        """4. 移除无语义的纯包装容器"""
         layout_tags = {"div", "span", "section", "article", "main", "header", "footer"}
         keep = []
         for el in elements:
@@ -266,7 +266,7 @@ class DOMDistiller:
         return keep
 
     def __deduplicate(self, elements: List[DomElement]) -> List[DomElement]:
-        """⑤ 去重：同指纹 / 高相似文本 / 同 href 路径"""
+        """3. 去重：同指纹 / 高相似文本 / 同 href 路径"""
         seen_hashes: Set[str] = set()
         seen_texts: List[str] = []
         seen_href_paths: Set[str] = set()
@@ -283,16 +283,26 @@ class DOMDistiller:
             # 5b 高相似文本（S39：只在最近窗口内比对）
             if el.text and len(el.text) > 2:
                 skip = False
+                probe = el.text[:60]
                 for prev in seen_texts[-SIMILARITY_WINDOW:]:
-                    if prev:
-                        ratio = SequenceMatcher(None, el.text[:60], prev[:60]).ratio()
-                        if ratio > self.similarity_threshold:
-                            skip = True
-                            break
+                    if not prev:
+                        continue
+                    candidate = prev[:60]
+                    # 完全相同是最常见的重复形态，无需跑动态规划；
+                    # quick_ratio 是 ratio 的上界，先把明显不相似的挡掉。
+                    if probe == candidate:
+                        skip = True
+                        break
+                    matcher = SequenceMatcher(None, probe, candidate)
+                    if matcher.quick_ratio() <= self.similarity_threshold:
+                        continue
+                    if matcher.ratio() > self.similarity_threshold:
+                        skip = True
+                        break
                 if skip:
                     continue
 
-            # 5c 同 href 路径（去查询参数）只留第一个
+            # 同 href 路径（去查询参数）只留第一个
             if el.href:
                 clean_href = el.href.split("?")[0].rstrip("/")
                 if clean_href in seen_href_paths:
@@ -305,7 +315,7 @@ class DOMDistiller:
         return deduped
 
     def __assign_stable_ids(self, elements: List[DomElement]) -> List[DomElement]:
-        """⑥ 稳定 selector + 唯一 uid"""
+        """6 稳定 selector + 唯一 uid"""
         tag_counter: Dict[str, int] = {}
         for i, el in enumerate(elements):
             sel = (el.selector or "").strip()
@@ -328,7 +338,7 @@ class DOMDistiller:
         return elements
 
     def _chunk_elements(self, elements: List[DomElement]) -> List[DomChunk]:
-        """⑦ 视口内优先排序 + 固定大小分块"""
+        """7. 视口内优先排序 + 固定大小分块"""
         ordered = sorted(elements, key=lambda e: (not e.in_viewport, e.z_index))
         chunks: List[DomChunk] = []
         for i in range(0, len(ordered), self.max_chunk_size):

@@ -10,7 +10,7 @@
 （响应模型错放在 requests 里），这里统一归位到 models.py。
 """
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..models import Role
@@ -82,6 +82,7 @@ class SwitchResultData(_Base):
     success: bool = False
     type: str = ""
     name: str = ""
+    model: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     errors: List[str] = Field(default_factory=list)
 
@@ -312,6 +313,40 @@ class MemoryStatsData(_Base):
     backend: str = ""
     short_term_days: int = 2
 
+class MemoryShortTermData(_Base):
+    """短期记忆摘要。"""
+    session_id: str = "default"
+    summary: str = ""
+
+
+class MemoryLongTermData(_Base):
+    """长期记忆摘要；`query` 非空时表示按语义检索的入参回显。"""
+    session_id: str = "default"
+    summary: str = ""
+    query: str = ""
+
+
+class MemoryCompressedListData(_Base):
+    """压缩记忆（历史对话摘要）列表。"""
+    items: List[CompressedItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class MemoryDecayData(_Base):
+    """手动衰减结果。"""
+    decayed: bool = False
+
+
+class MemoryFlushData(_Base):
+    """后台写入排空结果。"""
+    flushed: bool = False
+
+
+class MemoryDeleteData(_Base):
+    """单条记忆删除结果。"""
+    id: str = ""
+    deleted: bool = False
+
 
 # ───────────────────────── 技能 ─────────────────────────
 class SkillInfoData(_Base):
@@ -439,3 +474,119 @@ class AuditServiceData(_Base):
 class AuditTreeData(_Base):
     services: List[AuditServiceData] = Field(default_factory=list)
     total_tools: int = 0
+
+# ───────────────────────── provider 状态 ─────────────────────────
+class DownloadStatusData(_Base):
+    applicable: bool = False
+    installed: bool = False
+    target_dir: str = ""
+    file_count: int = 0
+    total_mb: float = 0.0
+    files_present: List[str] = Field(default_factory=list)
+    files_missing: List[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class ProviderStatusData(_Base):
+    capability: str = ""
+    name: str = ""
+    label: str = ""
+    deployment: str = ""
+    transport: str = ""
+    protocol: str = ""
+    runtime: str = ""
+    selected_model: Optional[str] = None
+    models: List[Dict[str, Any]] = Field(default_factory=list)
+    params: Dict[str, Any] = Field(default_factory=dict)
+    ui: Dict[str, Any] = Field(default_factory=dict)
+    download: Optional[Dict[str, Any]] = None
+    download_status: DownloadStatusData = Field(default_factory=DownloadStatusData)
+    available: bool = False
+    missing_env: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class DownloadStartData(_Base):
+    task_id: str = ""
+    capability: str = ""
+    provider: str = ""
+    model_id: Optional[str] = None
+    status: str = "started"
+
+
+# ───────────────────────── 图像生成 ─────────────────────────
+class ImageGenerateData(_Base):
+    urls: List[str] = Field(default_factory=list)
+    b64_json: List[str] = Field(default_factory=list)
+    raw: Dict[str, Any] = Field(default_factory=dict)
+    
+
+# ───────────────────────── SSE 事件（text/event-stream） ─────────────────────────
+class SseEventBase(_Base):
+    type: str
+
+
+class SseChunkEvent(SseEventBase):
+    type: Literal["chunk"] = "chunk"
+    text: str = ""
+
+
+class SseDoneEvent(SseEventBase):
+    type: Literal["done"] = "done"
+    session_id: str = ""
+    elapsed_ms: int = 0
+    route: str = ""
+    character_id: str = ""
+    mood: int = 4
+
+
+class SseErrorEvent(SseEventBase):
+    type: Literal["error"] = "error"
+    code: int = 3001
+    message: str = ""
+    request_id: str = ""
+
+
+class SseProgressEvent(SseEventBase):
+    type: Literal["progress"] = "progress"
+    task_id: str = ""
+    status: str = "running"          # running | done | error | finished
+    percent: float = 0.0
+    sent: int = 0
+    total: int = 0
+    files_done: int = 0
+    files_total: int = 0
+    error: str = ""
+
+
+# ───────────────────────── WebSocket 下载事件 ─────────────────────────
+class WsDownloadStartedData(_Base):
+    model: str = ""
+    capability: str = ""
+    provider: str = ""
+    model_id: str = ""
+    task_id: str = ""
+
+
+class WsDownloadProgressData(_Base):
+    model: str = ""
+    progress: float = 0.0
+    file: str = ""
+    phase: str = "download"          # download | extract
+
+
+class WsDownloadCompletedData(_Base):
+    model: str = ""
+    target_dir: str = ""
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class WsDownloadFailedData(_Base):
+    model: str = ""
+    error: str = ""
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class WsDownloadErrorData(_Base):
+    model: str = ""
+    reason: str = ""

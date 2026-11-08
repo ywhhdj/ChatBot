@@ -70,7 +70,7 @@
 | L1-01 | 组合根整理 | 单一装配入口 | 单例只出现在组合根/适配器 | A0-04 |
 | L1-02 | 定义端口：`ContextStore`、`Clock`、`AuditSink` | Protocol/ABC + 内存实现 | 测试可整体注入假实现 | L1-01 |
 | L1-03 | `ChatApplicationService` 薄入口 | controller 只调用它 | 行为不变，回归通过 | L1-02、C0-01 |
-| L1-04 | 其余应用服务入口（Memory/Save/Pipeline/Task） | 薄函数/对象 | 无空壳目录 | L1-03 |
+| L1-04 | 其余应用服务入口（ memory/Save/Pipeline/Task） | 薄函数/对象 | 无空壳目录 | L1-03 |
 | L1-05 | allowlist 收紧 | 违规清单减少 | 最终为空 | 持续 |
 
 ### 5.2 上下文隔离（引用 `BackendPlan.md` §7）

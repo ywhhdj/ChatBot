@@ -34,12 +34,6 @@ class ConfigSaveRequest(_Base):
     file_path: Optional[str] = None
 
 
-# ───────────────────────── 管道 ─────────────────────────
-class PipelineSwitchRequest(_Base):
-    provider: str
-    config: Optional[Dict[str, Any]] = None
-
-
 # ───────────────────────── 服务 ─────────────────────────
 class ServiceConfigUpdateRequest(_Base):
     id: str = Field(..., description="服务 ID")
@@ -184,56 +178,10 @@ class SkillExecuteRequest(_Base):
 
 # ───────────────────────── WebSocket ─────────────────────────
 class WebSocketRequest(_Base):
-    """WebSocket 上行帧（api文档.md 13.1）。
-
-    只有 `type` 是必填：心跳帧没有 data，
-    校验时不能因为缺 data 就把连接断掉。
-    """
 
     type: str
     data: Dict[str, Any] = Field(default_factory=dict)
     client_id: str = ""
-
-
-# ───────────────────────── WebSocket 载荷 ─────────────────────────
-class WsChatPayload(_Base):
-    """`type=chat` 的 data。"""
-
-    text: str = ""
-    session_id: str = "default"
-    source: str = "text"
-    route: Optional[str] = None
-
-
-class WsAsrPayload(_Base):
-    """`type=asr` 的 data（流式语音识别）。"""
-
-    audio: str = ""                       # base64
-    is_final: bool = True
-
-
-class WsTtsPayload(_Base):
-    """`type=tts` 的 data。"""
-
-    text: str = ""
-
-
-class WsCommandPayload(_Base):
-    """`type=command` 的 data。"""
-
-    text: str = ""
-
-
-class WsSubscribePayload(_Base):
-    """`type=subscribe` / `unsubscribe` 的 data（支持 `*` 通配）。"""
-
-    events: List[str] = Field(default_factory=list)
-
-
-class WsCancelPayload(_Base):
-    """`type=cancel` 的 data。"""
-
-    request_id: str = ""
 
 
 # ───────────────────────── 任务 ─────────────────────────
@@ -266,3 +214,27 @@ class PptRenderRequest(_Base):
     colors: Dict[str, str] = Field(default_factory=dict)
     file_name: str = ""
     material: str = ""
+
+# ───────────────────────── 供应商 ─────────────────────────
+class ProviderSwitchRequest(_Base):
+    provider: str
+    config: Optional[Dict[str, Any]] = None
+    model_id: Optional[str] = Field(
+        default=None, 
+        description="指定模型 id；缺省用该 provider 的第一个模型"
+    )
+
+class ProviderDownloadRequest(_Base):
+    model_id: Optional[str] = None
+    force: bool = False
+
+
+# ───────────────────────── 图像生成 ─────────────────────────
+class ImageGenerateRequest(_Base):
+    prompt: str
+    size: str = "1024x1024"
+    n: int = 1
+    response_format: str = "url"
+    provider: Optional[str] = None
+    model_id: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)

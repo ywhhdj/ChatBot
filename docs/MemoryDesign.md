@@ -5,7 +5,7 @@
 ## 1. 当前实现（按 dev 源码）
 
 关键模块：
-- src_py/modules/memory/main.py：HybridMemorySystem 单例、短期上下文流程、压缩编排和后台任务引用管理。
+- src_py/modules/ memory/main.py：HybridMemorySystem 单例、短期上下文流程、压缩编排和后台任务引用管理。
 - managers.py：EmbeddingManager、MemoryBackendManager，选择 embedding adapter 与存储后端；含 hash embedding fallback。
 - storage/base.py：记忆存储抽象接口。
 - storage/sqlite.py、storage/markdown.py：SQLite/FAISS 与 Markdown 存储实现。

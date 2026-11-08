@@ -1,6 +1,4 @@
-"""对话入口：把用户输入接到 路由 / 角色 / 存档 / 上下文 / pipeline 上。
-
-修复对应清单：C5 C6 C7 C8 C9 C15 C17–C21 / CD2 CD6
+"""对话入口：把用户输入接到 路由 / 角色 / 存档 / 上下文 / provider 上。
 
 线程模型：
     router()        —— 可在任意有 loop 的线程调用（Web loop / 调度器 loop）
@@ -8,14 +6,14 @@
                        producer 实际跑在**调度器 loop**，Web loop 只消费队列
 
 两条铁律：
-  1. 初始化必须**可等待**。原实现 `@async_task_scheduler` 装饰 ensure_initialized，
-     调用后返回 TaskReference 就走了，紧接着 router() 必然拿到 None。
-  2. 流式结果必须来自**本次调用**，不能读单例上的 `_last_result`（并发会串台）。
+  1. 初始化必须**可等待**。原实现装饰成后台任务后直接拿返回值，
+     紧接着 router() 必然拿到 None。
+  2. 流式结果必须来自**本次调用**，不能读单例上的 `_last_result`（并发串台）。
 """
-
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import threading
 import time
 from typing import Any, AsyncGenerator, Literal, Optional
@@ -28,11 +26,10 @@ from ...logger import logger
 from ..native import decorator
 from .orchestrator import CharacterOrchestrator
 from .emotion.predictor import LLMEmotionClassifier
-from ...providers.entity import LLM,ASR,TTS
+from ...providers.entity import LLM, ASR, TTS
 
 from ... import runtime
 from ...manager.session.models import Session
-from ...pipeline import debounce
 
 SourceType = Literal["ocr", "asr", "text"]
 
@@ -45,24 +42,31 @@ _saved_sessions: Optional[Any] = None
 SYNC_TIMEOUT = 50
 STREAM_TIMEOUT = 600
 
-# 初始化只做一次；用 Event 让并发调用方等待同一个初始化过程（CD2）
+# 初始化只做一次。不能用 asyncio.Event：项目里 Web loop、调度器 loop 与
+# to_thread 临时 loop 并存，Event 绑定创建它的 loop，跨 loop await 会直接
+# RuntimeError。改用线程安全的 concurrent Future + asyncio.wrap_future，
+# 每个调用方在自己的 loop 上等待同一个初始化过程。
 _init_lock = threading.Lock()
-_init_event: Optional[asyncio.Event] = None
+_init_future: Optional["concurrent.futures.Future[None]"] = None
 _init_error: Optional[BaseException] = None
 _default_character_id = "qingmei"
-_emotion_classifier: Optional["LLMEmotionClassifier"] = None
+_emotion_classifier: Optional[LLMEmotionClassifier] = None
+
+#: capability → 配置里的字段名（app.conf 允许覆盖 Registry 默认值）
+_CONFIG_KEYS = {
+    "llm": ("llm", "provider", "model", "api_key", "base_url"),
+    "tts": ("tts", "provider", "", "api_key", "base_url"),
+    "asr": ("asr", "provider", "model", "api_key", "base_url"),
+}
+
 
 class Router:
     """把用户输入交给 CharacterOrchestrator，并把结果转成事件广播出去。"""
 
     def __init__(self, llm_manager: LLM) -> None:
-        self._orchestrator = CharacterOrchestrator(llm_manager=llm_manager)
-        self._async_deb=debounce.InputDebouncer(
-            on_submit=self._orchestrator.process,
-            
-        )
-        self._stream_deb=debounce.InputDebouncer(
-            
+        self._orchestrator = CharacterOrchestrator(
+            llm_manager=llm_manager,
+            emotion_predictor=_emotion_classifier,
         )
 
     async def route(
@@ -112,7 +116,6 @@ class Router:
                 ))
             commands = getattr(result, "commands_executed", None)
             if commands:
-                # C21：常量化，缺失时只在启动期探测一次，不再每次 hasattr
                 event_type = _task_executed_event_type()
                 if event_type is not None:
                     events.emit(events.data.BaseEvent(
@@ -134,80 +137,136 @@ def _task_executed_event_type() -> Optional[str]:
             events.types.PipelineEventType, "TASK_EXECUTED", None
         )
         _TASK_EXECUTED_PROBED = True
-        if _TASK_EXECUTED_TYPE is None:
-            logger.debug("[Chat] PipelineEventType.TASK_EXECUTED 未定义，命令事件不广播")
     return _TASK_EXECUTED_TYPE
+
+
+# --------------------------------------------------------------------------
+# 供应商初始化（唯一入口：Registry）
+# --------------------------------------------------------------------------
+
+def _normalize_provider(name: str, available: list, fallback: str) -> str:
+    """app.conf 里的驼峰/别名（GPTSovits、ope…）映射到 Registry 的 provider id。"""
+    wanted = str(name or "").strip().lower().replace("-", "").replace("_", "")
+    for pid in available:
+        if str(pid).lower().replace("-", "").replace("_", "") == wanted:
+            return str(pid)
+    return fallback if fallback in available else (available[0] if available else "")
+
+
+def _provider_kwargs(
+    config, capability: str, provider: str = "", model: str = ""
+) -> tuple:
+    """从 Registry 取扁平配置，并叠加 app.conf 的显式覆盖。
+
+    返回 ``(flat, provider_id, model_id)``。不再按供应商名写死分支：
+    新增一个云端供应商只需改 JSON，不用改这里。
+    """
+    from ...providers import factory
+
+    reg = factory.reload_registry()
+    available = reg.provider_ids(capability)
+    if not available:
+        raise RuntimeError(f"[Chat] {capability} 没有任何可用供应商配置")
+
+    section, provider_field, model_field, key_field, url_field = _CONFIG_KEYS[capability]
+    cfg = getattr(config, section, None)
+    raw_provider = provider or str(getattr(cfg, provider_field, "") or "")
+    fallback = {"llm": "deepseek", "tts": "gptsovits", "asr": "whisper"}[capability]
+    provider_id = _normalize_provider(raw_provider, available, fallback)
+
+    raw_model = model or str(getattr(cfg, model_field, "") or "") if model_field else model
+    spec = reg.spec(capability, provider_id, raw_model or None)
+    flat = spec.flat(include_secrets=True)
+
+    if cfg is not None:
+        key = getattr(cfg, key_field, "") or ""
+        url = getattr(cfg, url_field, "") or ""
+        secret_field = str((spec.endpoint.get("auth") or {}).get("field") or "api_key")
+        if str(key).strip():
+            flat[secret_field] = str(key).strip()
+        if str(url).strip():
+            flat["base_url"] = str(url).strip().rstrip("/")
+    return flat, provider_id, spec.model_id
 
 
 # --------------------------------------------------------------------------
 # 初始化
 # --------------------------------------------------------------------------
 
-def _provider_kwargs(config) -> dict:
-    kwargs = {"model": config.llm.model}
-    provider = config.llm.provider
-    if provider == enum.LLMProviderType.DeepSeek.value:
-        kwargs.update({"api_key": config.llm.api_key, "model": config.llm.model})
-    elif provider == enum.LLMProviderType.ChatGPT.value:
-        kwargs.update({
-            "api_url": config.llm.base_url,
-            "api_key": config.llm.api_key,
-            "model": config.llm.model,
-        })
-    elif provider == enum.LLMProviderType.Ollama.value:
-        kwargs.update({
-            "api_url": config.llm.base_url,
-            "model": config.llm.model
-        })
-    return kwargs
+def _init_ready() -> bool:
+    """编排器与 LLM 门面都已建立，即视为初始化完成。"""
+    return _char_router is not None and _llm is not None
 
 
-async def ensure_initialized_async() -> None:
-    global _llm, _asr, _tts, _char_router, _saved_sessions, _init_event, _init_error
-
-    asyncio.get_running_loop()  # 确保在 loop 线程中被调用
-
+def _claim_initialization() -> tuple:
+    """返回 (future, owner)。owner=True 的调用方负责真正执行初始化。"""
+    global _init_future
     with _init_lock:
-        if _init_event is None:
-            _init_event = asyncio.Event()
+        if _init_future is None and _init_ready():
+            return None, False
+        if _init_future is None:
+            _init_future = concurrent.futures.Future()
             owner = True
         else:
             owner = False
-        event = _init_event
+        return _init_future, owner
 
+
+def _release_initialization(fut: "concurrent.futures.Future[None]", exc: Optional[BaseException]) -> None:
+    """广播结果；失败时清空状态，让下一次请求可以重试。"""
+    global _init_future
+    if exc is not None:
+        with _init_lock:
+            _init_future = None
+        if not fut.done():
+            fut.set_exception(exc)
+    elif not fut.done():
+        fut.set_result(None)
+
+
+async def ensure_initialized_async() -> None:
+    """任意 loop 都可调用；并发请求共享同一次初始化。"""
+    global _init_error
+
+    fut, owner = _claim_initialization()
+    if fut is None:
+        return
     if not owner:
-        await event.wait()
-        if _init_error is not None:
-            raise _init_error
+        # wrap_future 把线程安全的 concurrent Future 适配到调用方自己的 loop，
+        # 回调经 call_soon_threadsafe 派发，不会跨 loop 复用 asyncio 原语。
+        await asyncio.wrap_future(fut)
         return
 
     try:
+        _init_error = None
         await _do_initialize()
-    except BaseException as exc:  # noqa: BLE001 - 要广播给所有等待方
+    except BaseException as exc:  # noqa: BLE001 - 广播给所有等待方
         _init_error = exc
-        logger.exception(f"[Chat] 初始化失败: {exc}", exc_info=True)
+        logger.warning(f"[Chat] 初始化失败: {exc}")
+        _release_initialization(fut, exc)
         raise
-    finally:
-        # 无论成败都要唤醒等待方，否则他们永久挂起
-        event.set()
+    else:
+        _release_initialization(fut, None)
+
 
 async def _do_initialize() -> None:
     global _llm, _asr, _tts, _char_router, _saved_sessions, _emotion_classifier
 
     config = get_config()
-    _saved_sessions = runtime.manager.session_manager.get("default")
+    _saved_sessions = runtime.manager.session_manager.get("default") # type: ignore
 
+    # 情绪分类默认纯规则，不额外调用 LLM（每轮省一次完整推理）
     if _emotion_classifier is None:
-        _emotion_classifier = LLMEmotionClassifier()
-        _emotion_classifier.initialize()
+        _emotion_classifier = LLMEmotionClassifier().initialize()
 
     if _llm is None:
         _llm = LLM()
         if config.llm.enabled:
-            _llm.initialize_provider(config.llm.provider, **_provider_kwargs(config))
-            _char_router = Router(llm_manager=_llm)  # type: ignore[union-attr]
+            flat, provider_id, model_id = _provider_kwargs(config, "llm")
+            _llm.initialize_provider(provider_id, model_id=model_id, **flat) # type: ignore
+            _llm.init_provider_client(**flat) # type: ignore
+        _char_router = Router(llm_manager=_llm) # type: ignore
 
-    # 记忆系统的初始化只在真正可用时做；失败不能拖垮整个启动
     try:
         from ..context.user import UserContext
 
@@ -217,50 +276,67 @@ async def _do_initialize() -> None:
             llm_client=_llm,
             is_db=bool(getattr(config.sqlite, "enabled", False)),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning(f"[Chat] memory init skipped: {exc}")
 
     if _tts is None and config.tts.enabled:
-        _tts = TTS()
         try:
-            _tts.initialize_provider(
-                config.tts.provider,
-                api_url=config.tts.base_url,
-            )
-        except Exception as exc:
+            flat, provider_id, model_id = _provider_kwargs(config, "tts")
+            _tts = TTS()
+            _tts.initialize_provider(provider_id, model_id=model_id, **flat) # type: ignore
+            _tts.init_provider_client(**flat) # type: ignore
+        except Exception as exc:  # noqa: BLE001
             logger.warning(f"[Chat] TTS init skipped: {exc}")
+            _tts = None
 
     if _asr is None and config.asr.enabled:
-        _asr =ASR()
         try:
-            _asr.initialize_provider( # type: ignore[union-attr]
-                config.asr.provider,
-                model=config.asr.model,
-            )
-            _asr.init_provider_client() # type: ignore[union-attr]
-        except Exception as exc:
+            flat, provider_id, model_id = _provider_kwargs(config, "asr")
+            _asr = ASR()
+            _asr.initialize_provider(provider_id, model_id=model_id, **flat) # type: ignore
+            await _asr.init_provider_client(**flat)  # # type: ignore
+        except Exception as exc:  # noqa: BLE001
             logger.warning(f"[Chat] ASR init skipped: {exc}")
+            _asr = None
 
 
 def ensure_initialized() -> None:
-    """启动阶段的同步入口（无运行中 loop 时使用）。"""
+    """启动阶段的同步入口（无运行中 loop 时使用）"""
+    global _init_error
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(_do_initialize())
+        pass
+    else:
+        raise RuntimeError(
+            "[Chat] 当前线程已有事件循环，请改用 await ensure_initialized_async()"
+        )
+
+    fut, owner = _claim_initialization()
+    if fut is None:
         return
-    raise RuntimeError(
-        "[Chat] 当前线程已有事件循环，请改用 await ensure_initialized_async()"
-    )
+    if not owner:
+        fut.result(timeout=SYNC_TIMEOUT)
+        return
+
+    try:
+        _init_error = None
+        asyncio.run(_do_initialize())
+    except BaseException as exc:  # noqa: BLE001
+        _init_error = exc
+        logger.warning(f"[Chat] 同步初始化失败: {exc}")
+        _release_initialization(fut, exc)
+        raise
+    else:
+        _release_initialization(fut, None)
 
 
 def is_initialized() -> bool:
-    return _char_router is not None
+    return _char_router is not None and _llm is not None and _llm.is_initialized
 
 
 def _ensure_session(session_id: str):
-    """create() 必须沿用传入的 session_id 作为 id。"""
-    sess = runtime.manager.session_manager.get(session_id)
+    sess = runtime.manager.session_manager.get(session_id) # type: ignore
     if sess is not None:
         return sess
 
@@ -272,8 +348,8 @@ def _ensure_session(session_id: str):
         session_id=session_id,
     )
     try:
-        runtime.manager.session_manager.switch(sess.id)
-    except Exception as exc:
+        runtime.manager.session_manager.switch(sess.id) # type: ignore
+    except Exception as exc:  # noqa: BLE001
         logger.warning(f"[Chat] switch session failed: {exc}")
     return sess
 
@@ -289,8 +365,9 @@ async def router(
     force_channel: Optional[RouteType] = None,
 ):
     """一轮对话（非流式），返回角色回复文本。"""
-    global _char_router
     await ensure_initialized_async()
+    if not is_initialized():
+        raise RuntimeError("[Chat] LLM 未初始化（检查 config.llm.enabled 与供应商配置）")
 
     sess = _ensure_session(session_id)
     result = await _char_router.route(  # type: ignore[union-attr]
@@ -300,11 +377,10 @@ async def router(
         force_channel=force_channel,
     )
 
-    # 存档：用同步保存，保证返回前已落盘（CD4）
     try:
         sess.updated_at = time.time()
-        runtime.manager.session_manager.save_sync(sess)
-    except Exception as exc:
+        runtime.manager.session_manager.save_sync(sess) # type: ignore
+    except Exception as exc:  # noqa: BLE001
         logger.warning(f"[Chat] save session failed: {exc}")
 
     return result.chat_response
@@ -318,41 +394,36 @@ async def router_stream(
     force_channel: Optional[RouteType] = None,
 ) -> AsyncGenerator[str, None]:
     """一轮对话（流式）。producer 跑在调度器 loop，Web loop 只消费。"""
-    global _char_router
     await ensure_initialized_async()
+    if not is_initialized():
+        raise RuntimeError("[Chat] LLM 未初始化（检查 config.llm.enabled 与供应商配置）")
 
-    sess = _ensure_session(session_id)
-
-    full: list[str] = []
-    try:
-        async for chunk in _char_router.route_stream(  # type: ignore[union-attr]
-            user_input=user_input,
-            source=source,
-            session_id=session_id or "default",
-            force_channel=force_channel,
-        ):
-            if not chunk:
-                continue
-            full.append(chunk)
-            events.emit(events.data.BaseEvent(
-                type=events.types.PipelineEventType.LLM_TEXT_DELTA,
-                args=(chunk,),
-            ))
-            yield chunk
-    finally:
-        pass
+    _ensure_session(session_id)
+    async for chunk in _char_router.route_stream(  # type: ignore[union-attr]
+        user_input=user_input,
+        source=source,
+        session_id=session_id or "default",
+        force_channel=force_channel,
+    ):
+        if not chunk:
+            continue
+        events.emit(events.data.BaseEvent(
+            type=events.types.PipelineEventType.LLM_TEXT_DELTA,
+            args=(chunk,),
+        ))
+        yield chunk
 
 
 def _append_session_messages(sess: Session, user_input: str, reply: str) -> None:
     sess.messages.append({
-        "role": Role.USER, 
-        "content": user_input, 
-        "timestamp": time.time()
+        "role": Role.USER,
+        "content": user_input,
+        "timestamp": time.time(),
     })
     sess.messages.append({
-        "role": Role.ASSISTANT, 
-        "content": reply, 
-        "timestamp": time.time()
+        "role": Role.ASSISTANT,
+        "content": reply,
+        "timestamp": time.time(),
     })
     if len(sess.messages) > 200:
         sess.messages = sess.messages[-200:]
@@ -383,7 +454,7 @@ async def speech_to_text(audio_bytes: bytes) -> str:
         raise ValueError("ASR manager is not initialized")
     try:
         return await _asr.process_audio(audio_bytes)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"Error in speech_to_text: {exc}")
         return ""
 

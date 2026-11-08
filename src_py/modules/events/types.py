@@ -91,9 +91,10 @@ class ChatStreamEventType:
     MESSAGE_END = "chat.message.end"
 
 class WebSocketEventType:
-    CONNECT = "connect"
-    PRIVATE = "private"
-    HEARTBEAT = "heartbeat"
+    CONNECT = "websocket.connect"
+    ERROR = "websocket.error"
+    PRIVATE = "websocket.private"
+    HEARTBEAT = "websocket.heartbeat"
     RESULT = "result"
     CHAT = "chat"
     DOWNLOAD_MODEL = "download_model"

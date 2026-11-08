@@ -75,53 +75,8 @@ async def outline(payload: Optional[PptOutlineRequest] = None) -> ApiResponse[Pp
 # --------------------------------------------------------------------------
 # 渲染
 # --------------------------------------------------------------------------
-
 async def render(payload: Optional[PptRenderRequest] = None) -> ApiResponse[PptRenderData]:
-    """渲染 pptx。
-
-    有 `deck` 就直接渲染；否则先出大纲再渲染。
-    """
-    p = payload or PptRenderRequest()
-    topic = (p.topic or "").strip()
-    if not p.deck and not topic:
-        raise ApiError.bad_request("deck 与 topic 至少提供一个")
-
-    svc = _service()
-
-    if p.deck:
-        from ...services.ppt.models import DeckSpec
-
-        deck = DeckSpec.from_dict(p.deck)
-        result = await to_thread(
-            svc.render,
-            deck=deck,
-            template_id=p.template_id or None,
-            style=p.style,
-            colors=p.colors or None,
-            file_name=p.file_name or None,
-        )
-    else:
-        result = await to_thread(
-            svc.generate,
-            topic=topic,
-            pages=p.pages,
-            template_id=p.template_id or None,
-            style=p.style,
-            material=p.material,
-            file_name=p.file_name or None,
-        )
-
-    if not result.ok:
-        raise ApiError.internal(result.message or "渲染失败")
-    return success(PptRenderData(**result.to_dict()))
-
-
-# --------------------------------------------------------------------------
-# 异步任务
-# --------------------------------------------------------------------------
-
-async def render_async(payload: Optional[PptRenderRequest] = None) -> ApiResponse[PptRenderData]:
-    """提交生成任务（K26：长耗时走调度器，立即返回 task_id）。"""
+    """提交生成任务"""
     p = payload or PptRenderRequest()
     if not (p.topic or "").strip():
         raise ApiError.bad_request("topic 不能为空")
@@ -162,10 +117,15 @@ async def download(file_name: str) -> ApiResponse[PptDownloadData]:
     if not name:
         raise ApiError.bad_request("file_name 不能为空")
 
-    from ...runtime import RuntimePath
+    # 产出目录固定为 <workspace>/ppt/；文件名只接受 basename，
+    # 并再经 security/workspace 做一次 realpath 边界复验。
+    from ...security import WorkspaceBoundaryError, output_path
 
-    path = os.path.join(str(RuntimePath.get_user_data_path("output")), name)
-    if not os.path.exists(path):
+    try:
+        path = output_path("ppt", name)
+    except WorkspaceBoundaryError as exc:
+        raise ApiError.bad_request(f"文件 {name} 不在允许的产出目录内: {exc.reason.value}")
+    if not os.path.isfile(path):
         raise ApiError.not_found(f"文件 {name}")
 
     data = await to_thread(_read_b64, path)
@@ -180,37 +140,3 @@ async def download(file_name: str) -> ApiResponse[PptDownloadData]:
 def _read_b64(path: str) -> str:
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode("ascii")
-
-
-# --------------------------------------------------------------------------
-# 路由（HTTP 层只做参数绑定，逻辑全在上面，供网关复用）
-# --------------------------------------------------------------------------
-
-@router.get("/templates", response_model=ApiResponse[PptTemplateListData])
-async def _templates() -> ApiResponse[PptTemplateListData]:
-    return await templates()
-
-
-@router.post("/outline", response_model=ApiResponse[PptOutlineData])
-async def _outline(payload: PptOutlineRequest) -> ApiResponse[PptOutlineData]:
-    return await outline(payload)
-
-
-@router.post("/render", response_model=ApiResponse[PptRenderData])
-async def _render(payload: PptRenderRequest) -> ApiResponse[PptRenderData]:
-    return await render(payload)
-
-
-@router.post("/render/async", response_model=ApiResponse[PptRenderData])
-async def _render_async(payload: PptRenderRequest) -> ApiResponse[PptRenderData]:
-    return await render_async(payload)
-
-
-@router.get("/job/{task_id}", response_model=ApiResponse[PptJobData])
-async def _job_status(task_id: str) -> ApiResponse[PptJobData]:
-    return await job_status(task_id)
-
-
-@router.get("/download/{file_name}", response_model=ApiResponse[PptDownloadData])
-async def _download(file_name: str) -> ApiResponse[PptDownloadData]:
-    return await download(file_name)

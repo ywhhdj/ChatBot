@@ -1,11 +1,18 @@
 """技能接口：列表、详情、重新扫描、启用/停用、执行、提示词。
 
-对应 api文档.md 第 11 节。
+对应 api.md 第 2 节。
 
 两条来自需求的硬约束：
   * 命令文本只认 `--id`，`--name` 是无效参数（技能名可重复，id 才唯一）。
   * `shell` 类型**暂不支持执行**：可被识别、可见、可启用，但执行时明确返回不支持，
     不会静默当作"无脚本"跳过。
+
+本次修复
+────────
+* `mgr.build_prompt()` 并不存在，改为 `PromptBuilder.build_skill_prompt()`。
+* 判定使用 `Skill.supported`（实际属性），而不是并不存在的
+  `skill.executable` —— 后者会让所有技能都显示不可执行。
+* 技能产出由 `security/workspace` 限制在 `<workspace>/skill/<skill_id>/`。
 """
 
 from __future__ import annotations
@@ -34,9 +41,17 @@ def _exec_type_value(skill: Any) -> str:
     return str(getattr(value, "value", value) or "none")
 
 
+def _is_supported(skill: Any) -> bool:
+    """Skill 只有 `supported` 属性（PYTHON 类型），没有 `executable`。"""
+    supported = getattr(skill, "supported", None)
+    if isinstance(supported, bool):
+        return supported
+    return _exec_type_value(skill) == "python"
+
+
 def _info(skill_id: str, skill: Any) -> SkillInfoData:
     exec_type = _exec_type_value(skill)
-    executable = bool(getattr(skill, "executable", False))
+    executable = _is_supported(skill)
     reason = ""
     if not executable:
         if exec_type == "shell":
@@ -92,7 +107,11 @@ async def prompt() -> ApiResponse[Dict[str, Any]]:
     """给 LLM 的技能提示词（只含已启用技能）。"""
     mgr = _manager()
     try:
-        text = mgr.build_prompt()
+        from ...core.context.prompt import PromptBuilder
+
+        text = PromptBuilder.build_skill_prompt(
+            mgr.list_skills(active_only=True) or {}
+        )
     except Exception as e:
         raise ApiError.internal(f"构建技能提示词失败: {e}")
     return success({"prompt": str(text or "")})
@@ -159,7 +178,7 @@ async def execute(
     if skill is None:
         raise ApiError.not_found(f"技能 {skill_id}")
 
-    if not getattr(skill, "executable", False):
+    if not _is_supported(skill):
         exec_type = _exec_type_value(skill)
         reason = "shell 技能暂不支持执行，请改用 python 沙盒实现" if exec_type == "shell" \
             else f"技能类型 {exec_type} 不支持执行"

@@ -9,9 +9,23 @@ CONFIG_BINDINGS: List[Tuple[str, List[str]]] = [
     ("SYSTEM", ["log", "network"]),
     ("DATABASE", ["sqlite"]),
     ("MODEL", ["llm", "tts"]),
+    ("LLM", ["llm"]),
+    ("TTS", ["tts"]),
+    ("LOGGER", ["log"]),
     ("WEB", ["web"]),
     ("SKILLS", ["skills"]),
     ("ASR", ["asr"]),
+]
+
+SAVE_SECTIONS: List[Tuple[str, List[str]]] = [
+    ("LLM", ["llm"]),
+    ("TTS", ["tts"]),
+    ("ASR", ["asr"]),
+    ("WEB", ["web"]),
+    ("NETWORK", ["network"]),
+    ("DATABASE", ["sqlite"]),
+    ("LOGGER", ["log"]),
+    ("SKILLS", ["skills"]),
 ]
 
 
@@ -40,10 +54,10 @@ class ConfigLoader:
 
         if not config_dict:
             return config
-        self.__apply_config(config, config_dict)
+        self._apply_config(config, config_dict)
         return config
 
-    def __apply_config(self, config: models.AppConfig, config_dict: Dict[str, Any]) -> None:
+    def _apply_config(self, config: models.AppConfig, config_dict: Dict[str, Any]) -> None:
         for section, section_data in config_dict.items():
             if not isinstance(section_data, dict):
                 continue
@@ -67,51 +81,52 @@ class ConfigLoader:
 
 
 class ConfigManager:
-    __instance = None
-    __config: Optional[models.AppConfig] = None
-    __loader: Optional[ConfigLoader] = None
+    _instance = None
+    _config: Optional[models.AppConfig] = None
+    _loader: Optional[ConfigLoader] = None
+    _path: Optional[str] = None
 
     def __new__(cls):
-        if cls.__instance is None:
-            cls.__instance = super().__new__(cls)
-        return cls.__instance
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def initialize(self, config_file_path: Optional[str] = None, debug: bool = False) -> models.AppConfig:
-        self.__loader = ConfigLoader(config_file_path)
+        self._loader = ConfigLoader(config_file_path)
+        self._path = config_file_path
         if config_file_path is None:
-            self.__config = models.AppConfig()
+            self._config = models.AppConfig()
         else:
-            self.__config = self.__loader.load(config_file_path)
+            self._config = self._loader.load(config_file_path)
 
         if debug:
-            log_cfg = getattr(self.__config, "log", None)
+            log_cfg = getattr(self._config, "log", None)
             if log_cfg is not None and not log_cfg.level:
                 log_cfg.level = "DEBUG"
-        return self.__config
+        return self._config
 
     def get_config(self) -> models.AppConfig:
-        if self.__config is None:
-            self.__config = models.AppConfig()
-        return self.__config
+        if self._config is None:
+            self._config = models.AppConfig()
+        return self._config
 
     def reload(self) -> models.AppConfig:
-        if self.__loader is None:
+        if self._loader is None:
             raise RuntimeError("Config loader not initialized.")
-        self.__config = self.__loader.load()
-        return self.__config
-    
+        self._config = self._loader.load(self._path)
+        return self._config
+
     def get_default_config(self) -> models.AppConfig:
         return models.AppConfig()
 
-    def save_config(self, file_path: str) -> None:
-        if not file_path:
-            raise ValueError("Config file path is required")
-        serialized = self.__serialize_config(self.get_config())
-        loader.write_app_config(file_path, serialized)
+    def save_config(self, file_path: Optional[str] = None) -> None:
+        target = file_path or self._path or "config.json"
+        serialized = self._serialize_config(self.get_config())
+        loader.write_app_config(target, serialized)
 
-    def __serialize_config(self, config: models.AppConfig) -> Dict[str, Dict[str, Any]]:
+    def _serialize_config(self, config: models.AppConfig) -> Dict[str, Dict[str, Any]]:
         result: Dict[str, Dict[str, Any]] = {}
-        for section, attrs in CONFIG_BINDINGS:
+        for section, attrs in SAVE_SECTIONS:
             section_data: Dict[str, Any] = {}
             for attr_name in attrs:
                 config_obj = getattr(config, attr_name, None)

@@ -121,6 +121,6 @@ def load_character(path: str) -> List[Character]:
 
 
 def create_defaults() :
-    path=str(RuntimePath.get_roles_file_path(is_defaults=True))
+    path=str(RuntimePath.get_templates_path("roles.yaml"))
     return load_character(path)
     

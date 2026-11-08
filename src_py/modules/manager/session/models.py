@@ -27,7 +27,7 @@ class RoundRecord:
         self.started_at = started_at or time.time()
         self.ended_at = ended_at
 
-    #: A19：有工具调用的任务轮，与纯聊天分开存，避免污染角色人设上下文
+    #: 有工具调用的任务轮，与纯聊天分开存，避免污染角色人设上下文
     @property
     def is_task(self) -> bool:
         value = str(getattr(self.route, "value", self.route) or "")

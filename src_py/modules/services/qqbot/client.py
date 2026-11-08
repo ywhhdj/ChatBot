@@ -13,7 +13,7 @@ from ..config import QQBotConfig
 from .. import base
 from . import models
 from ...events import emit, types as eventType, on_event_class
-from ..service.decorator import Service
+from ..manager import Service
 from ... import keys
 
 # QQ Bot API 端点
@@ -32,40 +32,53 @@ class QQBotClient(base.BaseService):
         Reference:
             <a href="https://bot.q.qq.com/wiki/develop/api-v2/#">QQ Bot API V2</a>
         Parameters:
-            appid: QQ Bot应用ID
+            app_id: QQ Bot应用ID
             secret: QQ Bot应用密钥
     """
     name="QQBot"
     description="用于控制QQ Bot服务"
 
-    def __init__(self,appid: str, secret: str, debug: bool = False, **kwargs):
+    def __init__(
+        self,
+        app_id: str = "",
+        secret: str = "",
+        sandbox: bool = True,
+        debug: bool = False,
+        token: str = "",
+    ) -> None:
         super().__init__()
-        self.config=QQBotConfig(enabled=True,appid=appid, secret=secret, **kwargs)
+        self.config = QQBotConfig(
+            enabled=True,
+            app_id=app_id,
+            token=token,
+            secret=secret,
+            sandbox=bool(sandbox),
+        )
         self.debug = debug
-        self.__token: Optional[str] = None
-        self.__token_expire: float = 0.0
-        self.__ws: Optional[ClientConnection] = None
-        self.__session: Optional[httpx.AsyncClient] = None
-        self.__seq: Optional[int] = None
-        self.__session_id: Optional[str] = None
-        self.__running: bool = False
-        self.__heartbeat_task: Optional[asyncio.Task] = None
-        self.__lifecycle_handlers = {
-            models.QQBotEvent.LifecycleEvent.GUILD_CREATE: self.__on_guild_created, # 群创建
-            models.QQBotEvent.LifecycleEvent.GUILD_DELETE: self.__on_guild_deleted, # 群删除
-            models.QQBotEvent.LifecycleEvent.GUILD_UPDATE: self.__on_guild_updated, # 群更新
-            models.QQBotEvent.LifecycleEvent.CHANNEL_CREATE: self.__on_channel_created, # 渠道创建
-            models.QQBotEvent.LifecycleEvent.CHANNEL_DELETE: self.__on_channel_deleted, # 渠道删除
-            models.QQBotEvent.LifecycleEvent.CHANNEL_UPDATE: self.__on_channel_updated, # 渠道更新
-            models.QQBotEvent.LifecycleEvent.GROUP_ADD_ROBOT: self.__on_group_added, # 机器人被添加到群
-            models.QQBotEvent.LifecycleEvent.GROUP_DEL_ROBOT: self.__on_group_removed,  # 机器人被踢出群
-            models.QQBotEvent.LifecycleEvent.GROUP_MSG_REJECT: self.__on_group_msg_rejected,  # 机器人被禁言
-            models.QQBotEvent.LifecycleEvent.FRIEND_ADD: self.__on_friend_added, # 好友添加
-            models.QQBotEvent.LifecycleEvent.FRIEND_DEL: self.__on_friend_deleted, # 好友删除
-            models.QQBotEvent.LifecycleEvent.C2C_MSG_CREATE: self.__on_c2c_msg_created,  # 2C消息创建
-            models.QQBotEvent.LifecycleEvent.C2C_MSG_REJECT: self.__on_c2c_msg_rejected, # 2C消息被拒绝
-            models.QQBotEvent.LifecycleEvent.DIRECT_MESSAGE_CREATE: self.__on_direct_message, # 直接消息创建
-            models.QQBotEvent.LifecycleEvent.INTERACTION_CREATE: self.__on_interaction_create, # 互动创建
+        self._token: Optional[str] = None
+        self._token_expire: float = 0.0
+        self._ws: Optional[ClientConnection] = None
+        self._session: Optional[httpx.AsyncClient] = None
+        self._seq: Optional[int] = None
+        self._session_id: Optional[str] = None
+        self._running: bool = False
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._lifecycle_handlers = {
+            models.QQBotEvent.LifecycleEvent.GUILD_CREATE: self._on_guild_created, # 群创建
+            models.QQBotEvent.LifecycleEvent.GUILD_DELETE: self._on_guild_deleted, # 群删除
+            models.QQBotEvent.LifecycleEvent.GUILD_UPDATE: self._on_guild_updated, # 群更新
+            models.QQBotEvent.LifecycleEvent.CHANNEL_CREATE: self._on_channel_created, # 渠道创建
+            models.QQBotEvent.LifecycleEvent.CHANNEL_DELETE: self._on_channel_deleted, # 渠道删除
+            models.QQBotEvent.LifecycleEvent.CHANNEL_UPDATE: self._on_channel_updated, # 渠道更新
+            models.QQBotEvent.LifecycleEvent.GROUP_ADD_ROBOT: self._on_group_added, # 机器人被添加到群
+            models.QQBotEvent.LifecycleEvent.GROUP_DEL_ROBOT: self._on_group_removed,  # 机器人被踢出群
+            models.QQBotEvent.LifecycleEvent.GROUP_MSG_REJECT: self._on_group_msg_rejected,  # 机器人被禁言
+            models.QQBotEvent.LifecycleEvent.FRIEND_ADD: self._on_friend_added, # 好友添加
+            models.QQBotEvent.LifecycleEvent.FRIEND_DEL: self._on_friend_deleted, # 好友删除
+            models.QQBotEvent.LifecycleEvent.C2C_MSG_CREATE: self._on_c2c_msg_created,  # 2C消息创建
+            models.QQBotEvent.LifecycleEvent.C2C_MSG_REJECT: self._on_c2c_msg_rejected, # 2C消息被拒绝
+            models.QQBotEvent.LifecycleEvent.DIRECT_MESSAGE_CREATE: self._on_direct_message, # 直接消息创建
+            models.QQBotEvent.LifecycleEvent.INTERACTION_CREATE: self._on_interaction_create, # 互动创建
         }
         self.set_status()
         self.bot_info: Optional[models.QQBotData.QQBotInfo] = None
@@ -111,38 +124,37 @@ class QQBotClient(base.BaseService):
             ),
         ]
     
-    def set_status(self):
-        if self.__running:
-            self.status= base.ServiceState.RUNNING
-        else:
-            self.status= base.ServiceState.STOPPED
+    def set_status(self) -> None:
+        super().set_status(
+            base.ServiceState.RUNNING if self._running else base.ServiceState.STOPPED
+        )
     
     async def start(self):
-        self.__running = True
+        self._running = True
         self.set_status()
-        self.__session = httpx.AsyncClient(timeout=30.0)
-        await self.__ensure_token()
-        asyncio.create_task(self.__connect_gateway())
+        self._session = httpx.AsyncClient(timeout=30.0)
+        await self._ensure_token()
+        asyncio.create_task(self._connect_gateway())
         #初始化获取一次机器人信息
         self.bot_info = await self.get_bot_info()
         logger.info(f"[QQBot] Bot info: {self.bot_info}")
         emit(BaseEvent(type=eventType.QQBotEventType.QQ_BOT_INFO, args=(self.bot_info,)))
     
     async def stop(self):
-        self.__running = False
-        if self.__heartbeat_task:
-            self.__heartbeat_task.cancel()
-        if self.__ws is not None and not hasattr(self.__ws, "close_code"):
-            await self.__ws.close() # type: ignore
-        if self.__session:
-            await self.__session.aclose()
+        self._running = False
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+        if self._ws is not None and not hasattr(self._ws, "close_code"):
+            await self._ws.close() # type: ignore
+        if self._session:
+            await self._session.aclose()
         logger.info("[QQBot] Service closed")
         self.set_status()
 
     # =========================================================
     # 鉴权与Token管理
     # =========================================================
-    async def __ensure_token(self):
+    async def _ensure_token(self):
         """
             获取或刷新 AccessToken `POST app/getAppAccessToken`
 
@@ -162,43 +174,43 @@ class QQBotClient(base.BaseService):
                 }
                 ```
         """
-        if self.__session is None:
+        if self._session is None:
             raise ValueError("ClientSession not initialized")
         now = time.time()
         # 提前60秒刷新
-        if self.__token and now < self.__token_expire - 60:
+        if self._token and now < self._token_expire - 60:
             return
         
         logger.info("[QQBot] Fetching new access_token...")
         if not self.config:
             raise ValueError("Config not initialized")
         payload = {
-            "appId": self.config.appid,
+            "appId": self.config.app_id,
             "clientSecret": self.config.secret
         }
-        resp = await self.__session.post(TOKEN_URL, json=payload)
+        resp = await self._session.post(TOKEN_URL, json=payload)
         resp.raise_for_status()
         data = resp.json()
         logger.info(f"[QQBot] Token response: {data}")
-        self.__token = data["access_token"]
-        self.__token_expire = now + float(data.get("expires_in", 7200))
-        logger.info(f"[QQBot] Fetched new access_token: {self.__token} with expire time: {self.__token_expire}")
+        self._token = data["access_token"]
+        self._token_expire = now + float(data.get("expires_in", 7200))
+        logger.info(f"[QQBot] Fetched new access_token: {self._token} with expire time: {self._token_expire}")
 
 
-    def __headers(self) -> Dict:
+    def _headers(self) -> Dict:
         """构造API请求头"""
         if not self.config:
             raise ValueError("Config not initialized")
         return {
-            "Authorization": f"QQBot {self.__token}",
+            "Authorization": f"QQBot {self._token}",
             "Content-Type": "application/json",
-            "X-Union-Appid": self.config.appid
+            "X-Union-Appid": self.config.app_id
         }
 
     # =========================================================
     # WebSocket Gateway 连接与维护
     # =========================================================
-    async def __get_websocket_url(self) -> str:
+    async def _get_websocket_url(self) -> str:
         """
         从gateway接口获取WebSocket地址 `GET /gateway`
         
@@ -208,7 +220,7 @@ class QQBotClient(base.BaseService):
         }
         ```
         """
-        if self.__session is None:
+        if self._session is None:
             raise ValueError("ClientSession not initialized")
             
         url = GATEWAY_URL
@@ -218,9 +230,9 @@ class QQBotClient(base.BaseService):
         if self.config.sandbox:
             url = f"https://sandbox.{BASE_DOMAIN}/gateway"
         
-        headers = {"Authorization": f"QQBot {self.__token}"}
+        headers = {"Authorization": f"QQBot {self._token}"}
         logger.info(f"[QQBot] Requesting websocket URL from {url} with headers: {headers}")
-        response = await self.__session.get(url, headers=headers)
+        response = await self._session.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
         logger.info(f"[QQBot] Gateway response: {data}")
@@ -230,7 +242,7 @@ class QQBotClient(base.BaseService):
         logger.info(f"[QQBot] Got websocket URL: {ws_url}")
         return ws_url
 
-    async def __connect_gateway(self):
+    async def _connect_gateway(self):
         """
         连接WebSocket Gateway `WS`
 
@@ -245,13 +257,13 @@ class QQBotClient(base.BaseService):
         }
         `
         """
-        if self.__session is None:
+        if self._session is None:
             return
         # 1. 获取Gateway地址（先获取WebSocket URL）
-        ws_url = await self.__get_websocket_url()        
+        ws_url = await self._get_websocket_url()        
         # 2. 建立WS连接
-        headers = {"Authorization": f"QQBot {self.__token}"}
-        while self.__running:
+        headers = {"Authorization": f"QQBot {self._token}"}
+        while self._running:
             try:
                 async with connect(
                     ws_url,
@@ -259,22 +271,22 @@ class QQBotClient(base.BaseService):
                     ping_interval=None,  # 自己管理心跳
                     max_size=None
                 ) as ws:
-                    self.__ws = ws
+                    self._ws = ws
                     logger.info("[QQBot] WebSocket connected")
                     async for msg in ws:
                         if msg:
                             payload = json.loads(msg)
-                            await self.__handle_payload(payload)
+                            await self._handle_payload(payload)
             except (ConnectionClosed, asyncio.CancelledError):
                 logger.info("[QQBot] WebSocket connection closed")
             except Exception as e:
                 logger.error(f"[QQBot] WS connection error: {e}, reconnecting in 5s...")
                 await asyncio.sleep(5)
             finally:
-                await self.stop()
+                self._ws = None
 
-    async def __handle_payload(self, payload: Dict):
-        if not payload or not self.__ws:
+    async def _handle_payload(self, payload: Dict):
+        if not payload or not self._ws:
             return
         print("[QQBot] Received payload: {payload}")
         logger.info(f"[QQBot] Received payload: {payload}")
@@ -292,32 +304,32 @@ class QQBotClient(base.BaseService):
         )
 
         if resp.seq is not None:
-            self.__seq = resp.seq
+            self._seq = resp.seq
 
         # OpCode 10 Hello (下发心跳间隔)
         if op == models.QQBotEvent.WebSocketEvent.HEARTBEAT:
             interval = resp.data.get("heartbeat_interval", 30000) # type:ignore
-            self.__heartbeat_task = asyncio.create_task(self.__heartbeat(interval))
-            await self.__send_identify()
+            self._heartbeat_task = asyncio.create_task(self._heartbeat(interval))
+            await self._send_identify()
         
         # OpCode 0 Dispatch (事件分发)
         elif op == models.QQBotEvent.WebSocketEvent.DISPATCH:
             logger.debug(f"[QQBot] Event: {resp.type}, Data: {resp.data}")
-            await self.__dispatch_event(resp.type, resp.data)
+            await self._dispatch_event(resp.type, resp.data)
         
         # OpCode 7 Reconnect
         elif op == models.QQBotEvent.WebSocketEvent.RECONNECT:
             logger.warning("[QQBot] Server requested reconnect")
-            await self.__ws.close()
+            await self._ws.close()
         
         # OpCode 9 Invalid Session
         elif op == models.QQBotEvent.WebSocketEvent.INVALID_SESSION:
             logger.error("[QQBot] Invalid session, re-identifying...")
             await asyncio.sleep(1)
-            await self.__send_identify()
+            await self._send_identify()
 
-    async def __send_identify(self):
-        if not self.__ws:
+    async def _send_identify(self):
+        if not self._ws:
             return
         """发送鉴权包 (OpCode 2)"""
         if not self.config:
@@ -325,7 +337,7 @@ class QQBotClient(base.BaseService):
         payload = {
             "op": 2,
             "d": {
-                "token": f"QQBot {self.__token}",
+                "token": f"QQBot {self._token}",
                 "intents": self.config.intents,
                 "shard": self.config.shard,
                 "properties": {
@@ -335,15 +347,15 @@ class QQBotClient(base.BaseService):
                 }
             }
         }
-        if self.__session_id:
-            payload["d"]["session_id"] = self.__session_id
+        if self._session_id:
+            payload["d"]["session_id"] = self._session_id
         
-        await self.__ws.send(json.dumps(payload))
+        await self._ws.send(json.dumps(payload))
     
     # =========================================================
     # 事件分发
     # =========================================================
-    async def __dispatch_event(self, event_type: str, data: Dict):
+    async def _dispatch_event(self, event_type: str, data: Dict):
         """
         可用事件名：
 
@@ -368,26 +380,26 @@ class QQBotClient(base.BaseService):
             logger.info(f"[QQBot] Ready - SessionID: {self._session_id}, Version: {version}")
             return
             
-        handler = self.__lifecycle_handlers.get(event_type)
+        handler = self._lifecycle_handlers.get(event_type)
         if handler:
             handler(data)
     
-    def __on_c2c_msg_created(self, data: Dict):
+    def _on_c2c_msg_created(self, data: Dict):
         """2C消息创建"""
         content = data.get("content")
         user_id = data.get("author", {}).get("user_openid")
         if content is None or user_id is None:
             return
-        self.__trigger_lifecycle(eventType.QQBotEventType.QQ_BOT_C2C_MSG_CREATE, {
+        self._trigger_lifecycle(eventType.QQBotEventType.QQ_BOT_C2C_MSG_CREATE, {
             "content": content,
             "user_id": user_id
         })
 
-    async def __heartbeat(self, interval_ms: int):
-        while self.__running and self.__ws:
+    async def _heartbeat(self, interval_ms: int):
+        while self._running and self._ws:
             try:
-                payload = {"op": 1, "d": self.__seq}
-                await self.__ws.send(json.dumps(payload))
+                payload = {"op": 1, "d": self._seq}
+                await self._ws.send(json.dumps(payload))
                 logger.debug("[QQBot] Heartbeat sent")
             #取消
             except asyncio.CancelledError:
@@ -411,9 +423,9 @@ class QQBotClient(base.BaseService):
         """
             发送群消息 `POST /v2/groups/{group_openid}/messages`
         """
-        if self.__session is None:
+        if self._session is None:
             raise Exception("QQBot session not initialized")
-        await self.__ensure_token()
+        await self._ensure_token()
         url = f"https://{BASE_DOMAIN}/v2/groups/{group_openid}/messages"
         if not self.config:
             raise ValueError("Config not initialized")
@@ -426,7 +438,7 @@ class QQBotClient(base.BaseService):
         }
         if msg_id:
             payload["msg_id"] = msg_id
-        resp=await self.__session.post(url, json=payload, headers=self.__headers())
+        resp=await self._session.post(url, json=payload, headers=self._headers())
         data = resp.json()
         if resp.status_code != 200:
             logger.error(f"[QQBot] Send group msg failed: {data}")
@@ -443,9 +455,9 @@ class QQBotClient(base.BaseService):
         """
             发送单聊(C2C)消息 `POST /v2/users/{user_openid}/messages`
         """
-        if self.__session is None:
+        if self._session is None:
             raise Exception("QQBot session not initialized")
-        await self.__ensure_token()
+        await self._ensure_token()
         url = f"https://{BASE_DOMAIN}/v2/users/{user_openid}/messages"
         if not self.config:
             raise ValueError("Config not initialized")
@@ -458,7 +470,7 @@ class QQBotClient(base.BaseService):
         }
         if msg_id:
             payload["msg_id"] = msg_id
-        resp = await self.__session.post(url, json=payload, headers=self.__headers())
+        resp = await self._session.post(url, json=payload, headers=self._headers())
         if resp.status_code != 200:
             logger.error(f"[QQBot] Send user msg failed: {resp.status_code}")
         data = resp.json()
@@ -468,13 +480,13 @@ class QQBotClient(base.BaseService):
         """
             获取机器人自身信息 `GET /v2/users/@me`
         """
-        if self.__session is None:
+        if self._session is None:
             raise Exception("QQBot session not initialized")
         if self.bot_info is not None:
             return self.bot_info #避免多次调用接口
-        await self.__ensure_token()
+        await self._ensure_token()
         url = f"https://{BASE_DOMAIN}/users/@me"
-        response = await self.__session.get(url, headers=self.__headers())
+        response = await self._session.get(url, headers=self._headers())
         if response.status_code != 200:
             logger.error(f"[QQBot] Get self info failed: {response.status_code}")
         data = response.json()
@@ -489,28 +501,28 @@ class QQBotClient(base.BaseService):
             raise ValueError("Config not initialized")
         return {
             "name": self.name,
-            "appid": self.config.appid,
-            "connected": self.__ws is not None and not hasattr(self.__ws, "close_code"),
-            "seq": self.__seq
+            "appid": self.config.app_id,
+            "connected": self._ws is not None and not hasattr(self._ws, "close_code"),
+            "seq": self._seq
         }
     
 
     # =========================================================
     # 生命周期事件处理
     # =========================================================
-    def __on_guild_created(self, data: Dict):
+    def _on_guild_created(self, data: Dict):
         """机器人加入新频道"""
         guild_id = data.get("id", "unknown")
         guild_name = data.get("name", "unknown")
         logger.info(f"[QQBot] Bot joined guild - ID: {guild_id}, Name: {guild_name}")
         
-        self.__trigger_lifecycle("on_guild_joined", {
+        self._trigger_lifecycle("on_guild_joined", {
             "guild_id": guild_id,
             "guild_name": guild_name,
             "data": data
         })
 
-    def __on_guild_deleted(self, data: Dict):
+    def _on_guild_deleted(self, data: Dict):
         """ 机器人被移出频道（被踢/解散）
           请求参数
           ```json
@@ -527,7 +539,7 @@ class QQBotClient(base.BaseService):
         
         logger.warning(f"[QQBot] ⚠️ Bot was removed from guild - ID: {guild_id}, Name: {guild_name}, Operator: {operator_id}")
         
-        self.__trigger_lifecycle("on_bot_kicked", {
+        self._trigger_lifecycle("on_bot_kicked", {
             "guild_id": guild_id,
             "guild_name": guild_name,
             "operator_id": operator_id,
@@ -535,41 +547,41 @@ class QQBotClient(base.BaseService):
             "data": data
         })
 
-    async def __on_guild_updated(self, data: Dict):
+    async def _on_guild_updated(self, data: Dict):
         """频道信息更新"""
         guild_id = data.get("id", "unknown")
         logger.info(f"[QQBot] Guild updated - ID: {guild_id}")
 
-    async def __on_channel_created(self, data: Dict):
+    async def _on_channel_created(self, data: Dict):
         """子频道创建"""
         channel_id = data.get("id", "unknown")
         channel_name = data.get("name", "unknown")
         logger.info(f"[QQBot] Channel created - ID: {channel_id}, Name: {channel_name}")
 
-    def __on_channel_deleted(self, data: Dict):
+    def _on_channel_deleted(self, data: Dict):
         """子频道删除"""
         channel_id = data.get("id", "unknown")
         channel_name = data.get("name", "unknown")
         logger.info(f"[QQBot] Channel deleted - ID: {channel_id}, Name: {channel_name}")
 
-    def __on_channel_updated(self, data: Dict):
+    def _on_channel_updated(self, data: Dict):
         """子频道更新"""
         channel_id = data.get("id", "unknown")
         logger.info(f"[QQBot] Channel updated - ID: {channel_id}")
 
-    def __on_group_added(self, data: Dict):
+    def _on_group_added(self, data: Dict):
         """机器人被添加到群聊"""
         group_openid = data.get("group_openid", "unknown")
         timestamp = data.get("timestamp", 0)
         logger.info(f"[QQBot] ✅ Bot added to group - GroupOpenID: {group_openid}")
         
-        self.__trigger_lifecycle(eventType.QQBotEventType.QQ_BOT_ON_GROUP_ADDED, {
+        self._trigger_lifecycle(eventType.QQBotEventType.QQ_BOT_ON_GROUP_ADDED, {
             "group_openid": group_openid,
             "timestamp": timestamp,
             "data": data
         })
 
-    def __on_group_removed(self, data: Dict):
+    def _on_group_removed(self, data: Dict):
         """
         机器人被踢出群聊或被群管理员删除
         """
@@ -581,12 +593,12 @@ class QQBotClient(base.BaseService):
         logger.warning(f"[QQBot]    GroupOpenID: {group_openid}")
         logger.warning(f"[QQBot]    Operator: {op_member_openid}")
         logger.warning(f"[QQBot]    Timestamp: {timestamp}")
-        self.__log_bot_event("kicked_from_group", {
+        self._log_bot_event("kicked_from_group", {
             "group_openid": group_openid,
             "operator": op_member_openid,
             "timestamp": timestamp
         })
-        self.__trigger_lifecycle("on_bot_kicked", {
+        self._trigger_lifecycle("on_bot_kicked", {
             "group_openid": group_openid,
             "operator_id": op_member_openid,
             "reason": "kicked_from_group",
@@ -595,46 +607,46 @@ class QQBotClient(base.BaseService):
         })
     
 
-    def __on_group_msg_rejected(self, data: Dict):
+    def _on_group_msg_rejected(self, data: Dict):
         """机器人被群禁言"""
         group_openid = data.get("group_openid", "unknown")
         logger.warning(f"[QQBot] 🔇 Bot muted in group - GroupOpenID: {group_openid}")
         
-        self.__log_bot_event("muted_in_group", {
+        self._log_bot_event("muted_in_group", {
             "group_openid": group_openid,
             "timestamp": data.get("timestamp", 0)
         })
 
-    def __on_friend_added(self, data: Dict):
+    def _on_friend_added(self, data: Dict):
         """机器人被添加好友"""
         user_openid = data.get("openid", "unknown")
         logger.info(f"[QQBot] 🤝 Friend added - UserOpenID: {user_openid}")
-        self.__trigger_lifecycle(eventType.QQBotEventType.QQ_BOT_ON_FRIEND_ADDED, {
+        self._trigger_lifecycle(eventType.QQBotEventType.QQ_BOT_ON_FRIEND_ADDED, {
             "user_openid": user_openid,
             "data": data
         })
 
-    def __on_friend_deleted(self, data: Dict):
+    def _on_friend_deleted(self, data: Dict):
         """机器人被删除好友"""
         user_openid = data.get("openid", "unknown")
         logger.warning(f"[QQBot] 👋 Friend removed - UserOpenID: {user_openid}")
-        self.__trigger_lifecycle("on_friend_removed", {
+        self._trigger_lifecycle("on_friend_removed", {
             "user_openid": user_openid,
             "data": data
         })
 
-    def __on_c2c_msg_rejected(self, data: Dict):
+    def _on_c2c_msg_rejected(self, data: Dict):
         """用户拒绝接收机器人消息"""
         user_openid = data.get("openid", "unknown")
         logger.warning(f"[QQBot] 🚫 C2C message rejected by user - UserOpenID: {user_openid}")
 
-    def __on_direct_message(self, data: Dict):
+    def _on_direct_message(self, data: Dict):
         """收到私信消息"""
         author = data.get("author", {})
         user_openid = author.get("id", "unknown")
         logger.info(f"[QQBot] Direct message from user: {user_openid}")
 
-    def __on_interaction_create(self, data: Dict):
+    def _on_interaction_create(self, data: Dict):
         """交互事件（按钮点击等）"""
         interaction_id = data.get("id", "unknown")
         logger.info(f"[QQBot] Interaction created - ID: {interaction_id}")
@@ -642,7 +654,7 @@ class QQBotClient(base.BaseService):
     # =========================================================
     # 日志记录与通知
     # =========================================================
-    def __log_bot_event(self, event_type: str, details: Dict):
+    def _log_bot_event(self, event_type: str, details: Dict):
         """
         记录机器人生命周期事件到持久化日志
         可用于后续分析或监控
@@ -651,7 +663,7 @@ class QQBotClient(base.BaseService):
             return
         log_entry = {
             "event": event_type,
-            "appid": self.config.appid,
+            "appid": self.config.app_id,
             "timestamp": time.time(),
             "details": details
         }
@@ -659,7 +671,7 @@ class QQBotClient(base.BaseService):
         logger.info(f"[QQBot-LOG] Bot event: {json.dumps(log_entry, ensure_ascii=False)}")
         
 
-    def __trigger_lifecycle(self, event_name: str, data: Dict):
+    def _trigger_lifecycle(self, event_name: str, data: Dict):
         if not self.debug:
             return
         from ...events import emit

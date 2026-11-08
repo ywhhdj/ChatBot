@@ -1,39 +1,72 @@
-"""PPT 对外服务：模板 + 大纲 + 渲染 三合一。
-
-修复对应清单：K23 / K25 / K26
-
-注册为 ServiceManager 的一个服务（`ServiceId.PPT`），
-`get_tools()` 返回 `ToolFunction`，可直接进命令文档。
-
-长耗时（Kimi 网络调用）全部提交到任务调度器，返回 task_id，
-前端按需取回 —— 不在 UI 线程 / Web loop 上 await 网络 IO。
-"""
+"""PPT 对外服务：模板 + 大纲 + 渲染 三合一"""
 
 from __future__ import annotations
 
-import os
+import json
+import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
+from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
 from ...events import on_event_class, types
 from ...logger import logger
-from ..service.decorator import Service
-from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
-
-from ..base import BaseService, ServiceState
-from .models import DeckSpec, RenderResult, TemplateSpec
-from .renderer import PptRenderService
-from .template import get_template_service,DEFAULT_TEMPLATE_ID
-from .prompts import build_outline_system, build_outline_user,OFFICIAL_CONVENTIONS
-
 from ... import keys
-from ... import events
+from ...providers.entity import LLM
+from .._async import run_coroutine
+from ..base import BaseService, ServiceState
+from ..manager import Service
+from .models import DeckSpec, RenderResult, TemplateSpec
+from .prompts import (
+    OFFICIAL_CONVENTIONS,
+    build_outline_system,
+    build_outline_user,
+)
+from .renderer import PptRenderService
+from .template import get_template_service
 
-# 任务表：task_id -> {...}
-_JOBS: Dict[str, Dict[str, Any]] = {}
+# 有界任务表：task_id -> {...}。旧实现无上限、无 TTL，长时间运行会持续堆积
+# 已完成的 RenderResult 与 TaskReference。
+_JOBS: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 _JOB_LOCK = threading.RLock()
+_JOB_LIMIT = 64
+_JOB_TTL = 3600.0
+
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _parse_deck_json(raw: str) -> Dict[str, Any]:
+    """LLM 返回可能被 ```json 包裹或夹前后说明；只接受含 slides 的对象。"""
+    text = str(raw or "").strip()
+    candidates = [text]
+    block = _JSON_BLOCK.search(text)
+    if block:
+        candidates.append(block.group(1).strip())
+    obj = _JSON_OBJECT.search(text)
+    if obj:
+        candidates.append(obj.group(0))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            data = json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, dict) and data.get("slides"):
+            return data
+    raise RuntimeError("LLM 未返回合法的大纲 JSON")
+
+
+def _prune_jobs(now: float) -> None:
+    """调用方持有 _JOB_LOCK。"""
+    for task_id, job in list(_JOBS.items()):
+        if now - float(job.get("created_at", 0)) > _JOB_TTL:
+            _JOBS.pop(task_id, None)
+    while len(_JOBS) > _JOB_LIMIT:
+        _JOBS.popitem(last=False)
 
 @on_event_class([
     (types.PptEventType.PPT_STOP, "stop"),
@@ -50,24 +83,25 @@ class PptService(BaseService):
 
     def __init__(
         self,
-        api_key: str = "",
-        model: str = "",
-        base_url: str = "",
         default_template: str = "consulting",
         default_pages: int = 10,
-        output_dir: str = "",
     ) -> None:
         super().__init__()
-        self.api_key = api_key or os.environ.get("MOONSHOT_API_KEY", "")
-        self.model = model or ""
-        self.base_url = base_url or ""
         self.default_template = default_template or "consulting"
         self.default_pages = int(default_pages or 10)
-        self.output_dir = output_dir
+        try:
+            from ...security import service_output_dir
+
+            self.output_dir = service_output_dir("ppt")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[PPT] 工作区产出目录暂不可用: {exc}")
+            self.output_dir = ""
 
         self.templates = get_template_service()
-        self.renderer = PptRenderService(output_dir=output_dir or None)
-        self.running = True
+        self.renderer = PptRenderService()
+        # 构造尚未启动：状态由 ServiceManager.start_service 置为 RUNNING。
+        # 旧实现构造即 running，管理器再启动会被"已在运行"直接拒绝。
+        self.running = False
         self.set_status()
         self.context_profile = {
             "dedicated_stage": True,
@@ -89,6 +123,17 @@ class PptService(BaseService):
                 "reserve_for_input": 1024,
             },
         }
+
+    def on_config_change(self, old_config: Dict, new_config: Dict) -> None:
+        template = str(new_config.get("default_template") or "").strip()
+        if template:
+            self.default_template = template
+        pages = new_config.get("default_pages")
+        if pages:
+            try:
+                self.default_pages = max(1, min(int(pages), 60))
+            except (TypeError, ValueError):
+                pass
 
     # ---------- 状态 ----------
 
@@ -118,11 +163,14 @@ class PptService(BaseService):
         material: str = "",
         template_id: Optional[str] = None,
     ) -> DeckSpec:
-        """调 Kimi 生成结构化大纲。"""
-        tpl =self.resolve_template(template_id, style)
+        """用已初始化的 LLM 门面生成结构化大纲。
+
+        旧实现 `events.emit(events.types.ProviderEventType.LLM_GENERATE)` 有三重问题：
+        emit 需要 BaseEvent 却传了字符串（必抛 AttributeError）、该事件没有任何
+        监听者、且完全没有把 system/user 提示词发出去 —— 大纲链路从未可用。
+        """
+        tpl = self.resolve_template(template_id, style)
         system = build_outline_system(tpl)
-        #更新上下文
-        self.context_profile["system_prompt"]=system
         user = build_outline_user(
             topic=topic,
             pages=int(pages or self.default_pages),
@@ -131,10 +179,18 @@ class PptService(BaseService):
             style=style,
             material=material,
         )
-        data=events.emit(events.types.ProviderEventType.LLM_GENERATE)
-        if not data:
-            raise RuntimeError("LLM 未返回任何信息")
-        deck = DeckSpec.from_dict(data)
+        llm = LLM()
+        if not llm.is_initialized:
+            raise RuntimeError("LLM 未初始化，无法生成 PPT 大纲")
+        raw = run_coroutine(llm.process_message(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.2,
+            max_tokens=2048,
+        ))
+        deck = DeckSpec.from_dict(_parse_deck_json(raw))
         if not deck.slides:
             raise RuntimeError("LLM 未返回任何页面")
         # 兜底：补封面 / 结尾
@@ -163,10 +219,10 @@ class PptService(BaseService):
         audience: str = "",
         scenario: str = "",
         file_name: Optional[str] = None
-    ) -> str:
-        """一步到位：大纲 + 渲染。"""
+    ) -> RenderResult:
+        """一步到位：大纲 + 渲染"""
         deck = self.outline(topic, pages, audience, scenario, style, material, template_id)
-        return self.render(deck, template_id, style, file_name=file_name).prompt()
+        return self.render(deck, template_id, style, file_name=file_name)
 
     @staticmethod
     def _ensure_edges(deck: DeckSpec, topic: str) -> None:
@@ -192,52 +248,67 @@ class PptService(BaseService):
         from ... import runtime
 
         task_id = uuid.uuid4().hex[:16]
+        now = time.time()
         with _JOB_LOCK:
+            _prune_jobs(now)
             _JOBS[task_id] = {
-                "state": "pending", 
+                "state": "pending",
                 "result": None,
-                "error": None, 
-                "created_at": time.time()
+                "error": None,
+                "created_at": now,
             }
 
-        def _job() -> str:
+        def _job() -> RenderResult:
             return self.generate(**kwargs)
 
-        ref = runtime.manager.task_manager.submit(_job, timeout=600.0, task_type="sync")  # type: ignore[union-attr]
+        try:
+            ref = runtime.manager.task_manager.submit(  # type: ignore[union-attr]
+                _job, timeout=600.0, task_type="sync"
+            )
+        except Exception as exc:  # noqa: BLE001
+            with _JOB_LOCK:
+                job = _JOBS.get(task_id)
+                if job is not None:
+                    job["state"] = "failed"
+                    job["error"] = str(exc)
+            raise
         with _JOB_LOCK:
-            _JOBS[task_id]["ref"] = ref
-            _JOBS[task_id]["state"] = "running"
+            job = _JOBS.get(task_id)
+            if job is not None:
+                job["ref"] = ref
+                job["state"] = "running"
         return task_id
 
     def job_status(self, task_id: str) -> Dict[str, Any]:
         with _JOB_LOCK:
+            _prune_jobs(time.time())
             job = _JOBS.get(str(task_id))
-        if job is None:
-            return {
-                "task_id": task_id,
-                "state": "not_found"
-            }
-        ref = job.get("ref")
-        result = None
-        state = job.get("state")
-        if ref is not None:
-            try:
-                done = ref.is_done() if hasattr(ref, "is_done") else None
-                if done:
-                    state = "done"
+            if job is None:
+                return {"task_id": task_id, "state": "not_found"}
+            # 终态直接读缓存，不再每次都去取 TaskReference 的结果
+            if job.get("state") not in ("done", "failed"):
+                ref = job.get("ref")
+                if ref is not None:
                     try:
-                        result = ref.result()
-                    except Exception as e:  # noqa: BLE001
-                        state = "failed"
-                        job["error"] = str(e)
-            except Exception:  # noqa: BLE001
-                pass
-        out = {"task_id": task_id, "state": state}
-        if result is not None:
-            out["result"] = result.to_dict() if hasattr(result, "to_dict") else result
-        if job.get("error"):
-            out["error"] = job["error"]
-        return out
+                        if ref.is_done():
+                            try:
+                                value = ref.result()
+                            except Exception as exc:  # noqa: BLE001
+                                job["state"] = "failed"
+                                job["error"] = str(exc)
+                            else:
+                                job["state"] = "done"
+                                job["result"] = (
+                                    value.to_dict() if hasattr(value, "to_dict") else value
+                                )
+                    except Exception:  # noqa: BLE001
+                        pass
+            out: Dict[str, Any] = {"task_id": task_id, "state": job.get("state")}
+            if job.get("result") is not None:
+                out["result"] = job["result"]
+            if job.get("error"):
+                out["error"] = job["error"]
+            return out
 
     # ---------- 生命周期 ----------
 

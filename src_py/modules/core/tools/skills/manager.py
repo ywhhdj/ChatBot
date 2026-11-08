@@ -10,7 +10,7 @@ from ....runtime import RuntimePath
 from ....utils.file import read_markdown, yaml 
 from .models import ExecType, Skill, SkillMetadata, SkillsManagerConfig
 
-INDEX_NAME = "index.yaml"   # C89：统一为 yaml，且读写同一个文件
+INDEX_NAME = "index.yaml"   # 统一为 yaml，且读写同一个文件
 SKILL_DOC_NAME = "SKILL.md"
 
 class ExternalSkillManager:
@@ -20,7 +20,7 @@ class ExternalSkillManager:
     _cls_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
-        # C90：加锁。原来无锁，多线程同时首次调用会创建多个实例
+        # 加锁。原来无锁，多线程同时首次调用会创建多个实例
         with cls._cls_lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
@@ -105,7 +105,7 @@ class ExternalSkillManager:
         except Exception as exc:
             logger.error(f"[Skills] 写入索引失败 {self._index_path}: {exc}")
 
-    # ---------- 目录监听（C88） ----------
+    # ---------- 目录监听 ----------
 
     def watch_directory(self) -> None:
         """真正启动目录监听。
@@ -184,7 +184,7 @@ class ExternalSkillManager:
             logger.warning(f"[Skills] 技能 {skill_id} 校验失败: {'; '.join(errors)}")
             return
 
-        # C93：原来传的是 file_path.parent（skills 根目录），
+        # 原来传的是 file_path.parent（skills 根目录），
         # 于是 __get_exec_type 去找 skills/scripts —— 永远不存在，
         # exec_type 恒为 0(none)。这里传技能自己的目录。
         exec_type, entry, code = self._probe_scripts(skill_dir)
@@ -194,7 +194,7 @@ class ExternalSkillManager:
                 metadata=metadata,
                 exec_type=exec_type,
                 active=True,
-                code=code,                      # C80：真正填充代码
+                code=code,                      # 真正填充代码
                 context=parts[2].strip(),
                 entry=entry,
             )
@@ -230,7 +230,7 @@ class ExternalSkillManager:
                     return exec_type, file.name, code
         return ExecType.NONE, "", ""
 
-    # ---------- 启用 / 停用（C95） ----------
+    # ---------- 启用 / 停用 ----------
 
     def activate_skill(self, skill_id: str) -> bool:
         with self._lock:
@@ -311,11 +311,27 @@ class ExternalSkillManager:
         if not skill.code:
             return {"ok": False, "error": f"skill {skill_id} 代码为空"}
 
+        # 技能产出限制在 <workspace>/skill/<skill_id>/。
+        # 沙盒 AST 白名单禁用 open / os / pathlib / subprocess，
+        # 注入的 write_output 是技能落盘的唯一通道。
+        try:
+            from ....security import make_output_writer, service_output_dir
+
+            output_dir = service_output_dir("skill", skill_id)
+            write_output = make_output_writer("skill", skill_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Skills] 工作区输出目录不可用: {exc}")
+            output_dir = ""
+            write_output = None
+
         context = {
             "input_data": params,
             "params": params,
             "result": None,
+            "output_dir": output_dir,
         }
+        if write_output is not None:
+            context["write_output"] = write_output
         try:
             return await self._executor.execute(skill.code, context=context)
         except Exception as exc:

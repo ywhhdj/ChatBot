@@ -67,6 +67,10 @@ export default defineConfig({
   server: {
     watch: {
       ignored: [
+        "lib",
+        "android",
+        "ios",
+        "log",
         "src_py",
         "memory",
         "resources",
@@ -75,8 +79,7 @@ export default defineConfig({
         "others",
         "node_modules",
         "dist",
-        "static",
-        "public"
+        "static"
       ]
     }
   },

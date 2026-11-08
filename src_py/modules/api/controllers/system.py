@@ -173,11 +173,9 @@ async def info() -> ApiResponse[InfoData]:
 
     adapters: Dict[str, Any] = {}
     try:
-        from ...manager.pipeline import PipelineManager
+        from ...providers.manager import provider_manager
 
-        pm = PipelineManager.__new__(PipelineManager)
-        if getattr(pm, "_initialized", False):
-            adapters = pm.get_pipeline_all_configs() or {}
+        adapters = provider_manager.get_pipeline_all_configs() or {}
     except Exception:
         pass
 
@@ -206,11 +204,17 @@ async def stats() -> ApiResponse[StatsData]:
 
     ws_stats: Dict[str, Any] = {}
     try:
-        from ...manager.websocket.manager import get_websocket_manager
+        # 管理器在 api/controllers/websocket/ 下；旧路径 manager.websocket.*
+        # 不存在，导致 stats 里的连接数永远恒为 0。
+        from .websocket.manager import get_websocket_manager
 
         mgr = get_websocket_manager()
-        conns = getattr(mgr, "active_connections", None) or {}
-        ws_stats = {"connections": len(conns)}
+        count = getattr(mgr, "connection_count", None)
+        if callable(count):
+            ws_stats = {"connections": int(count())}
+        else:
+            conns = getattr(mgr, "active_connections", None) or {}
+            ws_stats = {"connections": len(conns)}
     except Exception:
         ws_stats = {"connections": 0}
 

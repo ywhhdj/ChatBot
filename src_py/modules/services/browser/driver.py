@@ -17,19 +17,11 @@ from ...logger import logger
 from ...utils.file import read_text
 from ..config import BrowserConfig
 
-# try:  # playwright 是可选依赖，缺失时本模块仍可被导入
-#     from playwright.async_api import (
-#         async_playwright, Browser, BrowserContext, Page, Playwright,
-#     )
-#     _PLAYWRIGHT_OK = True
-# except ImportError:  # pragma: no cover
-#     _PLAYWRIGHT_OK = False
-#     async_playwright = None  # type: ignore
-#     Browser = BrowserContext = Page = Playwright = object  # type: ignore
+# playwright 是可选依赖：缺失时 import 抛 ImportError，
+# 由 browser.Browser 在构造阶段捕获并降级为"服务不可用"。
 from playwright.async_api import (
     async_playwright, Browser, BrowserContext, Page, Playwright,
 )
-_PLAYWRIGHT_OK = True
 
 BrowserType = Literal["chrome", "edge", "firefox"]
 
@@ -111,7 +103,7 @@ class BrowserDriver:
     # ---------- 可执行文件 ----------
 
     def _get_default_exe_path(self) -> str:
-        """S46：按平台找已安装的浏览器；找不到返回空串（用自带内核）。"""
+        """按平台找已安装的浏览器；找不到返回空串（用自带内核）。"""
         table = _EXE_CANDIDATES.get(self.config.browser_type, {})
         for key in (sys.platform, "linux"):
             for candidate in table.get(key, []):
@@ -134,12 +126,8 @@ class BrowserDriver:
     # ---------- 启动 ----------
 
     async def start_browser(self, headless: bool = False) -> Page:
-        if not _PLAYWRIGHT_OK:
-            raise RuntimeError("playwright 未安装，无法启动浏览器")
-
         self._pw = await async_playwright().start()
         exe_path = self._get_default_exe_path()
-        # S47：channel 与 executable_path 不能同时给
         channel = None if exe_path else self._get_channel()
         vp = self.config.viewport or DEFAULT_VIEWPORT
 
@@ -190,12 +178,10 @@ class BrowserDriver:
             else await self._context.new_page()
         )
         if self.config.viewport:
-            try:
-                await self._page.set_viewport_size(
-                    vp["width"], vp["height"]  # type: ignore[union-attr][arg-type]
-                )
-            except Exception:
-                pass
+            await self._page.set_viewport_size({
+                "width": int(vp.get("width", 1280)),
+                "height": int(vp.get("height", 800))
+            })
 
         logger.info(f"[BrowserDriver] 已启动 {self.config.browser_type}")
         return self._page
@@ -207,7 +193,6 @@ class BrowserDriver:
         return {"server": proxy}
 
     async def stop_browser(self) -> None:
-        """S49：cdp 模式只停 playwright 进程，不关用户的浏览器。"""
         try:
             if self._context is not None and not self.config.cdp_url:
                 await self._context.close()
@@ -232,7 +217,6 @@ class BrowserDriver:
     # ---------- 反检测 ----------
 
     def _load_script(self, name: str) -> Optional[str]:
-        """S45：dev 与打包后都拼到 scripts/ 下，不再把目录当文件读。"""
         if runtime.is_dev_mode():
             js_path = Path(__file__).parent / "scripts" / name
         else:

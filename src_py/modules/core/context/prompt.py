@@ -111,7 +111,7 @@ class PromptBuilder:
             )
 
         # 1.5) 阶段指令：优先级 5，仅高于角色身份（10）
-        segments.extend(cls._build_directive_segments(directives))
+        segments.extend(cls._build_directive_segments(directives)) # type:ignore
 
         # 2) 预算裁剪（默认策略；调用方可传入自定义）
         kept, report = apply_budget(segments, budget_policy or BudgetPolicy())
@@ -201,11 +201,7 @@ class PromptBuilder:
 
     @classmethod
     def estimate_tokens(cls, text: str) -> int:
-        """区分 CJK 与拉丁字符估算 token。
-
-        委托给 `context.budget.estimate_tokens`，保证预算裁剪与结果统计
-        用的是同一把尺子 —— 两处口径不一会导致"报告说没超、实际超了"。
-        """
+        """区分 CJK 与拉丁字符估算 token"""
         return _estimate_tokens(text)
 
     # ---------- 各通道片段 ----------
@@ -495,6 +491,18 @@ class PromptBuilder:
                 if parts:
                     command += " " + " ".join(parts)
                 lines.append(f"{command} # {desc}".rstrip())
+        # shell 兜底：模型直接写原生命令原文，不需要 `shell --command` 包装。
+        # 平台差异由后端映射，删除/提权/拼接/越界由后端确定性拒绝。
+        lines.extend([
+            "",
+            "## 通用 Shell 命令（兜底）",
+            "除上面的服务命令、skill、error 之外，其余命令直接写原生命令原文，",
+            "不要加 shell 前缀，也不要写 --command 之类的包装。",
+            "示例：cd docs / ls -la / dir / mkdir report / cat notes.txt / type notes.txt / pwd / echo hello",
+            "命令只在当前工作区内执行；禁止 rm/del/rd/format/sudo 等删除与提权命令，",
+            "禁止管道、重定向与命令拼接，禁止访问工作区外的路径。",
+            "系统差异由后端按平台映射（dir↔ls、type↔cat、copy↔cp、move↔mv、cls↔clear）。",
+        ])
         if skill_prompt:
             lines.append(skill_prompt.strip())
         return "\n".join(lines)

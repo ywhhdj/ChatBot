@@ -21,6 +21,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import threading
 import time
 from typing import Callable, List, Optional, Tuple
@@ -169,8 +171,16 @@ class InputDebouncer:
         self._on_idle()
 
     def _fire(self, text: str) -> None:
+        """触发提交回调"""
         try:
-            self._on_submit(text)  # type: ignore[misc]
+            result = self._on_submit(text)  # type: ignore[misc]
+            if inspect.isawaitable(result):
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    asyncio.run(_await_value(result))
+                else:
+                    asyncio.get_running_loop().create_task(_await_value(result))
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[Debouncer] on_submit 失败: {exc}")
 
@@ -195,6 +205,10 @@ class InputDebouncer:
     def _cancel_timers(self) -> None:
         self._cancel_idle()
         self._cancel_deadline()
+
+
+async def _await_value(value) -> None:
+    await value
 
 
 def _clamp(value: float, low: float, high: float) -> float:

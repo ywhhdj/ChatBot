@@ -31,7 +31,6 @@ def _state(raw: Any) -> str:
     return _STATE_MAP.get(str(value).lower(), str(value).lower())
 
 
-@router.get("/{task_id}", response_model=ApiResponse[TaskStatusData])
 async def get_task(
     task_id: str,
     wait: bool = Query(False, description="true 时阻塞等待任务完成"),
@@ -74,7 +73,6 @@ async def get_task(
     )
 
 
-@router.post("/{task_id}/cancel", response_model=ApiResponse[TaskStatusData])
 async def cancel_task(task_id: str) -> ApiResponse[TaskStatusData]:
     """取消任务（尽力而为）。"""
     s = get_schedular()

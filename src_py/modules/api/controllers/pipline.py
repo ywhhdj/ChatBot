@@ -1,175 +1,294 @@
-"""管道（适配器）接口：查看可选 provider、切换、关闭。
+"""对话与推理接口：聊天（非流式 / SSE 流式）、TTS、ASR、命令执行。
 
-对应 api文档.md 第 3 节。
+对应 api文档.md 第 6 节。
 
-`switch_adapter` 内部会关闭旧适配器 + 初始化新 provider，
-其中 `init_provider_client` 可能触发模型加载（OCR 尤其明显），
-因此整个切换放在线程池执行，Web loop 不被占住。
+核心约束（api文档.md 15 节）
+───────────────────────────
+* **producer 跑在调度器 loop**：`chat.router_stream` 由 `stream_task_scheduler`
+  装饰，Web loop 只做 `async for` 转发 —— 流式推理期间其它 HTTP 请求照常响应。
+* **非流式聊天同样提交调度器**，不在 Web loop 里 await 整个推理过程。
+* **二进制走 base64**，避免 multipart 与前端（PyQt）的额外适配。
 """
+
 from __future__ import annotations
-from typing import Any, Dict
-from fastapi import APIRouter, Query
 
-from ..dto import AdapterInfo, SwitchResultData
-from ..requests import PipelineSwitchRequest
-from ..response import ApiError, ApiResponse, success
-from .._common import mask_config, to_thread
+import asyncio
+import base64
 
-router = APIRouter(prefix="/pipeline", tags=["pipeline"])
+import threading
+import time
+from typing import AsyncGenerator,Optional
+from fastapi.responses import StreamingResponse
+from fastapi import APIRouter
 
-SECRET_KEYS = ("api_key", "token", "secret", "password")
+from src_py.modules.runtime import RuntimePath
+from src_py.modules.utils.zipstream import stream_zip
+
+from ..requests import (
+    ASRRequest,
+    ChatRequest,
+    TTSRequest
+)
+from ..dto import (
+    ASRResultData,
+    ChatResultData,
+    CommandResultData,
+    TTSResultData,
+    RequestStatusData,
+    ASRResultData
+)
+from ..response import ApiError, ApiResponse, success, sse
+from .._common import run_in_scheduler
+
+router=APIRouter(
+    prefix="",
+    tags=["常规请求"]
+)
+
+STREAM_TIMEOUT = 600.0
 
 
-def _adapter_type(value: str):
-    from ...core.pipeline.enum import AdapterType
+def _route_type(value: Optional[str]):
+    if not value:
+        return None
+    from ...core.routes.models import RouteType
 
     try:
-        return AdapterType(value)
+        return RouteType(value)
     except ValueError:
-        valid = [e.value for e in AdapterType]
-        raise ApiError.bad_request(f"适配器类型 {value} 无效，可选: {', '.join(valid)}")
+        valid = [e.value for e in RouteType]
+        raise ApiError.bad_request(f"路由类型 {value} 无效，可选: {', '.join(valid)}")
 
+# --------------------------------------------------------------------------
+# 对话
+# --------------------------------------------------------------------------
+async def chat_once(payload: ChatRequest) -> ApiResponse[ChatResultData]:
+    """非流式对话。"""
+    from ...core.pipeline import chat
 
-def _manager():
-    from ...manager.pipeline import pipeline_manager
+    if not payload.text.strip():
+        raise ApiError.bad_request("text 不能为空")
 
-    pm = pipeline_manager
-    # 配置可能还没加载（PIPELINE_START 未触发），这里兜底加载一次
-    if not (pm.get_pipeline_all_configs() or {}):
-        try:
-            pm.load_config()
-        except Exception:
-            pass
-    return pm
+    start = time.time()
+    force = _route_type(payload.route)
 
-
-@router.get("/adapters", response_model=ApiResponse[Dict[str, Any]])
-async def list_adapters() -> ApiResponse[Dict[str, Any]]:
-    """列出所有适配器类型、可选 provider 与当前 provider。"""
-    from ...core.pipeline.enum import AdapterType
-
-    pm = _manager()
-    out: Dict[str, Any] = {}
-    for adapter in AdapterType:
-        key = adapter.value
-        try:
-            providers = list(pm.get_provider_names(_adapter_type(key)) or [])
-        except Exception:
-            providers = []
-        current = None
-        try:
-            from ...core.pipeline.manager import LLM, TTS
-
-            mapping = {"llm": LLM, "tts": TTS}
-            cls = mapping.get(key)
-            if cls is not None:
-                inst = cls.__new__(cls)
-                if getattr(inst, "_provider", None) is not None:
-                    current = str(getattr(inst._provider, "name", "") or "")
-        except Exception:
-            pass
-        out[key] = AdapterInfo(type=key, providers=providers, current=current).model_dump()
-    return success({"adapters": out})
-
-
-@router.get(
-    "/adapters/{adapter}/providers", 
-    response_model=ApiResponse[Dict[str, Any]]
-)
-async def list_providers(adapter: str) -> ApiResponse[Dict[str, Any]]:
-    """某适配器类型下的 provider 列表。"""
-    pm = _manager()
-    at = _adapter_type(adapter)
-    names = list(pm.get_provider_names(at) or [])
-    return success({"type": adapter, "providers": names, "total": len(names)})
-
-
-@router.get(
-    "/adapters/{adapter}/providers/{provider}",
-    response_model=ApiResponse[Dict[str, Any]],
-)
-async def get_provider(
-    adapter: str,
-    provider: str,
-    raw: bool = Query(False, description="true 时返回敏感字段原值"),
-) -> ApiResponse[Dict[str, Any]]:
-    """单个 provider 的完整配置。"""
-    pm = _manager()
-    cfg = pm.get_provider_config(_adapter_type(adapter), provider)
-    if not cfg:
-        raise ApiError.not_found(f"provider {adapter}/{provider}")
-    data = dict(cfg)
-    if not raw:
-        data = mask_config(data, SECRET_KEYS)
-    return success({
-        "type": adapter, 
-        "name": provider,
-        "config": data
-    })
-
-
-@router.post("/adapters/{adapter}/switch", response_model=ApiResponse[SwitchResultData])
-async def switch(
-    adapter: str,
-    payload: PipelineSwitchRequest,
-) -> ApiResponse[SwitchResultData]:
-    """切换 provider。
-
-    `config` 留空则使用配置文件中的默认配置。
-    切换过程（关闭旧的 + 初始化新的）在线程池执行。
-    """
-    pm = _manager()
-    at = _adapter_type(adapter)
-
-    if not pm.validate_provider(at, payload.provider):
-        valid = list(pm.get_provider_names(at) or [])
-        raise ApiError.bad_request(
-            f"provider {payload.provider} 不适用于 {adapter}，可选: {', '.join(valid)}"
+    try:
+        text = await run_in_scheduler(
+            chat.router,
+            payload.text,
+            source=payload.source,
+            session_id=payload.session_id,
+            force_channel=force,
+            timeout=STREAM_TIMEOUT,
         )
-
-    result = await to_thread(pm.switch_adapter, at, payload.provider, payload.config)
-    data = result if isinstance(result, dict) else {}
-
-    if not data.get("success"):
-        errors = data.get("errors") or ["切换失败"]
-        raise ApiError.internal("; ".join(str(e) for e in errors))
+    except asyncio.TimeoutError:
+        raise ApiError.timeout("对话")
+    except Exception as e:
+        raise ApiError.internal(f"对话失败: {e}")
 
     return success(
-        SwitchResultData(
-            success=True,
-            type=data.get("type", adapter),
-            name=data.get("name", payload.provider),
-            config=mask_config(data.get("config") or {}, SECRET_KEYS),
-        ),
-        message=f"{adapter} 已切换到 {payload.provider}",
+        ChatResultData(
+            text=str(text or ""),
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+    )
+
+async def chat_stream(payload: ChatRequest) -> StreamingResponse:
+    """流式对话（SSE）。
+
+    每帧 `data: {"type":"chunk","text":"..."}`，结束帧
+    `data: {"type":"done","elapsed_ms":...}`。
+    """
+    from ...core.pipeline import chat
+
+    if not payload.text.strip():
+        raise ApiError.bad_request("text 不能为空")
+
+    force = _route_type(payload.route)
+    start = time.time()
+
+    async def gen() -> AsyncGenerator[str, None]:
+        ref = None
+        try:
+            ref = await chat.router_stream(
+                payload.text,
+                source=payload.source,
+                session_id=payload.session_id,
+                force_channel=force,
+            )
+            async for chunk in ref:
+                if not chunk:
+                    continue
+                yield sse({
+                    "type": "chunk",
+                    "text": chunk
+                })
+            yield sse({
+                "type": "done",
+                "session_id": payload.session_id,
+                "elapsed_ms": int((time.time() - start) * 1000),
+            })
+        except asyncio.CancelledError:
+            # 客户端断开：尽力关闭流，避免 producer 留在调度器里
+            if ref is not None:
+                with _suppress():
+                    ref.cancel()
+            return
+        except Exception as e:
+            yield sse({
+                "type": "error", 
+                "message": f"{type(e).__name__}: {e}"
+            })
+        finally:
+            if ref is not None:
+                try:
+                    ref.finish()
+                except Exception:
+                    pass
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
-@router.post("/adapters/{adapter}/stop", response_model=ApiResponse[Dict[str, Any]])
-async def stop_adapter(adapter: str) -> ApiResponse[Dict[str, Any]]:
-    """关闭当前适配器。"""
-    pm = _manager()
-    at = _adapter_type(adapter)
-    await to_thread(pm.unregister, at.value)
-    return success({"type": adapter, "stopped": True}, message=f"{adapter} 已关闭")
+class _suppress:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return True
 
 
-@router.get("/configs", response_model=ApiResponse[Dict[str, Any]])
-async def all_configs(
-    raw: bool = Query(False, description="true 时返回敏感字段原值"),
-) -> ApiResponse[Dict[str, Any]]:
-    pm = _manager()
-    data = pm.get_pipeline_all_configs() or {}
-    if raw:
-        return success(data)
+# --------------------------------------------------------------------------
+# TTS / ASR
+# --------------------------------------------------------------------------
+async def tts(payload: TTSRequest) -> ApiResponse[TTSResultData]:
+    """文本转语音，返回 base64 音频。"""
+    from ...core.pipeline import chat
 
-    masked: Dict[str, Any] = {}
-    for adapter, providers in data.items():
-        if not isinstance(providers, dict):
-            masked[adapter] = providers
-            continue
-        masked[adapter] = {
-            name: mask_config(cfg, SECRET_KEYS) if isinstance(cfg, dict) else cfg
-            for name, cfg in providers.items()
+    if not payload.text.strip():
+        raise ApiError.bad_request("text 不能为空")
+
+    try:
+        ref = chat.text_to_speech(payload.text)
+        audio = await ref.wait_async(timeout=120.0)
+    except asyncio.TimeoutError:
+        raise ApiError.timeout("语音合成")
+    except Exception as e:
+        raise ApiError.internal(f"语音合成失败: {e}")
+
+    if not audio:
+        raise ApiError.not_initialized("TTS", "未返回音频数据")
+
+    raw = audio if isinstance(audio, (bytes, bytearray)) else bytes(audio)
+    return success(
+        TTSResultData(
+            audio=base64.b64encode(raw).decode("ascii"),
+            format=payload.format,
+            bytes=len(raw),
+        )
+    )
+
+async def asr(payload: ASRRequest) -> ApiResponse[ASRResultData]:
+    """语音转文本，audio 为 base64 编码的音频字节。"""
+    from ...core.pipeline import chat
+
+    try:
+        audio = base64.b64decode(payload.audio)
+    except Exception as e:
+        raise ApiError.bad_request(f"audio 不是合法的 base64: {e}")
+
+    if not audio:
+        raise ApiError.bad_request("audio 不能为空")
+
+    try:
+        ref = chat.speech_to_text(audio)
+        text = await ref.wait_async(timeout=120.0)
+    except asyncio.TimeoutError:
+        raise ApiError.timeout("语音识别")
+    except Exception as e:
+        raise ApiError.internal(f"语音识别失败: {e}")
+
+    return success(ASRResultData(text=str(text or "")))
+
+progress_lock=threading.Lock()
+progress_store={}
+@router.post("/progress-stream/{task_id}")
+async def progress_stream(task_id: str) -> StreamingResponse:
+    async def event_stream():
+        while True:
+            while progress_lock:
+                data=progress_store.get(task_id)
+            if data:
+                yield sse(data)
+                if data.get('status') in ['done','error']:
+                    break
+            else:
+                yield sse({
+                    'status': 'finished'
+                })
+                break
+        await asyncio.sleep(0.3)
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
         }
-    return success(masked)
+    )
+
+# @app.get("/download/{task_id}")
+# async def download(task_id: str, files: list[dict[str, str]]) -> StreamingResponse:
+#     files, total_bytes = await probe_sizes(files)
+
+#     # ZIP 元数据粗略开销（Local Header + Central Directory + EOCD）
+#     zip_overhead = sum(
+#         30 + len(f['name'].encode('utf-8')) +
+#         46 + len(f['name'].encode('utf-8'))
+#         for f in files
+#     ) + 22
+#     total_with_overhead = total_bytes + zip_overhead
+#     with progress_lock:
+#         progress_store[task_id]={
+#             "sent": 0,
+#             "total": 0,
+#             "status": 'downloading',
+#             "files_done":0,
+#             'total': total_with_overhead,
+#             'percent': 0.0,
+#             'files_total': len(files),
+#         }
+#     async def generate():
+#         try:
+#             async for chunk in stream_zip(files):
+#                 yield chunk
+#             with progress_lock:
+#                 if task_id in progress_store:
+#                     progress_store[task_id]['percent'] = 100
+#                     progress_store[task_id]['status'] = 'done'
+#         except Exception as e:
+#             with progress_lock:
+#                 if task_id in progress_store:
+#                     progress_store[task_id]['status'] = 'error'
+#                     progress_store[task_id]['error'] = str(e)
+#             raise
+#         finally:
+#             await asyncio.sleep(2)   # 给 SSE 最后一次读取机会
+#             progress_store.pop(task_id, None)
+    
+#     return StreamingResponse(
+#         generate(),
+#         media_type="application/zip",
+#         headers={
+#             "Content-Disposition": 'attachment; filename="models.zip"',
+#             "X-Accel-Buffering": "no",
+#             "Cache-Control": "no-store",
+#         },
+#     )

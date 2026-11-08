@@ -7,6 +7,13 @@
 
 数据来源是各服务的 `get_tools()`（已是 `ToolFunction`），
 不再需要前端一个个试。
+
+本次修复
+────────
+* 服务管理器导入改为正式路径 `modules.services.manager`。
+* `_collect()` 结尾多余的 `total += len(tools)` 引用了 try 内的局部变量，
+  可能 NameError 且会重复计数。
+* `tools()` 里的 `data["skills"]` 键根本不存在，必然 KeyError。
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ from ..dto import (
 )
 from ..response import ApiResponse, success
 
-router = APIRouter(prefix="/api/audit", tags=["audit"])
+router = APIRouter(prefix="/audit", tags=["audit"])
 
 
 def _tool_to_audit(service: str, tool: Any) -> Dict[str, Any]:
@@ -43,7 +50,7 @@ def _tool_to_audit(service: str, tool: Any) -> Dict[str, Any]:
 
 
 def _collect() -> Dict[str, Any]:
-    from ...services.service.manager import service_manager
+    from ...services.manager import service_manager
 
     services: List[Dict[str, Any]] = []
     total = 0
@@ -75,11 +82,10 @@ def _collect() -> Dict[str, Any]:
             })
     except Exception:  # noqa: BLE001
         pass
-    total += len(tools)
 
     return {
-        "services": services, 
-        "total_tools": total
+        "services": services,
+        "total_tools": total,
     }
 
 
@@ -102,5 +108,4 @@ async def tools() -> ApiResponse[Dict[str, Any]]:
     for svc in data["services"]:
         for t in svc.get("tools", []):
             flat.append(t)
-    flat.extend(data["skills"])
     return success({"tools": flat, "total": len(flat)})
