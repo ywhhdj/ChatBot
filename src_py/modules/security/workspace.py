@@ -76,6 +76,12 @@ class DenyReason(str, Enum):
     TRAIL_PROTECTED = "trail_protected"
     INVALID_PATH = "invalid_path"
     NOT_A_FILE = "not_a_file"
+    #: 命令命中危险动词 / 拼接形态
+    COMMAND_DENIED = "command_denied"
+    #: service_id / subpath 不符合命名约束
+    INVALID_SERVICE_ID = "invalid_service_id"
+    #: 产出超过大小上限
+    OUTPUT_LIMIT = "output_limit"
 
 
 @dataclass(frozen=True)
@@ -516,3 +522,355 @@ def confirm_sensitive_exposure(confirmation_id: str) -> Workspace:
 
 def clear_workspace() -> None:
     _workspace.clear()
+
+
+# ─────────────────────────────────────────────────────────────
+# 默认工作区与服务产出目录
+# ─────────────────────────────────────────────────────────────
+#
+# 为什么要有"默认工作区"
+# ─────────────────────
+# 业务模块（PPT、技能、shell）不该各自决定"没选工作区时往哪写"。
+# 如果各自兜底到 data/output、临时目录甚至 CWD，工作区边界就形同虚设。
+# 统一惰性创建一个可写的默认工作区，所有产出仍然走同一套判定。
+#
+# 目录规范：
+#   <workspace>/ppt/                  PPT 产出
+#   <workspace>/skill/<skill_id>/    技能执行输出
+#   <workspace>/<service_id>/...     其它服务
+#   <workspace>/                     shell 命令 cwd（不得越界）
+# ─────────────────────────────────────────────────────────────
+
+DEFAULT_WORKSPACE_DIRNAME = "workspace"
+_SAFE_PART_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+class WorkspaceBoundaryError(RuntimeError):
+    """工作区边界被突破。带稳定 reason，可直接映射成拒绝响应。"""
+
+    def __init__(self, message: str, reason: DenyReason = DenyReason.INVALID_PATH):
+        super().__init__(message)
+        self.reason = reason
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"allowed": False, "reason": self.reason.value, "message": str(self)}
+
+
+def default_workspace_root() -> str:
+    """默认工作区根目录：`<用户数据目录>/workspace`。"""
+    from pathlib import Path
+
+    from ..runtime import StandardPaths
+
+    root = Path(StandardPaths.get_user_data_dir()) / DEFAULT_WORKSPACE_DIRNAME
+    root.mkdir(parents=True, exist_ok=True)
+    return str(root.resolve())
+
+
+def ensure_workspace() -> Workspace:
+    """返回可用工作区；未选择时惰性建立默认工作区（WRITABLE）。"""
+    ws = get_workspace()
+    if ws.root:
+        return ws
+    return select_workspace(default_workspace_root(), WorkspaceMode.WRITABLE)
+
+
+def _safe_part(value: Any, label: str) -> str:
+    """service_id / subpath 分段：只允许 [A-Za-z0-9_-]，杜绝 `..` 与分隔符。"""
+    text = str(value or "").strip()
+    if not _SAFE_PART_RE.fullmatch(text):
+        raise WorkspaceBoundaryError(
+            f"非法{label}: {text!r}", DenyReason.INVALID_SERVICE_ID
+        )
+    return text
+
+
+def service_output_dir(
+    service_id: str,
+    subpath: str = "",
+    *,
+    create: bool = True,
+) -> str:
+    """返回 `<workspace>/<service_id>[/<subpath>]` 的绝对路径。
+
+    三道检查一次做完：命名合法 → `realpath` 边界 → 档位允许写。
+    `create=True` 时建目录后**再校验一次**，防止目录被换成指向外部的软链。
+    """
+    ws = ensure_workspace()
+    parts = [_safe_part(service_id, "service_id")]
+    if subpath:
+        for seg in str(subpath).replace("\\", "/").split("/"):
+            if seg:
+                parts.append(_safe_part(seg, "subpath"))
+
+    target = os.path.join(ws.resolved_root(), *parts)
+    resolved, reason = resolve_in(ws, target)
+    if resolved is None:
+        raise WorkspaceBoundaryError(f"服务输出目录越界: {service_id}", reason)
+
+    verdict = check(ws, resolved, Operation.WRITE)
+    if not verdict.allowed:
+        raise WorkspaceBoundaryError(
+            f"服务输出目录无写权限: {service_id}", verdict.reason
+        )
+
+    if create:
+        os.makedirs(resolved, exist_ok=True)
+        again, reason2 = resolve_in(ws, resolved)
+        if again is None:
+            raise WorkspaceBoundaryError("输出目录被符号链接替换", reason2)
+    return resolved
+
+
+def output_path(service_id: str, name: str, subpath: str = "") -> str:
+    """服务产出的单文件路径。**只接受 basename**，再走一次边界复验。"""
+    base = os.path.basename(str(name or "").replace("\\", "/"))
+    if not base or base in (".", "..") or "\x00" in base:
+        raise WorkspaceBoundaryError("非法文件名", DenyReason.INVALID_PATH)
+
+    directory = service_output_dir(service_id, subpath)
+    resolved, reason = resolve_in(ensure_workspace(), os.path.join(directory, base))
+    if resolved is None:
+        raise WorkspaceBoundaryError("输出文件路径越界", reason)
+    return resolved
+
+
+def make_output_writer(
+    service_id: str,
+    subpath: str = "",
+    *,
+    max_bytes: int = 1024 * 1024,
+):
+    """给受限沙盒注入的唯一落盘通道。
+
+    技能代码里 `open` / `os` / `pathlib` 都被 AST 白名单禁用，
+    因此技能想产出文件只能调用这个闭包；它把文件名限制为 basename，
+    把内容限制在 `max_bytes` 内，并把路径钉死在
+    `<workspace>/<service_id>[/<subpath>]/`。
+
+    返回 `(name, content) -> absolute_path`。
+    """
+    def _write(name: str, content: Any, *, encoding: str = "utf-8") -> str:
+        path = output_path(service_id, name, subpath)
+        raw = str(content if content is not None else "").encode(
+            encoding, errors="replace"
+        )
+        if len(raw) > max_bytes:
+            raise WorkspaceBoundaryError(
+                f"产出超过上限 {max_bytes} 字节", DenyReason.OUTPUT_LIMIT
+            )
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        _trail(
+            "workspace.output",
+            source="service.output",
+            actor="ai",
+            target=os.path.basename(path),
+            decision="allow",
+            result="ok",
+            metadata={
+                "service_id": _safe_part(service_id, "service_id"),
+                "bytes": len(raw),
+            },
+        )
+        return path
+
+    return _write
+
+
+def describe_workspace() -> Dict[str, Any]:
+    """给 API / UI 的工作区状态。不回显完整绝对路径。"""
+    ws = ensure_workspace()
+    return {
+        "selected": bool(ws.root),
+        "root_label": _root_label(ws.root),
+        "mode": ws.mode.value,
+        "allow_sensitive": bool(ws.allow_sensitive),
+        "confirmation_id": str(ws.confirmation_id)[:32],
+        "outputs": {
+            "ppt": "ppt",
+            "skill": "skill/<skill_id>",
+            "other": "<service_id>",
+        },
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 命令准入（平台无关的权威数据）
+# ─────────────────────────────────────────────────────────────
+#
+# 这一份数据同时被 `core/tools/policy.py`（策略层粗筛）与
+# `services/shell/commands.py`（执行层精筛）引用，避免三处各写一份
+# 黑名单、改了一处漏了另一处。平台别名映射属于 shell 服务，不在这里。
+# ─────────────────────────────────────────────────────────────
+
+#: 危险动词（程序名）。带路径前缀 / .exe 后缀也会归一化后命中。
+FORBIDDEN_COMMAND_TOKENS: FrozenSet[str] = frozenset({
+    # 删除 / 破坏性写入
+    "rm", "rmdir", "del", "erase", "unlink", "shred", "format", "mkfs",
+    "fdisk", "diskpart", "dd", "wipe", "truncate",
+    # 提权 / 系统控制
+    "sudo", "su", "doas", "runas", "chmod", "chown", "chgrp", "icacls",
+    "takeown", "attrib", "reg", "regedit", "sc", "net", "shutdown",
+    "reboot", "halt", "poweroff", "init", "systemctl", "service",
+    # 进程 / 计划任务
+    "kill", "killall", "pkill", "taskkill", "tskill", "schtasks", "crontab",
+    # 任意解释器与外联（会绕过单命令白名单）
+    "curl", "wget", "ssh", "scp", "ftp", "telnet", "nc", "ncat", "socat",
+    "powershell", "pwsh", "cmd", "bash", "sh", "zsh", "fish",
+    "python", "python3", "node", "perl", "ruby", "php", "lua",
+    "eval", "exec", "xargs", "tee", "env", "export", "set",
+    # 磁盘 / 挂载
+    "mount", "umount", "fsck", "chkdsk", "convert",
+})
+
+#: 命令拼接 / 重定向 / 替换形态。命中即拒绝（引号内的内容先剔除再判定）。
+COMMAND_JOIN_TOKENS: Tuple[str, ...] = (
+    "||", "&&", ";", "|", "&", "`", "$(", "${", ">>", ">", "<<", "<",
+    "\n", "\r",
+)
+
+_QUOTED_RE = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"", re.S)
+
+
+@dataclass(frozen=True)
+class CommandVerdict:
+    allowed: bool
+    reason: DenyReason = DenyReason.OK
+    program: str = ""
+    message: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "allowed": self.allowed,
+            "reason": self.reason.value,
+            "program": self.program,
+            "message": self.message,
+        }
+
+
+def _program_of(text: str) -> str:
+    """取命令程序名：`/bin/rm` → `rm`，`Rm.EXE` → `rm`。"""
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    first = stripped.split()[0]
+    first = first.strip("'\"")
+    name = os.path.basename(first.replace("\\", "/")).lower()
+    if name.endswith((".exe", ".com", ".bat", ".cmd")):
+        name = name.rsplit(".", 1)[0]
+    return name
+
+
+def command_verdict(text: str, *, allow_dangerous: bool = False) -> CommandVerdict:
+    """命令文本的确定性粗筛。**纯函数**，不读配置、不执行命令。
+
+    检查三件事：拼接/重定向形态、程序名黑名单、明显的路径逃逸形态。
+    绝对路径是否合法由执行层结合 cwd 做 `realpath` 判定，这里不误杀。
+    """
+    raw = str(text or "")
+    if not raw.strip():
+        return CommandVerdict(False, DenyReason.COMMAND_DENIED, "", "空命令")
+
+    # 引号内容不参与"拼接符"判定：`echo "a > b"` 不该被当成重定向
+    unquoted = _QUOTED_RE.sub('""', raw)
+    for token in COMMAND_JOIN_TOKENS:
+        if token in unquoted:
+            return CommandVerdict(
+                False, DenyReason.COMMAND_DENIED, _program_of(raw),
+                "禁止命令拼接、管道或重定向",
+            )
+
+    program = _program_of(raw)
+    if not allow_dangerous and program in FORBIDDEN_COMMAND_TOKENS:
+        return CommandVerdict(
+            False, DenyReason.COMMAND_DENIED, program,
+            f"命令 {program} 属于危险命令，已拒绝",
+        )
+
+    # `..` 与 `~/` 无法在纯函数里结合 cwd 判定，统一拒绝；
+    # 执行层再用 realpath + is_within 做精确边界检查。
+    lowered = unquoted.lower()
+    parent_dir = re.search(r"(^|[\s/\\])\.\.(?=$|[\s/\\])", unquoted)
+    if (
+        parent_dir
+        or "../" in lowered
+        or "..\\" in lowered
+        or "~/" in lowered
+        or "~\\" in lowered
+    ):
+        return CommandVerdict(
+            False, DenyReason.OUTSIDE_ROOT, program, "禁止父目录或家目录路径"
+        )
+
+    return CommandVerdict(True, DenyReason.OK, program, "")
+
+
+def resolve_command_path(
+    workspace: Workspace,
+    cwd: str,
+    token: str,
+) -> Tuple[Optional[str], DenyReason]:
+    """把命令里的一个路径参数解析成绝对路径并校验工作区边界。
+
+    绝对路径与相对路径都接受，但**解析后必须仍在工作区内**。
+    shell 服务用它逐个校验 `cd` / `ls` / `cat` 等命令的路径参数。
+    """
+    path = str(token or "").strip().strip("'\"")
+    if not path or "\x00" in path:
+        return None, DenyReason.INVALID_PATH
+
+    if os.path.isabs(path) or re.match(r"^[A-Za-z]:[\\/]", path):
+        candidate = path
+    else:
+        candidate = os.path.join(str(cwd), path)
+    return resolve_in(workspace, candidate)
+
+
+# ─────────────────────────────────────────────────────────────
+# "这行是不是一条 shell 命令" 的纯判定
+# ─────────────────────────────────────────────────────────────
+#
+# `CommandParser` 用它把"非服务命令的行"兜底到 shell 服务。
+# 只认已知命令动词，避免把普通英文句子当成命令执行。
+# 危险动词**故意包含在内**：这样 `rm -rf x` 会被交给 ShellService
+# 明确拒绝并返回结构化原因码，而不是被静默当作自然语言吞掉。
+# ─────────────────────────────────────────────────────────────
+
+#: 允许的命令动词（各平台方言的超集，归一前的形式）
+SHELL_COMMAND_PROGRAMS: FrozenSet[str] = frozenset({
+    # 浏览 / 定位
+    "ls", 
+    "dir",
+    "cd",
+    "chdir",
+    "pwd",
+    "tree",
+    "where",
+    "find",
+    # 读取
+    "cat", "type", "more", "head", "tail", "wc", "grep", "sort", "uniq",
+    "diff", "file", "stat", "du", "df", "basename", "dirname",
+    # 写入（非删除）
+    "cp", "copy", "xcopy", "mv", "move", "ren", "rename", "mkdir", "md",
+    "touch", "echo",
+    # 环境 / 终端
+    "clear", "cls", "date", "time", "whoami", "hostname", "ver", "uname",
+})
+
+#: 判定用集合 = 允许动词 ∪ 危险动词
+KNOWN_SHELL_PROGRAMS: FrozenSet[str] = (
+    SHELL_COMMAND_PROGRAMS | FORBIDDEN_COMMAND_TOKENS
+)
+
+
+def looks_like_shell_command(text: str) -> bool:
+    """首词是否为已知命令动词。纯函数，无 IO。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    first = raw.split()[0].strip("'\"")
+    program = os.path.basename(first.replace("\\", "/")).lower()
+    if program.endswith((".exe", ".com", ".bat", ".cmd")):
+        program = program.rsplit(".", 1)[0]
+    return program in KNOWN_SHELL_PROGRAMS

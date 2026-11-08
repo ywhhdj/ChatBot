@@ -74,7 +74,7 @@ request_id 不等于 task_id；一次 POST 可能只负责创建 task，之后�
 - HTTP status 保留语义（2xx/4xx/5xx），业务 code 表示应用错误种类。
 - error response 的 data 默认 null 或稳定结构，避免内部 traceback。
 - 前端只通过共享 decoder 解包一次；service 不能再次猜测是否包了一层 data。
-- 当前源码差异：普通 Axios 分支检查 code===200，而 desktop bridge 分支检查 code===0。目标统一为 200，并建立相同契约用例。
+- 当前源码差异：普通 Axios 分支检查 code===200，而 desktop bridge 分支检查 目标统一为 200，并建立相同契约用例。
 - 若未来变更信封，需有 versioning/compatibility rule，而不是让各 transport 自行兼容。
 
 ## 5. 统一错误模型

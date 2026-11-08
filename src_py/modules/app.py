@@ -59,7 +59,17 @@ class Application:
         return cls._instance
 
     def init(self):
-        load_config(".env", self.debug)
+        # 仓库里的配置在 resources/config/app.conf
+        from pathlib import Path
+
+        from .runtime import StandardPaths
+
+        try:
+            candidate = Path(StandardPaths.get_resources_dir()) / "config" / "app.conf"
+        except Exception:  # noqa: BLE001
+            candidate = Path(".env")
+        config_path = str(candidate) if candidate.exists() else ".env"
+        load_config(config_path, self.debug)
 
     def run(self) -> int:
         if self._running:
@@ -108,7 +118,7 @@ class Application:
 
 
     def _shutdown(self) -> None:
-        """A2 / B4：唯一清理路径，带幂等守卫。"""
+        """唯一清理路径，带幂等守卫。"""
         if not self._initialized or self._closing:
             return
         self._closing = True

@@ -40,7 +40,7 @@ def _tpl(
     )
 
 def load_defaluts():
-    path=RuntimePath.get_ppt_template_file_path(is_defaults=True)
+    path=RuntimePath.get_templates_path("ppt.yaml")
     data=yaml.read_yaml(path)
     PRESET_TEMPLATES={}
     for id_, spec in data.items():

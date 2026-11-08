@@ -8,9 +8,9 @@ from ...runtime import RuntimePath
 from .. import base
 from ...logger import logger
 from ...events import emit, off, on_event_class, types as eventType, on
-from ..service.decorator import Service
+from ..manager import Service
 from PyQt6.QtCore import QObject
-from ..keys import ServiceKeys
+from ...keys import ServiceKeys
 
 
 class Live2DController(QObject):
@@ -113,7 +113,7 @@ class Live2DController(QObject):
     def _do_position(self):
         if not self.canvas:
             return
-        geometry = self.__screen_geometry()
+        geometry = self._screen_geometry()
         if geometry is None:
             logger.error("[Live2D] screen geometry unavailable")
             return
@@ -121,8 +121,7 @@ class Live2DController(QObject):
         y = geometry.height() - self.canvas.height() - 50
         self.canvas.move(x, y)
 
-    def __screen_geometry(self):
-        """QApplication.desktop() 在新版 Qt 已废弃且可能返回 None，改用 primaryScreen。"""
+    def _screen_geometry(self):
         try:
             from PyQt6.QtGui import QGuiApplication
 
@@ -202,18 +201,44 @@ class Live2DView(base.BaseService):
     name = "Live2D"
     description = "Live2D 模型视图"
 
-    # B37：Live2D 全程操作 Qt/OpenGL，必须在主线程执行。
+    # Live2D 全程操作 Qt/OpenGL，必须在主线程执行。
     # ServiceManager 据此不再为它开独立线程，从根上避免
-    # 「主线程 join 服务线程、服务线程等主线程派发 Qt 任务」的死锁（D6）。
+    # 「主线程 join 服务线程、服务线程等主线程派发 Qt 任务」的死锁
     main_thread = True
 
-    # 创建控制器要加载 Live2D 模型 + MediaPipe，默认的 30s 未必够（B11）
+    # 创建控制器要加载 Live2D 模型 + MediaPipe，默认的 30s 未必够
     CONTROLLER_BUILD_TIMEOUT = 120.0
 
     def get_tools(self) -> list:
+        from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
         return [
-            "set_model_path",
-            "set_position",
+            ToolFunction(
+                name="set_model_path",
+                description="切换 Live2D 模型（.model3.json 路径）",
+                parameters=ToolFunctionParameters(
+                    type="object",
+                    properties={"model_path": {"type": "string", "description": "模型文件路径"}},
+                    required=["model_path"],
+                ),
+            ),
+            ToolFunction(
+                name="set_face_enabled",
+                description="开启或关闭人脸跟踪",
+                parameters=ToolFunctionParameters(
+                    type="object",
+                    properties={"enabled": {"type": "boolean", "description": "是否开启"}},
+                    required=["enabled"],
+                ),
+            ),
+            ToolFunction(
+                name="set_face_fps",
+                description="设置人脸跟踪帧率",
+                parameters=ToolFunctionParameters(
+                    type="object",
+                    properties={"fps": {"type": "integer", "description": "帧率"}},
+                    required=["fps"],
+                ),
+            ),
         ]
 
     def __init__(
@@ -253,7 +278,7 @@ class Live2DView(base.BaseService):
         self._canvas_size = canvas_size
         self._did_initial_position = False
         self._closing = False
-        self._initialized = False
+        self._view_initialized = False
         self._controller: Optional[Live2DController] = None
         # start/stop 成对的注册标记
         self._audio_chunk_bound = False
@@ -302,7 +327,7 @@ class Live2DView(base.BaseService):
             ))
 
     def put_audio(self, audio_path: str) -> None:
-        # B36：assert 在 python -O 下会被移除，且抛的是 AssertionError
+        # assert 在 python -O 下会被移除，且抛的是 AssertionError
         if not audio_path or not os.path.exists(audio_path):
             logger.error(f"[Live2D] audio file not found: {audio_path}")
             return
@@ -350,13 +375,13 @@ class Live2DView(base.BaseService):
     # ---------- 生命周期 ----------
 
     def init(self):
-        if self._initialized:
+        if self._view_initialized:
             return
         self.__ensure_controller()
-        self._initialized = True
+        self._view_initialized = True
 
     def start(self) -> None:
-        if not self._initialized:
+        if not self._view_initialized:
             self.init()
         if self._running:
             return
@@ -371,7 +396,7 @@ class Live2DView(base.BaseService):
         ))
         logger.info("[Live2D] Start signal emitted")
 
-        # B35：与 stop() 成对，避免反复 start/stop 后同一 chunk 被投递多次
+        # 与 stop() 成对，避免反复 start/stop 后同一 chunk 被投递多次
         if not self._audio_chunk_bound:
             on(eventType.PipelineEventType.TTS_AUDIO_CHUNK, self.put_audio_chunk)
             self._audio_chunk_bound = True
@@ -387,7 +412,6 @@ class Live2DView(base.BaseService):
             ))
             logger.info("[Live2D] Stop signal emitted")
 
-        # B35：与 start() 成对解绑
         if self._audio_chunk_bound:
             off(eventType.PipelineEventType.TTS_AUDIO_CHUNK, self.put_audio_chunk)
             self._audio_chunk_bound = False
@@ -400,7 +424,7 @@ class Live2DView(base.BaseService):
                 args=(self._controller.close,),
             ))
             self._controller = None
-            self._initialized = False
+            self._view_initialized = False
         logger.info("[Live2D] Closed")
         if self._audio_chunk_bound:
             off(eventType.PipelineEventType.TTS_AUDIO_CHUNK, self.put_audio_chunk)

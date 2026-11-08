@@ -22,7 +22,7 @@ DEFAULT_TIMEOUT = 600.0
 
 def get_schedular():
     from .. import runtime
-    return runtime.manager.task_manager
+    return runtime.manager.scheduler
 
 
 def schedular_running() -> bool:

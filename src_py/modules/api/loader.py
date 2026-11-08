@@ -12,9 +12,24 @@ from ..logger import logger
 from .registry import EndpointSpec, resolve_handler
 
 
+def _default_api_config_dir() -> str:
+    env = os.environ.get("API_CONFIG_DIR")
+    if env:
+        return env
+    try:
+        from ..runtime import StandardPaths
+
+        candidate = StandardPaths.get_resources_dir() / "config" / "api"
+        if (candidate / "endpoints.json").exists():
+            return str(candidate)
+    except Exception:  # noqa: BLE001
+        pass
+    return "config/api"  # 兼容打包后的相对布局
+
+
 class EndpointLoader:
-    def __init__(self, config_dir: str = "config/api"):
-        self.config_dir = Path(config_dir)
+    def __init__(self, config_dir: Optional[str] = None):
+        self.config_dir = Path(config_dir or _default_api_config_dir())
         self.specs: List[EndpointSpec] = []
         self.groups: Dict[str, Any] = {}
         self._loaded = False
@@ -87,8 +102,15 @@ class EndpointLoader:
 
         if spec.dispatch == "main":
             async def _main(payload=None):
-                from ..ui.dispatcher import run_in_main_thread  # 你自己的派发器
-                return await run_in_main_thread(lambda: _call_handler_sync(fn, payload))
+                # dispatcher 暴露的是 run_async_on_main_thread；旧代码引用的
+                # run_in_main_thread 并不存在，任何 dispatch=main 的端点都会
+                # 在调用时 ImportError。
+                from ..ui.dispatcher import get_main_thread_dispatcher
+
+                dispatcher = get_main_thread_dispatcher()
+                return await dispatcher.run_async_on_main_thread(
+                    lambda: _call_handler_sync(fn, payload)
+                )
             return _main
 
         return fn  # loop：网关本身已在调度器 loop 里跑
@@ -107,7 +129,7 @@ class EndpointLoader:
                 fn,
                 methods=[spec.http.method.upper()],
                 status_code=spec.http.status_code,
-                tags=spec.tags or ["default"],
+                tags=spec.tags or ["default"], # type: list[str]
                 summary=spec.http.summary or spec.meta.get("label", ""),
                 deprecated=spec.http.deprecated,
                 name=spec.op,
@@ -142,5 +164,5 @@ _loader: Optional[EndpointLoader] = None
 def get_loader() -> EndpointLoader:
     global _loader
     if _loader is None:
-        _loader = EndpointLoader(os.getenv("API_CONFIG_DIR", "config/api"))
+        _loader = EndpointLoader()
     return _loader

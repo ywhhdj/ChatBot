@@ -239,11 +239,7 @@ class WebSocketClientManager(base.BaseManager):
         message: str = "ok",
         ok: bool = True
     ) -> bool:
-        """发送 JSON。应在 Web loop 内调用。
-
-        防御：若从其他线程/其他 loop 调用，自动降级为投递，
-        避免跨 loop 操作 transport 导致状态损坏（L1/L12）。
-        """
+        """发送 JSON。应在 Web loop 内调用"""
         if not self.__in_web_loop:
             # 跨线程调用：转为投递，绝不在这里 await WebSocket
             self.submit_to_loop(lambda: self.send_json(client_id, type=type, data=data, message=message, ok=ok))
@@ -255,7 +251,13 @@ class WebSocketClientManager(base.BaseManager):
             return False
 
         try:
-            await ws.send_json(data=WebSocketAPIResponse(type=type, ok=ok, message=message, data=data, from_id=client_id).model_dump())
+            await ws.send_json(data=WebSocketAPIResponse(
+                type=type,
+                ok=ok,
+                message=message,
+                data=data,
+                from_id=client_id
+            ).model_dump())
             return True
         except Exception as e:
             logger.debug(f"[WebSocket] Send failed for {client_id}: {e}")

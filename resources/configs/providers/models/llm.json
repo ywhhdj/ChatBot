@@ -1,0 +1,331 @@
+{
+  "$schema": "../../../schemas/providers.schema.json",
+  "schema_version": 1,
+  "openai": {
+    "meta": {
+      "label": "OpenAI",
+      "tags": [
+        "cloud",
+        "paid",
+        "llm",
+        "text"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.openai.com/v1",
+      "chat_path": "/chat/completions",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 60,
+      "max_retries": 1
+    },
+    "models": [
+      {
+        "id": "gpt-5.4",
+        "label": "GPT-5.4"
+      },
+      {
+        "id": "gpt-5.4-mini",
+        "label": "GPT-5.4 Mini"
+      }
+    ],
+    "params": {
+      "temperature": {
+        "type": "number",
+        "default": 0.7,
+        "scope": "request"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "default": 4096,
+        "scope": "request"
+      }
+    }
+  },
+  "deepseek": {
+    "meta": {
+      "label": "DeepSeek",
+      "tags": [
+        "cloud",
+        "paid",
+        "llm",
+        "text"
+      ],
+      "deployment": "cloud",
+      "region": "cn"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.deepseek.com",
+      "chat_path": "/chat/completions",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 60,
+      "max_retries": 3
+    },
+    "models": [
+      {
+        "id": "deepseek-chat",
+        "label": "DeepSeek Chat"
+      },
+      {
+        "id": "deepseek-reasoner",
+        "label": "DeepSeek Reasoner"
+      }
+    ],
+    "params": {
+      "temperature": {
+        "type": "number",
+        "default": 0.7,
+        "scope": "request"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "default": 8192,
+        "scope": "request"
+      }
+    }
+  },
+  "qwen": {
+    "meta": {
+      "label": "Qwen (百炼)",
+      "tags": [
+        "cloud",
+        "paid",
+        "llm",
+        "text"
+      ],
+      "deployment": "cloud",
+      "region": "cn"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "chat_path": "/chat/completions",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 60,
+      "max_retries": 1
+    },
+    "models": [
+      {
+        "id": "qwen-max",
+        "label": "Qwen Max"
+      },
+      {
+        "id": "qwen-plus",
+        "label": "Qwen Plus"
+      },
+      {
+        "id": "qwen-turbo",
+        "label": "Qwen Turbo"
+      }
+    ],
+    "params": {
+      "temperature": {
+        "type": "number",
+        "default": 0.7,
+        "scope": "request"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "default": 4096,
+        "scope": "request"
+      }
+    }
+  },
+  "kimi": {
+    "meta": {
+      "label": "Moonshot Kimi",
+      "tags": [
+        "cloud",
+        "paid",
+        "llm",
+        "text"
+      ],
+      "deployment": "cloud",
+      "region": "cn"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.moonshot.cn/v1",
+      "chat_path": "/chat/completions",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 60,
+      "max_retries": 1
+    },
+    "models": [
+      {
+        "id": "kimi-k2.5",
+        "label": "Kimi K2.5"
+      },
+      {
+        "id": "moonshot-v1-128k",
+        "label": "Moonshot 128K"
+      }
+    ],
+    "params": {
+      "temperature": {
+        "type": "number",
+        "default": 0.7,
+        "scope": "request"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "default": 4096,
+        "scope": "request"
+      }
+    }
+  },
+  "anthropic": {
+    "meta": {
+      "label": "Anthropic Claude",
+      "tags": [
+        "cloud",
+        "paid",
+        "llm",
+        "text"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.anthropic.com/v1",
+      "chat_path": "/messages",
+      "headers": {
+        "anthropic-version": "2023-06-01"
+      },
+      "auth": {
+        "type": "header",
+        "header": "x-api-key",
+        "field": "api_key"
+      },
+      "timeout": 120,
+      "max_retries": 1
+    },
+    "models": [
+      {
+        "id": "claude-sonnet-4-5-20250929",
+        "label": "Claude Sonnet 4.5"
+      },
+      {
+        "id": "claude-haiku-4-5-20251001",
+        "label": "Claude Haiku 4.5"
+      }
+    ],
+    "params": {
+      "max_tokens": {
+        "type": "integer",
+        "default": 4096,
+        "scope": "request",
+        "required": true
+      },
+      "temperature": {
+        "type": "number",
+        "default": 0.7,
+        "scope": "request"
+      }
+    }
+  },
+  "gemini": {
+    "meta": {
+      "label": "Google Gemini",
+      "tags": [
+        "cloud",
+        "paid",
+        "llm",
+        "text"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "chat_path": "/models/{model}:generateContent",
+      "auth": {
+        "type": "header",
+        "header": "x-goog-api-key",
+        "field": "api_key"
+      },
+      "timeout": 60,
+      "max_retries": 1
+    },
+    "models": [
+      {
+        "id": "gemini-3.1-pro",
+        "label": "Gemini 3.1 Pro"
+      },
+      {
+        "id": "gemini-3.1-flash",
+        "label": "Gemini 3.1 Flash"
+      }
+    ],
+    "params": {
+      "temperature": {
+        "type": "number",
+        "default": 0.7,
+        "scope": "request"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "default": 8192,
+        "scope": "request"
+      }
+    }
+  },
+  "ollama": {
+    "meta": {
+      "label": "Ollama (本地)",
+      "tags": [
+        "local",
+        "free",
+        "llm",
+        "text"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "http://localhost:11434",
+      "chat_path": "/api/chat",
+      "protocol": "ollama",
+      "auth": {
+        "type": "none"
+      },
+      "timeout": 120,
+      "max_retries": 0
+    },
+    "models": [],
+    "params": {
+      "temperature": {
+        "type": "number",
+        "default": 0.7,
+        "scope": "request"
+      },
+      "num_ctx": {
+        "type": "integer",
+        "default": 8192,
+        "scope": "request"
+      }
+    }
+  }
+}

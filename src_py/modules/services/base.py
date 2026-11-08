@@ -40,18 +40,19 @@ class ServiceLifecycleHook:
     def on_health_check_failed(self) -> None:
         """健康检查失败时回调。默认什么都不做，由 ServiceManager 记录状态。"""
 
+ServiceStateLiteral = Literal["created", "running", "stopped", "error"]
 
 class BaseService(ABC, ServiceLifecycleHook):
     name: str = ""
     description: str = ""
     main_thread: bool = False
 
-    # 装饰器会保留原方法为 *_original
+    # ServiceDecorator 把原始实现保留为 *_original，管理器只调这几个名字
     start_original: Callable
     stop_original: Callable
     close_original: Callable
 
-    state: Literal["created", "running", "stopped", "error"] = "stopped"
+    state: ServiceStateLiteral = "created"
 
     _instance = None
     _lock = threading.Lock()
@@ -75,15 +76,8 @@ class BaseService(ABC, ServiceLifecycleHook):
 
     # ---------- 状态 ----------
 
-    def set_status(self, state: Optional[Literal["created", "running", "stopped", "error"]] = None) -> None:
-        """设置状态；不传参时按 `running` 属性推断（兼容既有子类）。"""
-        if state is not None:
-            self.state = state
-            return
-        running = getattr(self, "running", None)
-        if running is None:
-            return
-        self.state = "running" if running else "stopped"
+    def set_status(self, state:ServiceStateLiteral) -> None:
+        self.state = state
 
     def get_status(self):
         return self.state
@@ -116,7 +110,7 @@ class BaseService(ABC, ServiceLifecycleHook):
 
     @classmethod
     def reset_instance(cls) -> None:
-        """S3：清空单例，允许重建（测试 / 配置热重载用）。"""
+        """清空单例，允许重建（测试 / 配置热重载用）。"""
         with cls._lock:
             cls._instance = None
 

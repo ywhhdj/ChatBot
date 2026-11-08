@@ -1,4 +1,4 @@
-"""工具执行安全策略（B0-06）。
+"""工具执行安全策略
 
 为什么单独一个模块
 ──────────────────
@@ -18,7 +18,7 @@ REST / WebSocket / Qt bridge（SecurityAndAuditDesign §3）。
 
 reason_code 的稳定性
 ────────────────────
-低基数、稳定、不含自由文本（§5）。调用方可以拿它做计数与告警，
+低基数、稳定、不含自由文本。调用方可以拿它做计数与告警，
 所以绝不能把用户输入的片段拼进 code —— 那是日志注入的入口。
 需要给人看的细节放 `message`，且已经过长度截断。
 """
@@ -28,6 +28,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
+
+from ...security.workspace import command_verdict
+
+#: 唯一允许进程执行的服务 id。其余服务即使声明 EXEC 也不放行。
+SHELL_SERVICE_ID = "shell"
 
 # ─────────────────────────────────────────────────────────────
 # 能力
@@ -95,6 +100,8 @@ class ReasonCode(str, Enum):
     PARAM_TOO_LARGE = "param_too_large"
     #: 参数含危险形态（路径穿越等）
     PARAM_UNSAFE = "param_unsafe"
+    #: shell 命令命中危险动词 / 拼接 / 逃逸形态
+    COMMAND_FORBIDDEN = "command_forbidden"
 
 
 @dataclass(frozen=True)
@@ -147,6 +154,8 @@ class ToolPolicy:
     #: 服务未声明 tools 时是否放行。
     #: 迁移期可临时打开，但必须留下日志痕迹（见 `warn_undeclared`）。
     allow_undeclared_service: bool = False
+    #: 是否对 shell 服务的 command 参数做纯函数粗筛。**默认 True**
+    inspect_shell_command: bool = True
     #: 单个字符串参数最大字符数
     max_param_str_len: int = 4000
     #: 单个数组参数最大元素数
@@ -180,8 +189,8 @@ DEFAULT_POLICY = ToolPolicy()
 #: 刻意**不含裸 `sh`**：它会误杀 show / flush / push / hash / dashboard
 #: 这类完全无害的方法。shell 语义由 `shell` / `bash` / `zsh` 覆盖。
 _EXEC_METHOD_TOKENS: Tuple[str, ...] = (
-    "shell", 
-    "exec", 
+    "shell",
+    "exec",
     "eval",
     "spawn",
     "subprocess",
@@ -197,10 +206,10 @@ _EXEC_METHOD_TOKENS: Tuple[str, ...] = (
 )
 
 #: 显式白名单：含上面 token 但确实安全的方法（避免误杀）。
-#: 例如 `command` 是本项目自身的命令类型名，不是执行器。
+#: `run` 同时是 shell 服务的方法名 —— 真正的准入在 ShellService 内部完成。
 _EXEC_METHOD_ALLOWLIST: FrozenSet[str] = frozenset({
     "error",   # 内置 error 命令
-    "run",     # skill.run，走受控沙盒
+    "run",     # skill.run 与 shell.run，均走受控执行
 })
 
 #: 参数值中出现的路径穿越形态。
@@ -209,7 +218,6 @@ _TRAVERSAL_TOKENS: Tuple[str, ...] = ("..\\", "../", "~/", "%2e%2e", "..%2f")
 
 def looks_like_exec(service: str, method: str) -> bool:
     """方法名是否像执行类命令。"""
-    name = f"{service}.{method}".lower()
     if method.lower() in _EXEC_METHOD_ALLOWLIST:
         return False
     lowered = method.lower()
@@ -285,6 +293,25 @@ def _inspect_value(value: Any, policy: ToolPolicy, depth: int) -> Optional[Reaso
 # ─────────────────────────────────────────────────────────────
 
 
+def _service_tools(service: Any) -> Any:
+    """取服务声明的工具集合。
+
+    现行 `BaseService` 子类实现 `get_tools()` 返回 `List[ToolFunction]`；
+    早期代码只读 `tools` 属性。两种形态都要兼容，否则所有服务都会被
+    判成 `SERVICE_UNDECLARED`（工具链整体不可用）。
+    """
+    tools = getattr(service, "tools", None)
+    if tools is not None:
+        return tools
+    getter = getattr(service, "get_tools", None)
+    if callable(getter):
+        try:
+            return getter()
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
 def declared_methods(service: Any) -> Optional[List[str]]:
     """服务声明的可调用方法名列表。
 
@@ -292,7 +319,7 @@ def declared_methods(service: Any) -> Optional[List[str]]:
     是两回事：前者无法判定意图（deny），后者是"明确什么都不能调"（deny）。
     两种都拒绝，但 reason_code 不同，便于运维区分。
     """
-    tools = getattr(service, "tools", None)
+    tools = _service_tools(service)
     if tools is None:
         return None
     names: List[str] = []
@@ -339,7 +366,7 @@ def method_capabilities(service: Any, method: str) -> FrozenSet[Capability]:
 
 def _find_method_config(service: Any, method: str) -> Any:
     """兼容 dict / list / 对象三种 tools 形态（与 formatter.CommandValidator 一致）。"""
-    tools = getattr(service, "tools", None)
+    tools = _service_tools(service)
     if not tools:
         return None
     if isinstance(tools, dict):
@@ -421,7 +448,15 @@ def evaluate(
             f"{service_name}.{method} 能力不在允许集合内",
         )
 
-    # 4) 参数规模与危险形态
+    # 4) shell 命令粗筛。执行层（ShellService）会再做一次完整的
+    # 平台映射、白名单与工作区边界判定；这里只是不让明显的危险命令
+    # 走到起子进程那一步，同时让拒绝原因在策略层就可计数告警。
+    if service_name == SHELL_SERVICE_ID and policy.inspect_shell_command:
+        verdict = command_verdict(str(params.get("command", "") or ""))
+        if not verdict.allowed:
+            return deny(ReasonCode.COMMAND_FORBIDDEN, verdict.message)
+
+    # 5) 参数规模与危险形态
     code = inspect_params(params, policy)
     if code is not None:
         return deny(code, "参数超出安全限制或含不安全形态")

@@ -1,10 +1,17 @@
-"""服务接口：列表、详情、工具定义、启停、配置读写、UI 描述。"""
+"""服务接口：列表、详情、工具定义、启停、配置读写、UI 描述。
+
+本次修复
+────────
+* `start_service` 原先把"已注册"当作可启动条件、并在注册前读取服务状态，
+  必然在首次启动时抛错；现改为未注册才注册、已运行才拒绝。
+* 服务管理器导入改为正式路径 `modules.services.manager`。
+* 补齐 `ppt` / `shell` 服务的注册分支。
+"""
 from __future__ import annotations
-from math import e
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Query
 
-from src_py.modules.services.keys import ServiceKeys
+from ...keys import ServiceKeys
 
 from ..requests import (
     ServiceConfigUpdateRequest,
@@ -24,7 +31,7 @@ router = APIRouter(prefix="/service", tags=["service"])
 
 
 def _sm():
-    from ...services.service.manager import service_manager
+    from ...services.manager import service_manager
 
     return service_manager
 
@@ -50,10 +57,7 @@ async def list_services(
 ) -> ApiResponse[ServiceListData]:
     """服务列表。"""
     sm = _sm()
-    services = [
-        _info_with_id(sid)
-        for sid in (sm.get_service_names() or [])
-    ]
+    services = [_info_with_id(sid) for sid in (sm.services.keys() or [])]
     if running_only:
         services = [s for s in services if s.state == "running"]
     return success(ServiceListData(services=services, total=len(services)))
@@ -68,7 +72,7 @@ async def list_tools() -> ApiResponse[ToolData]:
     except Exception as e:
         raise ApiError.internal(f"获取工具失败: {e}")
     return success(ToolData(
-        services={"tools": tools}, 
+        services={"tools": tools},
         total=len(tools)
     ))
 
@@ -106,20 +110,29 @@ async def service_ui(service_id: str) -> ApiResponse[ServiceUIDescription]:
         raise ApiError.internal(f"获取 UI 描述失败: {e}")
     return success(ServiceUIDescription(**desc))
 
-def register_service(service_id: str,payload: Optional[Dict[str, Any]] = None):
+
+def register_service(service_id: str, payload: Optional[Dict[str, Any]] = None):
+    """按需实例化并注册服务（`@Service` 装饰器在 __init__ 时完成注册）。"""
     sm = _sm()
     if service_id == ServiceKeys.BROWSER:
         from ...services.browser.browser import Browser
-        sm.register_service(ServiceKeys.BROWSER,Browser(**(payload or {})))
+        sm.register_service(ServiceKeys.BROWSER, Browser(**(payload or {})))
     elif service_id == ServiceKeys.OBS:
         from ...services.obs.client import OBSClient
-        sm.register_service(ServiceKeys.OBS,OBSClient(**(payload or {})))
+        sm.register_service(ServiceKeys.OBS, OBSClient(**(payload or {})))
     elif service_id == ServiceKeys.QQBOT:
         from ...services.qqbot.client import QQBotClient
-        sm.register_service(ServiceKeys.QQBOT,QQBotClient(**(payload or {})))
+        sm.register_service(ServiceKeys.QQBOT, QQBotClient(**(payload or {})))
     elif service_id == ServiceKeys.LIVE2D:
         from ...services.live2d.views import Live2DView
-        sm.register_service(ServiceKeys.LIVE2D,Live2DView(**(payload or {})))
+        sm.register_service(ServiceKeys.LIVE2D, Live2DView(**(payload or {})))
+    elif service_id == ServiceKeys.SHELL:
+        from ...services.shell.service import ShellService
+        sm.register_service(ServiceKeys.SHELL, ShellService(**(payload or {})))
+    elif service_id == ServiceKeys.PPT:
+        from ...services.ppt.service import PptService
+        # PptService 不接受任意关键字，配置从服务配置读取
+        sm.register_service(ServiceKeys.PPT, PptService())
     else:
         raise ApiError.not_found(f"服务 {service_id}")
 
@@ -134,15 +147,13 @@ async def start_service(
     服务启动可能拉起线程 / 建立连接，放在线程池执行。
     """
     sm = _sm()
-    if sm.is_registered(service_id):
-        raise ApiError.not_found(f"服务 {service_id} 已注册")
+    if not sm.is_registered(service_id):
+        register_service(service_id, payload)
+    else:
+        current = state_name(sm.get_service_state(service_id))
+        if current == "running":
+            raise ApiError.conflict(f"服务 {service_id} 已在运行")
 
-    current = state_name(sm.get_service_state(service_id))
-    if current == "running":
-        raise ApiError.conflict(f"服务 {service_id} 已在运行")
-
-    #注册服务
-    register_service(service_id)
     ok = await to_thread(sm.start_service, service_id, **(payload or {}))
     if not ok:
         raise ApiError.internal(f"服务 {service_id} 启动失败")
@@ -185,7 +196,7 @@ async def get_config(service_id: str) -> ApiResponse[Dict[str, Any]]:
 @router.put("/{service_id}/config", response_model=ApiResponse[Dict[str, Any]])
 async def update_config(
     service_id: str,
-    payload: Dict[str,Any],
+    payload: Dict[str, Any],
 ) -> ApiResponse[Dict[str, Any]]:
     """更新服务配置。"""
     sm = _sm()
@@ -204,7 +215,8 @@ async def update_config(
         "config": cfg
     }, message="配置已更新")
 
-#应用服务配置需先保存配置，再停止服务，再启动服务
+
+# 应用服务配置需先保存配置，再停止服务，再启动服务
 @router.put("/{service_id}/config/apply", response_model=ApiResponse[Dict[str, Any]])
 async def apply_config(
     service_id: str,

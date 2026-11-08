@@ -51,9 +51,6 @@ class StandardPaths:
             return Path(env_root).resolve()
 
         root = _default_root()
-        # S9/S14：仅当 env 未设置时写入默认值，且不再依赖 CWD。
-        # 之后 set_mode("prod") 改的是 Mode，不会把已经固化的路径改回去，
-        # 但也不会因为 dev 模式而在每次调用时覆盖用户显式设置的值。
         try:
             os.environ.setdefault(cls.APP_ROOT_ENV, str(root))
         except Exception:
@@ -77,24 +74,27 @@ class StandardPaths:
         if getattr(sys, "frozen", False):
             return cls.get_resources_dir() / "scripts"
         return cls.get_app_root() / "scripts"
-
+    
     @classmethod
-    def get_defaults_dir(cls) -> Path:
-        return cls.get_resources_dir() / "defaults"
-
-    @classmethod
-    def get_roles_dir(cls) -> Path:
-        return cls.get_resources_dir() / "roles"
+    def get_config_dir(cls) -> Path:
+        return cls.get_resources_dir() / "configs"
 
     @classmethod
     def get_user_data_dir(cls) -> Path:
         if getattr(sys, "frozen", False):
             return cls.get_app_root() / "var" / "data"
         return cls.get_app_root() / "data"
+    
+    @classmethod
+    def get_templates_dir(cls) -> Path:
+        return cls.get_resources_dir() / "templates"
+    
+    @classmethod
+    def get_memories_dir(cls) -> Path:
+        return cls.get_resources_dir() / "memories"
 
 class RuntimePath:
     model_dir=StandardPaths.get_models_dir()
-    roles_dir=StandardPaths.get_roles_dir()
     memory_dir=StandardPaths.get_user_data_dir()/"memory"
 
     #更新路径，给用户实时更新
@@ -119,10 +119,6 @@ class RuntimePath:
         return StandardPaths.get_defaults_dir() / "services.yaml"
 
     @staticmethod
-    def get_pipeline_config_file_path():
-        return StandardPaths.get_defaults_dir() / "pipeline.json"
-
-    @staticmethod
     def get_icon_file_path(icon_name: str="chatbot.ico"):
         return RuntimePath.get_web_resources_dir(f"icons/{icon_name}")
 
@@ -139,16 +135,8 @@ class RuntimePath:
         return StandardPaths.get_defaults_dir() / "prompts.toml"
     
     @staticmethod
-    def get_ppt_template_file_path(relative_path: str="",is_defaults: bool=False) -> Path:
-        if is_defaults:
-            return StandardPaths.get_defaults_dir() / "ppt_templates.yaml"
-        return ensure_dir(RuntimePath.model_dir / relative_path)
-    
-    @staticmethod
-    def get_roles_file_path(relative_path: str="",is_defaults: bool=False) -> Path:
-        if is_defaults:
-            return StandardPaths.get_defaults_dir() / "roles.yaml"
-        return ensure_dir(RuntimePath.roles_dir / relative_path)
+    def get_templates_path(relative_path: str="") -> Path:
+        return StandardPaths.get_templates_dir() / relative_path
 
     @staticmethod
     def get_scripts_path(subpath: str = "") -> Path:
@@ -157,12 +145,12 @@ class RuntimePath:
     @staticmethod
     def get_memory_db_path() -> Path:
         return ensure_dir(
-            RuntimePath.get_user_data_path("memory").parent
-        ) / "memory" / "memory.db"
+            RuntimePath.get_user_data_path("memory").parent / "memories"
+        )  / "memory.db"
     
     @staticmethod
     def get_sql_file_path():
-        return StandardPaths.get_defaults_dir() / "memory.sql"
+        return StandardPaths.get_memories_dir() / "memory.sql"
     
     @staticmethod
     def get_log_dir() -> Path:
@@ -180,6 +168,14 @@ class RuntimePath:
     def get_skill_dir():
         return StandardPaths.get_app_root() / "skills"
 
+    # ---------- 工作区（权威判定在 security/workspace） ----------
+
+    @staticmethod
+    def get_workspace_dir() -> Path:
+        from .security.workspace import default_workspace_root
+
+        return Path(default_workspace_root())
+
 T = TypeVar("T", bound=BaseManager)
 
 
@@ -194,7 +190,7 @@ class RuntimeManager:
 
     def __init__(self):
         self._running = False
-        from .manager.character import CharacterManager
+        from .characters.character import CharacterManager
         from .manager.session.manager import SessionManager
         self.character_manager = CharacterManager()
         self.session_manager = SessionManager()
@@ -215,8 +211,6 @@ class RuntimeManager:
         self._running = True
     
     def _register_all_ops(self):
-        # 把所有 API 端点注册进进程内网关。
-        # 桌面端 Bridge 与 Web 控制器共用同一张 op 表、同一套信封。
         try:
             from .api.ops import register_all
             register_all()

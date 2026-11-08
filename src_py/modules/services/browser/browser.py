@@ -3,15 +3,15 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
-from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 from ...events import on_event_class, types
 from ...logger import logger
-from ..service.decorator import Service
+from ..manager import Service
 from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
-from ..keys import ServiceKeys
+from ...keys import ServiceKeys
 from ..base import BaseService, ServiceState
 
 WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
@@ -55,9 +55,6 @@ class Browser(BaseService):
         distill_similarity: float = 0.88,
     ):
         super().__init__()
-
-        # 惰性依赖：playwright 缺失时本模块仍可导入、工具声明仍可读，
-        # 只是 start() 会明确报错，不会让 ServiceManager 注册阶段就崩。
         try:
             from .driver import BrowserDriver
             from .distiller import DOMDistiller
@@ -92,10 +89,10 @@ class Browser(BaseService):
 
     # ---------- 状态 ----------
 
-    def set_status(self, state = None) -> None:
-        if state is None:
-            state = "running" if self.running else "stopped"
-        super().set_status(state)
+    def set_status(self) -> None:
+        super().set_status(
+            ServiceState.RUNNING if self.running else ServiceState.STOPPED
+        )
 
     def _invalidate_cache(self) -> None:
         self.current_result = None
@@ -282,26 +279,34 @@ class Browser(BaseService):
     async def scroll(self, direction: str = "down", amount: int = 600) -> None:
         if not self._page:
             return
-        logger.info(f"[Browser] 滚动: {direction} {amount}")
-        # 滚动会改变视口内元素集合 → 失效缓存（S16）
+        # amount 会被插进 page.evaluate 的 JS 文本：必须是纯整数，
+        # 否则模型可借 `600);...//` 注入任意脚本。
+        try:
+            pixels = max(0, min(int(amount), 10000))
+        except (TypeError, ValueError):
+            pixels = 600
+        if pixels == 0:
+            return
+        if direction not in ("down", "up"):
+            direction = "down"
+        signed = pixels if direction == "down" else -pixels
+        logger.info(f"[Browser] 滚动: {direction} {pixels}")
         self._dom_version += 1
-        if direction == "down":
-            await self._page.evaluate(f"window.scrollBy(0, {amount})")
-        else:
-            await self._page.evaluate(f"window.scrollBy(0, -{amount})")
+        await self._page.evaluate(f"window.scrollBy(0, {signed})")
 
     async def screenshot(self, path: str = "screenshot.png", full: bool = False) -> bytes:
+        """截图落到 `<workspace>/browser/`，不接受任意绝对路径。"""
         if not self._page:
             return b""
-        # S21：父目录不存在时 Playwright 会直接抛错
-        target = Path(path)
-        if target.parent and not target.parent.exists():
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-        logger.info(f"[Browser] 截图: {path} ({'全页' if full else '视口'})")
-        return await self._page.screenshot(path=str(target), full_page=full)
+        from ...security import WorkspaceBoundaryError, output_path
+
+        name = os.path.basename(str(path or "screenshot.png").replace("\\", "/"))
+        try:
+            target = output_path("browser", name)
+        except WorkspaceBoundaryError as exc:
+            raise RuntimeError(f"截图路径被拒绝: {exc.reason.value}") from exc
+        logger.info(f"[Browser] 截图: {name} ({'全页' if full else '视口'})")
+        return await self._page.screenshot(path=target, full_page=full)
 
     # ---------- 属性 ----------
 

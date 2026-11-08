@@ -1,66 +1,58 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://chatbot.local/schemas/provider-config.schema.json",
-  "title": "Provider Config",
-  "description": "统一供应商配置 schema，覆盖 asr/llm/ocr/tts/embedding.json",
+  "$id": "https://local/schemas/providers.schema.json",
+  "title": "Provider Definitions (models/*.json)",
   "type": "object",
   "required": [
     "schema_version"
   ],
   "properties": {
     "schema_version": {
-      "type": "integer",
-      "const": 1,
-      "description": "配置文件格式版本"
+      "const": 1
+    },
+    "capability": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "$schema": {
+      "type": "string"
     }
   },
-  "propertyNames": {
-    "anyOf": [
-      {
-        "const": "schema_version"
-      },
-      {
-        "pattern": "^[a-z][a-z0-9_-]*$",
-        "description": "provider ID：小写字母开头，仅含小写字母/数字/下划线/连字符"
-      }
-    ]
+  "patternProperties": {
+    "^(?!schema_version$|capability$|description$|\\$schema$)[A-Za-z0-9_.-]+$": {
+      "$ref": "#/$defs/Provider"
+    }
   },
-  "unevaluatedProperties": {
-    "$ref": "#/$defs/provider"
-  },
+  "additionalProperties": false,
   "$defs": {
-    "provider": {
+    "Provider": {
       "type": "object",
       "required": [
         "meta",
-        "endpoint",
-        "models"
+        "endpoint"
       ],
       "properties": {
         "meta": {
-          "$ref": "#/$defs/meta"
+          "$ref": "#/$defs/Meta"
         },
         "endpoint": {
-          "$ref": "#/$defs/endpoint"
+          "$ref": "#/$defs/Endpoint"
         },
         "models": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/model"
+            "$ref": "#/$defs/Model"
           }
         },
         "params": {
-          "$ref": "#/$defs/params"
+          "$ref": "#/$defs/Params"
         }
       },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "$ref": "#/$defs/rule_cloud_implies_http"
-        }
-      ]
+      "additionalProperties": false
     },
-    "meta": {
+    "Meta": {
       "type": "object",
       "required": [
         "label",
@@ -75,17 +67,14 @@
         "tags": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
-          "uniqueItems": true,
-          "description": "能力/属性标签：llm / tts / asr / ocr / embedding / local / cloud / paid / free"
+          "minItems": 1
         },
         "deployment": {
-          "type": "string",
           "enum": [
-            "local",
-            "cloud"
+            "cloud",
+            "local"
           ]
         },
         "region": {
@@ -97,115 +86,208 @@
         "docs_url": {
           "type": "string",
           "format": "uri"
+        },
+        "streaming": {
+          "type": "boolean"
+        },
+        "task_type": {
+          "enum": [
+            "chat",
+            "grounding",
+            "ocr",
+            "tts",
+            "asr",
+            "image"
+          ]
+        },
+        "output_parser": {
+          "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
-    "endpoint": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/endpointHttp"
-        },
-        {
-          "$ref": "#/$defs/endpointLocal"
-        }
-      ]
-    },
-    "endpointHttp": {
+    "Endpoint": {
       "type": "object",
       "required": [
-        "transport",
-        "base_url"
+        "transport"
       ],
       "properties": {
         "transport": {
-          "const": "http"
+          "enum": [
+            "http",
+            "local",
+            "websocket"
+          ]
         },
         "base_url": {
-          "type": "string",
-          "minLength": 1,
-          "description": "HTTP 基址；允许 ${ENV_VAR} 模板"
+          "type": "string"
+        },
+        "websocket_url": {
+          "type": "string"
         },
         "chat_path": {
           "type": "string"
         },
-        "protocol": {
-          "type": "string",
-          "description": "协议方言；空 = 按 transport 推断",
-          "examples": [
-            "openai",
-            "ollama",
-            "generic"
-          ]
+        "speech_path": {
+          "type": "string"
         },
-        "auth": {
-          "$ref": "#/$defs/auth"
+        "synthesize_path": {
+          "type": "string"
+        },
+        "image_path": {
+          "type": "string"
+        },
+        "prompt_path": {
+          "type": "string"
+        },
+        "grounding_path": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "model_dir": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
         },
         "timeout": {
           "type": "number",
-          "exclusiveMinimum": 0
+          "minimum": 0
         },
         "max_retries": {
           "type": "integer",
           "minimum": 0
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "auth": {
+          "$ref": "#/$defs/Auth"
+        },
+        "stream_transport": {
+          "enum": [
+            "http-chunked",
+            "sse",
+            "websocket"
+          ]
+        },
+        "first_chunk_timeout_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_result_timeout_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "download":{
+          "type": "object",
+          "properties": { 
+            "provider": {
+              "type": "string"
+            },
+            "urls": {
+              "type": "object"
+            },
+            "size_mb": {
+              "type": "number"
+            },
+            "license": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "docs_url": {
+              "type": "string"
+            }
+          }
         }
       },
-      "additionalProperties": false
-    },
-    "endpointLocal": {
-      "type": "object",
-      "required": [
-        "transport",
-        "runtime"
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "http"
+              }
+            },
+            "required": [
+              "transport"
+            ]
+          },
+          "then": {
+            "required": [
+              "base_url"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "local"
+              }
+            },
+            "required": [
+              "transport"
+            ]
+          },
+          "then": {
+            "required": [
+              "runtime"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "websocket"
+              }
+            },
+            "required": [
+              "transport"
+            ]
+          },
+          "then": {
+            "required": [
+              "websocket_url"
+            ]
+          }
+        }
       ],
-      "properties": {
-        "transport": {
-          "const": "local"
-        },
-        "runtime": {
-          "type": "string",
-          "minLength": 1,
-          "description": "本地推理运行时名，如 faster-whisper / paddleocr / tesseract",
-          "examples": [
-            "faster-whisper",
-            "paddleocr",
-            "tesseract",
-            "easyocr",
-            "umiocr"
-          ]
-        },
-        "model_dir": {
-          "type": "string",
-          "description": "模型目录；允许 ${MODEL_ROOT} 模板"
-        },
-        "device": {
-          "type": "string",
-          "description": "计算设备",
-          "examples": [
-            "auto",
-            "cpu",
-            "cuda",
-            "cuda:0",
-            "mps",
-            "dml"
-          ]
-        }
-      },
       "additionalProperties": false
     },
-    "auth": {
+    "Auth": {
       "type": "object",
       "required": [
         "type"
       ],
       "properties": {
         "type": {
-          "type": "string",
           "enum": [
-            "bearer",
             "none",
+            "bearer",
+            "header",
             "basic",
-            "header"
+            "query"
           ]
         },
         "header": {
@@ -218,29 +300,33 @@
           "type": "string"
         }
       },
-      "additionalProperties": false,
       "allOf": [
         {
           "if": {
-            "required": [
-              "type"
-            ],
             "properties": {
               "type": {
-                "const": "bearer"
+                "enum": [
+                  "bearer",
+                  "header",
+                  "basic",
+                  "query"
+                ]
               }
-            }
+            },
+            "required": [
+              "type"
+            ]
           },
           "then": {
             "required": [
-              "header",
               "field"
             ]
           }
         }
-      ]
+      ],
+      "additionalProperties": false
     },
-    "model": {
+    "Model": {
       "type": "object",
       "required": [
         "id",
@@ -258,66 +344,60 @@
         "tags": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
+            "type": "string"
+          }
         },
         "params": {
-          "type": "object",
-          "description": "该模型的默认参数覆盖值，形状为 { param_name: { default: ... } }",
-          "additionalProperties": {
-            "type": "object"
-          }
+          "$ref": "#/$defs/Params"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
-    "params": {
+    "Params": {
       "type": "object",
-      "description": "provider 暴露的通用参数；键为参数名，值为参数描述符",
       "additionalProperties": {
-        "$ref": "#/$defs/paramDef"
+        "$ref": "#/$defs/ParamDescriptor"
       }
     },
-    "paramDef": {
+    "ParamDescriptor": {
       "type": "object",
       "required": [
         "type",
-        "label"
+        "scope"
       ],
       "properties": {
         "type": {
-          "type": "string",
           "enum": [
             "string",
-            "integer",
             "number",
+            "integer",
             "boolean",
             "array",
             "object"
           ]
         },
         "label": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "description": {
           "type": "string"
         },
         "default": {},
         "required": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "scope": {
-          "type": "string",
           "enum": [
             "init",
+            "connection",
             "request"
-          ],
-          "default": "request",
-          "description": "init=创建时生效；request=每次请求可覆盖"
+          ]
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "string"
         },
         "min": {
           "type": "number"
@@ -325,48 +405,12 @@
         "max": {
           "type": "number"
         },
-        "minLength": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "maxLength": {
-          "type": "integer",
-          "minimum": 0
+        "step": {
+          "type": "number"
         },
         "enum": {
-          "$ref": "#/$defs/enumOptions"
-        },
-        "items": {
-          "$ref": "#/$defs/paramDef"
-        },
-        "properties": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/paramDef"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "enumOptions": {
-      "type": "array",
-      "minItems": 1,
-      "description": "枚举值：原语，或 {value, label} 对象",
-      "items": {
-        "oneOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "boolean"
-          },
-          {
+          "type": "array",
+          "items": {
             "type": "object",
             "required": [
               "value",
@@ -375,51 +419,17 @@
             "properties": {
               "value": {},
               "label": {
-                "type": "string",
-                "minLength": 1
+                "type": "string"
               }
             },
             "additionalProperties": false
           }
-        ]
-      }
-    },
-    "rule_cloud_implies_http": {
-      "description": "deployment=cloud 时 endpoint.transport 必须是 http",
-      "if": {
-        "required": [
-          "meta",
-          "endpoint"
-        ],
-        "properties": {
-          "meta": {
-            "type": "object",
-            "required": [
-              "deployment"
-            ],
-            "properties": {
-              "deployment": {
-                "const": "cloud"
-              }
-            }
-          }
+        },
+        "items": {
+          "type": "object"
         }
       },
-      "then": {
-        "properties": {
-          "endpoint": {
-            "type": "object",
-            "required": [
-              "transport"
-            ],
-            "properties": {
-              "transport": {
-                "const": "http"
-              }
-            }
-          }
-        }
-      }
+      "additionalProperties": false
     }
   }
 }

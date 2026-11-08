@@ -69,7 +69,13 @@ def get_request_id() -> str:
 class Base(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-def sse(payload: Dict[str, Any]) -> str:
+def sse(event: Any) -> str:
+    if isinstance(event, BaseModel):
+        payload = event.model_dump(exclude_none=True)
+    elif isinstance(event, dict):
+        payload = event
+    else:
+        raise TypeError(f"unsupported SSE payload: {type(event)!r}")
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 

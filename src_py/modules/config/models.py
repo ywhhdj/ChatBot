@@ -1,5 +1,6 @@
 """配置数据模型"""
 
+
 from __future__ import annotations
 from typing import Any, Dict, List
 
@@ -77,7 +78,6 @@ class SqliteConfig(_BaseConfig):
 
 
 class LogConfig(_BaseConfig):
-    # C45：默认改成小写，与 logger.types.LogLevel 保持一致
     level: str = Field(default="info", description="日志级别")
     format: str = Field(
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -151,11 +151,6 @@ class ASRConfig(_BaseConfig):
 
 
 class AppConfig(BaseModel):
-    """应用配置根对象。
-
-    注意：这里列出的字段必须与 config/manager.py 的 CONFIG_BINDINGS 一致，
-    否则该分组的配置无法存取（原代码里的 mcp 就是这个情况）。
-    """
 
     web: WebConfig = Field(default_factory=WebConfig)
     log: LogConfig = Field(default_factory=LogConfig)

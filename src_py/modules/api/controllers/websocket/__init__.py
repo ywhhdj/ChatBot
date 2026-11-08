@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from ...requests import WebSocketRequest
 from .models import ClientEventBridge,logger
-from .events import handle_event,events,get_websocket_manager
+from .events import dispatch,events,get_websocket_manager
 
 MAX_INFLIGHT_PER_CLIENT = 8
 
@@ -16,12 +16,12 @@ def generate_client_id() -> str:
 
 async def __safe_handle(client_id: str, event: str, data: Optional[Dict[str, Any]]) -> None:
     try:
-        await handle_event(client_id=client_id, event=event, data=data)
+        await dispatch(client_id=client_id, event=event, data=data)
     except asyncio.CancelledError:
         raise
     except Exception as e:
         logger.exception(f"[WebSocket] handle {event} for {client_id} failed: {e}", exc_info=True)
-        # W3：单条消息失败只回错误，不切断连接
+        # 单条消息失败只回错误，不切断连接
         get_websocket_manager().submit_to_loop(
             lambda: get_websocket_manager().send_json(
                 client_id,
@@ -47,28 +47,16 @@ async def __handle_connection(websocket: WebSocket) -> None:
     try:
         while True:
             try:
-                raw = await websocket.receive_json()
+                request = WebSocketRequest.model_validate_json(await websocket.receive_json())
             except WebSocketDisconnect:
                 logger.info(f"[WebSocket] Client {client_id} disconnected")
                 break
             manager.update_heartbeat(client_id)
-            try:
-                request = WebSocketRequest(**raw)
-            except Exception as e:
-                logger.debug(f"[WebSocket] bad request from {client_id}: {e}")
-                await manager.send_json(
-                    client_id,
-                    type=events.types.WebSocketEventType.RESULT,
-                    ok=False,
-                    message=f"请求格式错误: {e}"
-                )
-                continue
-
-            # W1：只校验 type。心跳等消息本就没有 data，不能因此断开
+            # 只校验 type。心跳等消息本就没有 data，不能因此断开
             if not request.type:
                 await manager.send_json(
                     client_id,
-                    type=events.types.WebSocketEventType.RESULT,
+                    type=events.types.WebSocketEventType.ERROR,
                     ok=False,
                     message="缺少 type"
                 )
@@ -90,7 +78,7 @@ async def __handle_connection(websocket: WebSocket) -> None:
             data = request.data or {}
             request_client_id = data.get("client_id", "") if isinstance(data, dict) else ""
             if not request_client_id:
-                # W2：原来是 disconnect + return，太激进；回错误并保持连接
+                # 原来是 disconnect + return，太激进；回错误并保持连接
                 await manager.send_json(
                     client_id,
                     type=events.types.WebSocketEventType.RESULT,
@@ -107,7 +95,7 @@ async def __handle_connection(websocket: WebSocket) -> None:
                 )
                 continue
 
-            # L6：派发为独立任务，接收循环立即返回，
+            # 派发为独立任务，接收循环立即返回，
             # 否则一次耗时对话会阻塞心跳与后续消息，甚至被 cleanup 误判为 stale
             inflight = {t for t in inflight if not t.done()}
             if len(inflight) >= MAX_INFLIGHT_PER_CLIENT:

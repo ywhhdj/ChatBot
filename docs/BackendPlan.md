@@ -77,8 +77,8 @@ B1-08 → B2-01 → B2-02 → B2-04
 |---|---|---|---|
 | C0-01 | 建立 RequestContext DTO | pipeline/chat.py、orchestrator.py 周边 | 一次请求的 id/session/character/deadline 全链路显式传递 |
 | C0-02 | ContextStore 按 session 分桶 | context/user.py 或新 context store | A/B session 并发时窗口不会混入另一 session 的消息 |
-| C0-03 | PromptBuilder 纯化 | pipeline/orchestrator.py | system/character/tool/memory/history/input 各段可单独测试与计 token |
-| C0-04 | 记忆注入去副作用 | context/user.py、memory/main.py | memory snippets 不无限追加；重建 context 无旧摘要残留 |
+| C0-03 | PromptBuilder 纯化 | pipeline/orchestrator.py | system/character/tool/ memory/history/input 各段可单独测试与计 token |
+| C0-04 | 记忆注入去副作用 | context/user.py、 memory/main.py | memory snippets 不无限追加；重建 context 无旧摘要残留 |
 | C0-05 | session switch/clear 生命周期 | manager/session、orchestrator | 只清指定 session；迟到流不会覆盖切换后会话 |
 
 ### P1-S：存档 Memento
@@ -86,7 +86,7 @@ B1-08 → B2-01 → B2-02 → B2-04
 | ID | 任务 | 产出 | 验收 |
 |---|---|---|---|
 | S1-01 | 明确 Slot/Checkpoint/Full snapshot 语义 | GameSaveArchitecture.md、DTO | API/UI 显示 capture scope 和 consistency_level |
-| S1-02 | 为 Originator 定义 snapshot adapter | session/character/memory/config managers | 不读取私有变量；缺少 adapter 的 domain 不宣称完整捕获 |
+| S1-02 | 为 Originator 定义 snapshot adapter | session/character/ memory/config managers | 不读取私有变量；缺少 adapter 的 domain 不宣称完整捕获 |
 | S1-03 | manifest、schema version 和 hash | SnapshotRepository | damage/unknown schema 被安全拒绝 |
 | S1-04 | staging 与原子发布 | SnapshotCoordinator | 发布中断时旧 current revision 仍可恢复 |
 | S1-05 | RestorePlan/prepare/commit/rollback | RestoreCoordinator | preview 无副作用；prepare 失败无部分状态切换 |

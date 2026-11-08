@@ -1,14 +1,18 @@
 """角色编排器：在"纯角色聊天"与"后台任务执行"之间分流。
 """
 from __future__ import annotations
+import asyncio
 import inspect
 import json
+import re
+import threading
+from collections import OrderedDict
 from dataclasses import replace
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
 
 from ... import runtime
 from ...models import Role
-from .manager import LLM
+from ...providers.entity import LLM
 from ..routes.intent import IntentRouter
 from ..routes.models import RouteType
 from ..tools.ctl import CLTTool
@@ -33,6 +37,7 @@ from ..context.request import RequestContext, set_current, reset_current
 LLMCaller = Callable[[List[Dict[str, str]]], Awaitable[str]]
 CommandExecutor = Callable[[str], Awaitable[Any]]
 from ...types.common import Message
+from .emotion.predictor import DEFAULT_EMOTION_ID
 
 
 async def _resolve(value: Any) -> Any:
@@ -63,6 +68,29 @@ class CharacterOrchestrator:
         self._service_orch = CLTTool()
         #: 本轮实际执行的命令条数（摘要与审计用）
         self._last_commands: List[Any] = []
+        #: 轻量路由判断缓存：同一句话不重复付费调用 LLM。
+        #: 有界 LRU，避免长期运行后无上限增长（旧实现到 256 条整表清空，
+        #: 会周期性把热点全部打回付费调用）。
+        self._judge_cache: "OrderedDict[str, str]" = OrderedDict()
+        self._judge_cache_limit = 256
+        self._judge_cache_lock = threading.RLock()
+
+    @staticmethod
+    def _usage_snapshot(llm: LLM) -> Dict[str, int]:
+        getter = getattr(llm, "get_usage_snapshot", None)
+        if callable(getter):
+            try:
+                return dict(getter())
+            except Exception:  # noqa: BLE001
+                return {}
+        return {}
+
+    @staticmethod
+    def _usage_delta(before: Dict[str, int], after: Dict[str, int]) -> Dict[str, int]:
+        return {
+            key: max(0, int(after.get(key, 0)) - int(before.get(key, 0)))
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens", "calls")
+        }
 
     # ---------- 非流式 ----------
 
@@ -87,6 +115,7 @@ class CharacterOrchestrator:
         ctx = RequestContext.create(session_id=session_id, source=source, timeout=timeout)
 
         token = set_current(ctx)
+        usage_before = self._usage_snapshot(self._llm)
         try:
             result = OrchestrationResult()
             character = self._char_mgr.get_current()
@@ -107,6 +136,9 @@ class CharacterOrchestrator:
 
             await self.__record_character_state(character, user_input, result)
             result.mood_after = character.state.mood if character else 4
+            result.usage = self._usage_delta(
+                usage_before, self._usage_snapshot(self._llm)
+            )
             self._last_result = result
             return result
         finally:
@@ -137,12 +169,17 @@ class CharacterOrchestrator:
             request_id=ctx.request_id,
             session_id=ctx.session_id,
         )
+        # 先建好结果对象并交给调用方：内层 finally 会无条件访问 result，
+        # 旧实现把它放在 try 内，早期异常会被 NameError 覆盖成"未知错误"。
+        result = OrchestrationResult()
+        character = self._char_mgr.get_current()
+        if result_holder is not None:
+            result_holder["result"] = result
+        usage_before = self._usage_snapshot(self._llm)
         try:
             await self._user_context.add_user_message(
                 user_input, session_id=ctx.session_id, source=source
             )
-            result = OrchestrationResult()
-            character = self._char_mgr.get_current()
             result.character_id = character.id if character else ""
             channel = force_channel or await self._router.route(
                 user_input,
@@ -150,8 +187,6 @@ class CharacterOrchestrator:
             )
             result.route = channel
 
-            if result_holder is not None:
-                result_holder["result"] = result  # 先放进去，异常时调用方也能拿到部分信息
             from ..tools.tracer import ToolCallTracer
 
             route_value = getattr(channel, "value", None) or str(channel or "")
@@ -216,6 +251,9 @@ class CharacterOrchestrator:
                     )
                     record, _, _ = finish(record, reason)
                 result.stop_reason = record.reason
+                result.usage = self._usage_delta(
+                    usage_before, self._usage_snapshot(self._llm)
+                )
                 self.__emit_stream_audit(ctx, record)
         finally:
             reset_current(token)
@@ -313,15 +351,7 @@ class CharacterOrchestrator:
         user_input: str,
         session_id: str = "default",
     ):
-        """装配纯聊天 prompt。
-
-        两个修复：
-        1. `get_current_messages()` 旧版不按 session 过滤（跨会话串线），
-           这里显式传 session_id；
-        2. 记忆片段此前**根本没进 prompt** —— 它被写成 SYSTEM 消息 append 进
-           共享 deque，而这里取的是 USER/ASSISTANT，检索到的记忆白算了。
-           现在片段与对话一起作为 memory_context 注入。
-        """
+        """装配纯聊天 prompt"""
         memory_context = self.__collect_memory_context(session_id)
         return PromptBuilder.build(
             character=character,
@@ -362,12 +392,26 @@ class CharacterOrchestrator:
 
         result.commands_executed = [
             item if isinstance(item, dict) else {
-                "ok": True, 
+                "ok": True,
                 "data": item
             }
             for item in executed_results
         ]
         self._last_commands = list(result.commands_executed)
+
+    @staticmethod
+    def __has_actionable_results(commands: List[Any]) -> bool:
+        """是否有值得让模型再总结一次的执行结果。"""
+        for item in commands or []:
+            if isinstance(item, dict) and item.get("ok") is not False:
+                return True
+        return False
+
+    @staticmethod
+    def __fallback_reply(commands: List[Any]) -> str:
+        if not commands:
+            return "这轮没有解析出可执行的命令，我先停在这里，避免空转。你可以换个说法再试一次。"
+        return "刚才的命令没有成功执行，我先把结果停在这里，不再继续猜测。"
 
     def __build_task_prompt(
         self,
@@ -375,12 +419,7 @@ class CharacterOrchestrator:
         user_input: str,
         plan: Optional[AssemblyPlan] = None,
     ):
-        """命令规划阶段（COMMAND_PLAN）。
-
-        走 PromptBuilder 的三上下文分离，而不是直接调私有方法。
-        装配计划决定预算与是否带人设 —— 命令阶段不带人设
-        （见 `assembly.plan_for`），否则模型会开始寒暄而不是输出命令。
-        """
+        """命令规划阶段（COMMAND_PLAN）。"""
         plan = plan or plan_for(StageKind.COMMAND_PLAN, route=RouteType.TOOL_CALL)
         recent = self.__recent_dialogue(character, limit=5) if plan.include_history else []
         tools = self._service_orch.get_tools() if plan.include_tools else []
@@ -510,6 +549,19 @@ class CharacterOrchestrator:
         )).strip()
         result.task_output = text
         await self.__execute_commands(text, result)
+
+        # 成本短路：没有可执行结果时不发起第二次完整推理
+        if not self.__has_actionable_results(result.commands_executed):
+            result.chat_response = self.__fallback_reply(result.commands_executed)
+            result.stage = "skipped_summary"
+            await self._user_context.add_assistant_message(
+                result.chat_response, session_id=session_id
+            )
+            result.task_summary = self.__build_task_summary()
+            result.used_tokens_estimate = estimated
+            self.__emit_task_audit(session_id, result)
+            return
+
         task_result_text = json.dumps(
             result.commands_executed,
             ensure_ascii=False,
@@ -596,7 +648,7 @@ class CharacterOrchestrator:
             logger.warning(f"[Orchestrator] 审计事件失败: {type(exc).__name__}")
 
     def __stop_reason_of(self) -> StopReason:
-        """把本轮工具执行的实际结果翻译成可解释的结束原因（B1-07）。
+        """把本轮工具执行的实际结果翻译成可解释的结束原因
 
         返回稳定枚举而非自由文本：调用方要按原因分流
         （是否重试、是否提示用户），自由文本无法稳定判断。
@@ -692,6 +744,19 @@ class CharacterOrchestrator:
 
         await self.__execute_commands(command_text, result)
 
+        # 与非流式共用同一成本策略：无结果就不做总结推理
+        if not self.__has_actionable_results(result.commands_executed):
+            result.chat_response = self.__fallback_reply(result.commands_executed)
+            result.stage = "skipped_summary"
+            yield result.chat_response
+            await self._user_context.add_assistant_message(
+                result.chat_response, session_id=session_id
+            )
+            result.task_summary = self.__build_task_summary()
+            result.used_tokens_estimate = estimated
+            self.__emit_task_audit(session_id, result)
+            return
+
         task_result_text = json.dumps(
             result.commands_executed, ensure_ascii=False, default=str
         )
@@ -743,17 +808,81 @@ class CharacterOrchestrator:
             built, character, user_input, memory_limit=memory_limit
         )
 
+    #: 轻量判断只允许这三种结论，其余一律视为不可用
+    _JUDGE_TYPES = frozenset(("pure_chat", "tool_call", "mixed"))
+
+    @staticmethod
+    def _judge_key(user_input: str) -> str:
+        """与 ``IntentRouter._get_cache_key`` 同构的规范化键"""
+        return re.sub(r"[^\w\u4e00-\u9fff]", "", str(user_input or "").strip().lower())
+
+    @classmethod
+    def _normalize_judge(cls, raw: Any) -> str:
+        """把模型返回收敛成合法 JSON。"""
+        text = str(raw or "").strip()
+        candidates = [text]
+        block = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+        if block:
+            candidates.append(block.group(1).strip())
+        obj = re.search(r"\{[^{}]*\}", text, re.DOTALL)
+        if obj:
+            candidates.append(obj.group(0))
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                data = json.loads(candidate)
+            except Exception:  # noqa: BLE001
+                continue
+            if not isinstance(data, dict) or data.get("type") not in cls._JUDGE_TYPES:
+                continue
+            try:
+                confidence = float(data.get("confidence", 0.5) or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.5
+            return json.dumps({
+                "type": data["type"],
+                "confidence": max(0.0, min(1.0, confidence)),
+                "reason": str(data.get("reason", ""))[:80],
+            }, ensure_ascii=False)
+        return json.dumps({
+            "type": "mixed", "confidence": 0.3, "reason": "judge_unavailable",
+        }, ensure_ascii=False)
+
     async def __lightweight_route_judge(self, messages: List[Dict[str, str]]) -> str:
+        """模糊意图的 LLM 兜底。
+
+        成本约束：这是**每轮可能额外产生的一次调用**。默认 max_tokens=96、
+        temperature=0；缓存键与意图路由同构、结果先规范化再入有界 LRU，
+        避免规则与缓存同时失效时反复为同一句话付费。
+        """
         prompt = (
             "判断用户输入属于 pure_chat、tool_call 或 mixed。"
             "只返回 JSON: {\"type\":\"pure_chat|tool_call|mixed\","
             "\"confidence\":0.0-1.0,\"reason\":\"...\"}"
         )
         user_input = messages[-1]["content"] if messages else ""
-        return await self._llm.process_message([
-            {"role": Role.SYSTEM, "content": prompt},
-            {"role": Role.USER, "content": user_input},
-        ])
+        key = self._judge_key(user_input)
+        with self._judge_cache_lock:
+            cached = self._judge_cache.get(key)
+            if cached is not None:
+                self._judge_cache.move_to_end(key)
+                return cached
+        raw = await self._llm.process_message(
+            [
+                {"role": Role.SYSTEM, "content": prompt},
+                {"role": Role.USER, "content": user_input},
+            ],
+            temperature=0.0,
+            max_tokens=96,
+        )
+        result = self._normalize_judge(raw)
+        with self._judge_cache_lock:
+            self._judge_cache[key] = result
+            self._judge_cache.move_to_end(key)
+            while len(self._judge_cache) > self._judge_cache_limit:
+                self._judge_cache.popitem(last=False)
+        return result
 
     def __recent_dialogue(self, character: Optional[Character], limit: int) -> List[Dict[str, str]]:
         if not character:
@@ -777,23 +906,13 @@ class CharacterOrchestrator:
             self._char_mgr.add_message(character.id, "assistant", result.chat_response)
         await self._apply_emotion(character, result)
 
-    # ---------- A23–A28：情感预测 ----------
+    # ---------- 情感预测 ----------
 
     #: 情绪预测是"锦上添花"，绝不能拖住回复。超过这个时间就回落默认情绪。
     EMOTION_TIMEOUT = 3.0
 
     async def _apply_emotion(self, character: Character, result: OrchestrationResult) -> None:
         """按回复文本预测情绪并更新角色状态。
-
-        修复说明
-        ────────
-        旧实现是 `task_manager.submit(...)` 后立刻 `fut.result()`（无超时）：
-        在 async 上下文里同步阻塞等待一个后台任务。两层问题：
-
-        1. 情绪分类可能走 LLM，几秒到几十秒，这段时间整个事件循环被卡住，
-           其他会话的请求一起排队；
-        2. 若当前线程恰好就是调度器线程，`submit` 的任务要等调度器空闲，
-           而调度器正在等这次 `result()` —— 互等死锁（BackendDesign §3.3）。
 
         现在统一走"有界异步"：协程就直接 await，同步阻塞函数丢进线程池，
         并用 `wait_for` 兜底超时，超时/失败都回落到默认情绪，不影响主回复。
@@ -809,32 +928,30 @@ class CharacterOrchestrator:
 
             clf = getattr(self, "_emotion_clf", None)
             if clf is None:
-                clf = LLMEmotionClassifier()
+                injected = getattr(self, "_emotion_predictor", None)
+                clf = injected if callable(getattr(injected, "classify", None)) else LLMEmotionClassifier()
                 self._emotion_clf = clf
 
-            if inspect.iscoroutinefunction(clf.classify):
+            if inspect.iscoroutinefunction(clf.classify): # type: ignore
                 mood = await asyncio.wait_for(
-                    clf.classify(text), timeout=self.EMOTION_TIMEOUT
+                    clf.classify(text),  # type: ignore
+                    timeout=self.EMOTION_TIMEOUT
                 )
             else:
                 loop = asyncio.get_running_loop()
                 mood = await asyncio.wait_for(
-                    loop.run_in_executor(None, clf.classify, text),
+                    loop.run_in_executor(None, clf.classify, text), # type: ignore
                     timeout=self.EMOTION_TIMEOUT,
                 )
             if not isinstance(mood, int):
                 mood = DEFAULT_EMOTION_ID
         except (asyncio.TimeoutError, TimeoutError):
+            # 回落路径本身不能再 import 任何东西：模块加载失败时这里若再抛，
+            # 会顺着 finally 盖掉真正的回复结果。DEFAULT_EMOTION_ID 是模块级常量。
             logger.debug("[Orchestrator] 情绪预测超时，回落平静")
-            from .emotion.predictor import DEFAULT_EMOTION_ID
-
             mood = DEFAULT_EMOTION_ID
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[Orchestrator] 情绪预测失败，回落平静: {exc}")
-            try:
-                from .emotion.predictor import DEFAULT_EMOTION_ID
-            except Exception:  # noqa: BLE001
-                DEFAULT_EMOTION_ID = 4  # noqa: N806
             mood = DEFAULT_EMOTION_ID
 
         try:

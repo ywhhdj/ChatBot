@@ -1,0 +1,270 @@
+{
+  "$schema": "../../../schemas/providers.schema.json",
+  "schema_version": 1,
+  "openai-image": {
+    "meta": {
+      "label": "OpenAI 图像",
+      "tags": [
+        "cloud",
+        "paid",
+        "image",
+        "vision"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.openai.com/v1",
+      "image_path": "/images/generations",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 600
+    },
+    "models": [
+      {
+        "id": "gpt-image-2",
+        "label": "GPT Image 2"
+      },
+      {
+        "id": "gpt-image-1",
+        "label": "GPT Image 1"
+      }
+    ],
+    "params": {
+      "prompt": {
+        "type": "string",
+        "scope": "request",
+        "required": true
+      },
+      "n": {
+        "type": "integer",
+        "default": 1,
+        "scope": "request"
+      },
+      "size": {
+        "type": "string",
+        "default": "1024x1024",
+        "scope": "request"
+      },
+      "response_format": {
+        "type": "string",
+        "default": "url",
+        "enum": [
+          "url",
+          "b64_json"
+        ],
+        "scope": "request"
+      }
+    }
+  },
+  "qwen-image": {
+    "meta": {
+      "label": "Qwen 图像 (通义万相)",
+      "tags": [
+        "cloud",
+        "paid",
+        "image",
+        "vision"
+      ],
+      "deployment": "cloud",
+      "region": "cn"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "image_path": "/images/generations",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 600
+    },
+    "models": [
+      {
+        "id": "qwen-image-3.0-pro",
+        "label": "Qwen Image 3.0 Pro"
+      },
+      {
+        "id": "qwen-image-2.1",
+        "label": "Qwen Image 2.1"
+      }
+    ],
+    "params": {
+      "prompt": {
+        "type": "string",
+        "scope": "request",
+        "required": true
+      },
+      "n": {
+        "type": "integer",
+        "default": 1,
+        "scope": "request"
+      },
+      "size": {
+        "type": "string",
+        "default": "1024*1024",
+        "scope": "request",
+        "description": "宽*高，总像素 512*512 到 2048*2048"
+      },
+      "response_format": {
+        "type": "string",
+        "default": "url",
+        "enum": [
+          "url",
+          "b64_json"
+        ],
+        "scope": "request"
+      }
+    }
+  },
+  "stability": {
+    "meta": {
+      "label": "Stability AI",
+      "tags": [
+        "cloud",
+        "paid",
+        "image",
+        "vision"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.stability.ai",
+      "image_path": "/v2beta/stable-image/generate/core",
+      "protocol": "stability_multipart",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
+      "timeout": 600
+    },
+    "models": [
+      {
+        "id": "sd3.5-large",
+        "label": "SD 3.5 Large"
+      },
+      {
+        "id": "stable-image-ultra",
+        "label": "Stable Image Ultra"
+      }
+    ],
+    "params": {
+      "prompt": {
+        "type": "string",
+        "scope": "request",
+        "required": true
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "default": "1:1",
+        "scope": "request"
+      },
+      "output_format": {
+        "type": "string",
+        "default": "png",
+        "scope": "request"
+      },
+      "negative_prompt": {
+        "type": "string",
+        "default": "",
+        "scope": "request"
+      }
+    }
+  },
+  "comfyui-local": {
+    "meta": {
+      "label": "ComfyUI (本地)",
+      "tags": [
+        "local",
+        "free",
+        "image",
+        "workflow"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "http://127.0.0.1:8188",
+      "prompt_path": "/prompt",
+      "protocol": "comfyui",
+      "auth": {
+        "type": "none"
+      },
+      "timeout": 600
+    },
+    "models": [
+      {
+        "id": "comfyui-workflow",
+        "label": "ComfyUI 工作流"
+      }
+    ],
+    "params": {
+      "workflow_json": {
+        "type": "object",
+        "scope": "request",
+        "required": true,
+        "hidden": true
+      },
+      "client_id": {
+        "type": "string",
+        "scope": "request",
+        "hidden": true
+      }
+    }
+  },
+  "comfyui-cloud": {
+    "meta": {
+      "label": "ComfyUI Cloud",
+      "tags": [
+        "cloud",
+        "paid",
+        "image",
+        "workflow"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://cloud.comfy.org",
+      "prompt_path": "/api/prompt",
+      "protocol": "comfyui",
+      "auth": {
+        "type": "header",
+        "header": "X-API-Key",
+        "field": "api_key"
+      },
+      "timeout": 600
+    },
+    "models": [
+      {
+        "id": "comfyui-workflow",
+        "label": "ComfyUI 工作流 (Cloud)"
+      }
+    ],
+    "params": {
+      "workflow_json": {
+        "type": "object",
+        "scope": "request",
+        "required": true,
+        "hidden": true
+      },
+      "client_id": {
+        "type": "string",
+        "scope": "request",
+        "hidden": true
+      }
+    }
+  }
+}

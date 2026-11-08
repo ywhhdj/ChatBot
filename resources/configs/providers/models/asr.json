@@ -1,0 +1,111 @@
+{
+  "$schema": "../../../schemas/providers.schema.json",
+  "schema_version": 1,
+  "whisper": {
+    "meta": {
+      "label": "Whisper (本地)",
+      "tags": [
+        "local",
+        "free",
+        "asr",
+        "audio"
+      ],
+      "deployment": "local",
+      "description": "faster-whisper 本地推理"
+    },
+    "endpoint": {
+      "transport": "local",
+      "runtime": "faster-whisper",
+      "model_dir": "${ASR_MODEL_ROOT}/whisper",
+      "device": "auto",
+      "download": {
+        "strategy": "huggingface",
+        "files": {
+          "repo": "Systran/faster-whisper-{model_size}"
+        },
+        "source": "https://huggingface.co/Systran/faster-whisper-{model_size}",
+        "docs_url": "https://github.com/SYSTRAN/faster-whisper"
+      }
+    },
+    "models": [
+      {
+        "id": "base",
+        "label": "Whisper Base",
+        "params": {
+          "model_size": {
+            "default": "base"
+          }
+        }
+      },
+      {
+        "id": "small",
+        "label": "Whisper Small",
+        "params": {
+          "model_size": {
+            "default": "small"
+          }
+        }
+      },
+      {
+        "id": "medium",
+        "label": "Whisper Medium",
+        "params": {
+          "model_size": {
+            "default": "medium"
+          }
+        }
+      }
+    ],
+    "params": {
+      "language": {
+        "type": "string",
+        "default": "zh",
+        "scope": "request",
+        "enum": [
+          {
+            "value": "zh",
+            "label": "中文"
+          },
+          {
+            "value": "en",
+            "label": "英语"
+          },
+          {
+            "value": "ja",
+            "label": "日语"
+          }
+        ]
+      },
+      "beam_size": {
+        "type": "integer",
+        "default": 5,
+        "scope": "request",
+        "min": 1,
+        "max": 10
+      },
+      "model_size": {
+        "type": "string",
+        "default": "base",
+        "scope": "init",
+        "enum": [
+          {
+            "value": "tiny",
+            "label": "Tiny"
+          },
+          {
+            "value": "base",
+            "label": "Base"
+          },
+          {
+            "value": "small",
+            "label": "Small"
+          },
+          {
+            "value": "medium",
+            "label": "Medium"
+          }
+        ]
+      }
+    }
+  }
+}

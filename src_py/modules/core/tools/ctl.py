@@ -9,13 +9,12 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ...logger import logger
-# from ..logger import audit
-from ...services.service.manager import service_manager
+from ...services.manager import service_manager
 from ..routes.models import RouteType
 from .policy import ToolPolicy, DEFAULT_POLICY, evaluate as evaluate_policy
 from ..context.assembly import ToolBudgetState, NO_TOOLS
 from .services.exceute import CommandExecutor, ResultFormatter
-from .services.formatter import CommandParser, CommandValidator
+from .services.formatter import CommandParser, CommandValidator, SHELL_SERVICE_ID
 from .services.models import (
     CommandData,
     CommandResult,
@@ -53,6 +52,7 @@ def _result_to_tool_item(
         "label": label,
     }
 
+
 class CLTTool:
     _instance = None
     _lock = threading.Lock()
@@ -69,7 +69,7 @@ class CLTTool:
         policy: Optional[ToolPolicy] = None,
     ) -> None:
         self._sm = service_manager
-        self.config: OrchestrationConfig= {
+        self.config: OrchestrationConfig = {
             "skill_dir": "skills",
             "max_tool_calls": 10,
             "exec_mode": "sequential",
@@ -86,16 +86,30 @@ class CLTTool:
         )
         self._skills = ExternalSkillManager(skill_dir=Path(self.config.get("skill_dir")))
         self._state = OrchestrationState()
+        self._ensure_shell_service()
 
         #: 单轮最大工具调用次数，-1 = 无上限。
         self.max_tool_calls: int = int(self.config.get("max_tool_calls", -1))
         self._tool_listener: Optional[Callable[[str, Dict[str, Any]], None]] = None
         self._current_messages: List[Dict[str, Any]] = []
-        #: 策略判定留。只存 service/method/决策/原因码，
+        #: 策略判定留痕。只存 service/method/决策/原因码，
         #: **不存参数与返回正文**（SecurityAndAuditDesign §5）。
         self._policy_decisions: List[Dict[str, Any]] = []
         #: 本轮工具额度状态。动态装配据此决定是否切"强制总结"阶段。
         self._budget_state: ToolBudgetState = NO_TOOLS
+
+    def _ensure_shell_service(self) -> None:
+        """确保 shell 兜底服务已注册"""
+        try:
+            if self._sm.is_registered(SHELL_SERVICE_ID):
+                return
+            from ...services.shell.service import ShellService
+
+            ShellService()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[Orchestrator] shell 服务注册失败: {type(exc).__name__}"
+            )
 
     def set_policy(self, policy: ToolPolicy) -> None:
         """替换执行策略（如切换到更严格的远程模式）。"""
@@ -103,7 +117,7 @@ class CLTTool:
         self._executor = CommandExecutor(
             self._sm, mode=self.config.get("exec_mode"), policy=policy
         )
-    
+
     def set_tool_listener(self, listener: Optional[Callable[[str, Dict[str, Any]], None]]) -> None:
         """注册工具生命周期回调。
 
@@ -120,30 +134,42 @@ class CLTTool:
             logger.debug(f"[Orchestrator] tool listener error: {exc}")
 
     def _label_for(self, service: str, method: str) -> str:
-        """TD3：人话标题，如 `obs.switch_scene` -> "切换OBS场景"。"""
+        """TD3：人话标题。
+
+        `ServiceManager.get_tools()` 返回的是
+        `[{"service": name, "tools": [ToolFunction, ...]}]`，
+        需要下钻一层才能拿到方法描述。
+        """
         try:
-            tools = self._sm.get_tools()
+            entries = self._sm.get_tools()
         except Exception:  # noqa: BLE001
             return f"{service}.{method}"
-        for t in tools or []:
-            name = getattr(t, "name", None) or (
-                t.get("name") if isinstance(t, dict) else None)
-            desc = getattr(t, "description", None) or (
-                t.get("description") if isinstance(t, dict) else None
-            )
-            if name == method and desc:
-                return str(desc)
+        for entry in entries or []:
+            if isinstance(entry, dict):
+                tools = entry.get("tools") or []
+            else:
+                tools = getattr(entry, "tools", None) or []
+            for t in tools or []:
+                name = getattr(t, "name", None) or (
+                    t.get("name") if isinstance(t, dict) else None)
+                desc = getattr(t, "description", None) or (
+                    t.get("description") if isinstance(t, dict) else None
+                )
+                if name == method and desc:
+                    return str(desc)
         return f"{service}.{method}"
-    
+
     def get_tools(self) -> List[Dict[str, Any]]:
         return self._sm.get_tools()
-
 
     # ---------- 执行 ----------
 
     async def _run(self, text: str) -> Dict[str, Any]:
-        results: List[CommandResult] = []
-        commands = self._parser.parse(text)
+        try:
+            service_names = list(self._sm.services.keys())
+        except Exception:  # noqa: BLE001
+            service_names = []
+        commands = self._parser.parse(text, service_names)
         round_results = await self._execute_commands(commands)
         results = round_results
         self._state.history.append({
@@ -213,7 +239,6 @@ class CLTTool:
             )
 
         # 额度状态在本轮开始时落地，供动态装配在总结阶段读取。
-        # `used` 先按"实际进入执行的条数"填，执行后会被更新为成功/失败的计数。
         self._budget_state = ToolBudgetState(
             limit=limit,
             used=len(commands),
@@ -269,7 +294,7 @@ class CLTTool:
                 results[index] = result
                 # 执行完发 end（同一 id，前端增量更新同一张卡）
                 self._emit_tool("end", _result_to_tool_item(
-                    dict(result), 
+                    dict(result),
                     self._label_for(
                         result.get("service", ""),
                         result.get("method", "")
@@ -286,7 +311,7 @@ class CLTTool:
         commands: List[CommandData],
         validated: List[CommandResult],
     ) -> List[CommandResult]:
-        """B0-06：把通过参数校验的命令再过一遍安全策略。
+        """把通过参数校验的命令再过一遍安全策略。
 
         为什么不在 `CommandValidator` 里一起做
         ──────────────────────────────────────
@@ -331,20 +356,7 @@ class CLTTool:
 
             # B1-08：被拒绝的调用单独发事件。与正常调用分开是为了
             # 让"被拒"可被计数告警——混在成功事件里就会被淹没。
-            try:
-                audit.record(
-                    audit.Action.TOOL_DENIED,
-                    resource=audit.Resource(
-                        type=audit.ResourceType.TOOL.value,
-                        id=f"{service_name}.{method_name}",
-                    ),
-                    decision=audit.Decision.DENY,
-                    result=audit.Result.FAILURE,
-                    reason_code=verdict.reason_code.value,
-                    source=audit.Source.TASK,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"[Orchestrator] 审计事件失败: {type(exc).__name__}")
+            self._record_denial(service_name, method_name, verdict.reason_code.value)
 
             logger.warning(
                 f"[Orchestrator] 命令被策略拒绝: {service_name}.{method_name} "
@@ -362,14 +374,41 @@ class CLTTool:
             )
         return out
 
+    @staticmethod
+    def _record_denial(service: str, method: str, reason_code: str) -> None:
+        """拒绝留痕：优先写 audit 事件，模块不可用时退化为结构化日志。
+
+        只记 service / method / 稳定原因码，不记参数与返回正文。
+        原实现直接调用未导入的 `audit.record(...)`，会在拒绝路径上抛
+        NameError，把"被安全策略拦下"变成 500。
+        """
+        try:
+            from ...logger import audit
+
+            audit.record(
+                audit.Action.TOOL_DENIED,
+                resource=audit.Resource(
+                    type=audit.ResourceType.TOOL.value,
+                    id=f"{service}.{method}",
+                ),
+                decision=audit.Decision.DENY,
+                result=audit.Result.FAILURE,
+                reason_code=reason_code,
+                source=audit.Source.TASK,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                f"[Orchestrator] 工具拒绝留痕: {service}.{method} ({reason_code})"
+            )
+
     async def _execute_skill_command(self, command: CommandData) -> CommandResult:
         started = time.perf_counter()
         params = dict(command.get("params", {}) or {})
         skill_id = str(params.get("id", "") or "").strip()
         if not skill_id:
             return CommandResult(
-                ok=False, 
-                service="skill", 
+                ok=False,
+                service="skill",
                 method="run",
                 status=CommandStatus.ERROR.value, data=None,
                 error='skill 命令缺少 --id 参数（应为: skill --id <id> --des "..."）',

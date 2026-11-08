@@ -1,14 +1,34 @@
-# ChatBot API 契约与源码差异
+# ChatBot API 契约（dev 分支现行基线）
 
-> 源码基线：dev，提交 c5e6343ec4b3913caaa04e5f6af2c34327213314。本文在不运行项目的情况下，根据控制器、统一响应、前端 service 和现有 API 文档交叉整理。
+> 权威来源：`resources/config/api/endpoints.json`（89 个启用端点）+ `api/loader.py` + `api/gateway.py` + `api/response.py` / `exceptions.py` + `src/api/services/*`。
 >
-> 重要：本文件同时记录“资源逻辑契约”和“当前源码中需要确认的注册差异”。实际发布路径必须以 FastAPI app.routes/OpenAPI 导出结果为准。此文档变更不修改业务源码。
+> 本文按**现行源码**整理，并标注本次改造的落地项。「目标/待办」单列，不混写成已实现。不运行项目、不导出 OpenAPI，路径以 `endpoints.json` + 注册器前缀为准。
+>
+> **本次重构**：
+> - 对话 / 语音 / 进度等请求端点由 `controllers/request.py` 迁入 `controllers/pipline.py`，op 前缀统一为 `pipline.*`。
+> - 供应商（adapter / provider / 切换 / 配置 / 状态 / 下载）统一归入 `controllers/providers.py`，op 前缀统一为 `providers.*`。
+> - 请求模型（`requests.py`）与响应 DTO（`dto.py`）按控制器重新分组，WebSocket 帧复用同一套 DTO。
+
+---
 
 ## 0. 通用约定
 
-### 0.1 REST 响应信封
+### 0.1 路由前缀与注册机制
 
-后端 ApiResponse 定义的标准字段如下：
+```
+endpoints.json（每项含 op / handler / http{method,path} / tags / desktop / dispatch）
+   │  EndpointLoader.build_router()  → add_api_route(spec.http.path, handler)
+   ▼
+register_all_routers(app, prefix="/api")     ← /api 只在这里加一次
+```
+
+- 表中「资源路径」= `spec.http.path`；**最终 URL = `/api` + 资源路径**。
+- `controllers/*.py` 内声明的 `APIRouter(prefix=...)` 是历史遗留，当前 `all_routers()` 只返回 loader 生成的 router，不会被 include。
+- `EndpointLoader._validate()` 启动期校验 handler 可 import、`METHOD + path` 不冲突。
+- `handler` 形如 `modules.api.controllers.<module>:<func>`；`desktop=true` 的端点同时注册为 `ApiGateway` 的 op，桌面 Bridge 直接 `call(op)`。
+- `dispatch`：`loop`（默认）/ `thread`（`asyncio.to_thread`）/ `main`（Qt 主线程派发）。
+
+### 0.2 REST 响应信封
 
 ~~~json
 {
@@ -21,308 +41,567 @@
 }
 ~~~
 
-- 后端成功业务 code 当前为 200（见 modules/api/exceptions.py）。
-- 失败返回语义化 HTTP status，同时使用同构响应信封。
-- request_id 使用 X-Request-ID 传入/返回，并应用于日志关联。
-- 时间戳 ts 当前为 Unix 秒（float）。
-- 前端普通 Axios 分支使用 code === 200；src/api/http.ts 的桌面 bridge 分支使用 code === 0，与后端不一致，为 P0 差异。
+- 成功业务 `code = 200`（`exceptions.py::CODE_OK`）；前端普通 Axios 分支判 `code === 200`。
+- 失败时 HTTP status 语义化，body 仍是同构信封。
+- `X-Request-ID` 由中间件注入 contextvar 并回写响应头；外部传入需限制长度/字符集。
+- `ts` 为 Unix 秒（float）。
+- 桌面 bridge 分支 `src/api/http.ts` 判 `code === 0` 与后端不一致，为 **P0 待办**，需共用 decoder。
 
-### 0.2 错误码（以源码为准）
+### 0.3 错误码（源码为准）
 
 | code | HTTP | 含义 | 客户端建议 |
 |---:|---:|---|---|
-| 200 | 200 | 成功 | 读取 data |
+| 200 | 200 | 成功 | 读取 `data` |
 | 1001 | 400 | 参数校验失败 | 修正输入 |
 | 1002 | 404 | 资源不存在 | 刷新资源或确认 ID |
-| 1003 | 409 | 状态冲突 | 查询当前状态后决定是否重试 |
+| 1003 | 409 | 状态冲突 | 查询当前状态后决定 |
 | 2001 | 503 | 依赖未初始化 | 配置/初始化依赖 |
-| 2002 | 504 | 处理超时 | 先查询任务状态；仅幂等操作可重试 |
-| 3001 | 500 | 内部异常 | 使用 request_id 排障 |
+| 2002 | 504 | 处理超时 | 先查任务状态；仅幂等操作可重试 |
+| 3001 | 500 | 内部异常 | 用 `request_id` 排障 |
 | 3002 | 503 | 主线程忙或不可用 | 稍后重试 |
 
-不要把业务 code 和 HTTP status 混为一谈。所有调用端应使用相同成功 code 和 decoder。
+不要把业务 `code` 与 HTTP status 混为一谈。所有调用端使用同一成功 code 与同一解包规则。
 
-### 0.3 长任务
+> 待办：`response.py::_unhandled_handler` 当前把 `type(exc).__name__: exc` 放进 `message`，应改为稳定通用信息 + `request_id`，详情写脱敏日志。`config` 类接口的 `raw=true` 原文回显应移除或限制到本地受控调试。
 
-模型下载、初始化、PPT 生成或其他长操作应优先使用任务接口/异步提交端点，返回 task_id；通过 task 查询状态。任务取消对同步任务不保证强制终止。
+### 0.4 长任务
+
+模型下载、PPT 生成等长操作返回 `task_id`，通过 `/api/task/{task_id}` 或 `/api/ppt/job/{task_id}` 查询。取消对同步线程不保证强制终止，超时只标记放弃等待。
+
+### 0.5 通用安全约束
+
+- 默认只绑定 `127.0.0.1`；远程监听必须显式启用认证与严格来源限制。
+- chat / audio / 文件 / PPT / 工具请求限制 body size、超时、并发与输出大小。
+- 产出文件只接受 `basename`，且必须落在 `security/workspace` 判定的工作区内。
+- 日志不保存 key、完整 prompt、音频或私人记忆正文。
+
+---
 
 ## 1. 系统与配置
 
-### System — 逻辑资源前缀 /api/system
+### System（tag: system）
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/system/health | Web、调度器、主线程、记忆和服务健康状态 |
-| GET | /api/system/info | 版本、配置路径和数据目录信息 |
-| GET | /api/system/stats | uptime、日志、任务、连接和记忆统计 |
-| POST | /api/system/gc | 触发记忆衰减/清理及日志排空 |
-| GET | /api/system/ping | 轻量探测；具体注册需以 OpenAPI 为准 |
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/system/health` | `system.health` | Web、调度器、主线程、记忆与服务健康状态 |
+| GET | `/system/info` | `system.info` | 版本、配置路径、数据目录 |
+| GET | `/system/stats` | `system.stats` | uptime、日志、任务、连接与记忆统计 |
+| POST | `/system/gc` | `system.gc` | 触发记忆衰减/清理及日志排空 |
+| GET | `/system/ping` | `system.ping` | 轻量探测 |
 
 健康检查不得触发模型加载、全量索引重建或全盘扫描。
 
-### Config — 逻辑资源前缀 /api/config
+### Config（tag: config）
 
-| 方法 | 路径 | 说明 |
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/config` | `config.get_config_api` | 读取配置；可按 section 查询 |
+| PATCH | `/config/{section}` | `config.patch_section` | 局部更新配置 |
+| POST | `/config/reload` | `config.reload` | 从配置文件重新加载 |
+| POST | `/config/save` | `config.save` | 持久化配置 |
+| GET | `/config/schema` | `config.schema` | 配置字段描述 |
+
+配置涉及密钥时默认遮蔽；不要在 URL、日志或前端持久化明文凭据。
+
+**请求/响应模型**：
+
+- `ConfigPatchRequest {values: Dict[str, Any]}` / 或直接 body 传字段。
+- `ConfigSaveRequest {file_path: Optional[str]}`。
+- 响应 `data` 为按 section 归集的配置 dict；`schema` 响应为 `{section: [ConfigSchemaItem]}`。
+
+### Logger（tag: logger）
+
+| 方法 | 资源路径 | op |
 |---|---|---|
-| GET | /api/config | 读取配置；可按 section 查询 |
-| PATCH | /api/config/{section} | 局部更新配置 |
-| POST | /api/config/reload | 从配置文件重新加载 |
-| POST | /api/config/save | 持久化配置 |
-| GET | /api/config/schema | 获取配置字段描述 |
+| GET | `/logger/level` | `logger.get_level` |
+| PUT | `/logger/level` | `logger.set_level` |
+| GET | `/logger/levels` | `logger.list_levels` |
+| GET | `/logger/stats` | `logger.stats` |
+| GET | `/logger/records` | `logger.records` |
+| POST | `/logger/flush` | `logger.flush` |
 
-配置涉及密钥时默认遮蔽。当前相关接口可能支持 raw 参数，应按 SecurityAndAuditDesign.md 收紧；不要在 URL、日志或前端持久化明文凭据。
+**请求/响应模型**：
 
-## 2. 管道、服务与技能
+- `PUT /logger/level`：`LoggerLevelRequest {level: str}`。
+- 响应：`LoggerLevelData` / `LoggerStatsData` / `{records: [LogRecordData], total, capacity}`。
 
-### Pipeline — 逻辑资源前缀 /api/pipeline
+### Device（tag: device）
 
-| 方法 | 路径 | 说明 |
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/device/info` | `device.device_info` | 设备/平台信息 |
+
+**响应 DTO**：`DeviceInfoData {cpu: CPUInfoData, gpu: GPUInfoData, overall: Dict, recommended_fps: int, ram_mb: int}`。
+
+---
+
+## 2. 供应商、服务、技能与工作区
+
+### Provider（tag: provider，handler 模块 `controllers/providers.py`）
+
+> 本次重构：adapter / provider / 切换 / 配置 / 状态 / 下载全部由 `providers.py` 提供，op 前缀 `providers.*`。
+
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/pipeline/adapters` | `providers.list_adapters` | adapter 类型、provider 列表、当前 provider / 模型、累计用量 |
+| GET | `/pipeline/adapters/{adapter}/providers` | `providers.list_providers` | 某 adapter 的 provider 列表（label / deployment / models） |
+| GET | `/pipeline/adapters/{adapter}/providers/{provider}` | `providers.get_provider` | 读取 provider 配置（敏感字段已掩码） |
+| GET | `/pipeline/adapters/{adapter}/providers/{provider}/status` | `providers.status` | provider 完整状态，含本地模型文件状态 |
+| POST | `/pipeline/adapters/{adapter}/switch` | `providers.switch` | 切换 provider（可指定 `model_id` 与配置覆盖） |
+| POST | `/pipeline/adapters/{adapter}/stop` | `providers.stop_adapter` | 停止当前 provider，保留门面 |
+| POST | `/pipeline/adapters/{adapter}/providers/{provider}/download` | `providers.download_model` | 触发本地模型下载；进度走 WebSocket |
+| GET | `/pipeline/configs` | `providers.all_configs` | 各能力供应商配置（已掩码） |
+
+**请求模型**：
+
+- `ProviderSwitchRequest {provider: str, config: Optional[Dict], model_id: Optional[str]}`。
+- `ProviderDownloadRequest {model_id: Optional[str], force: bool}`。
+
+**响应 DTO**：
+
+- `AdapterInfo` / `SwitchResultData` / `ProviderStatusData {capability, name, label, deployment, transport, protocol, runtime, selected_model, models, params, ui, download, download_status: DownloadStatusData, available, missing_env, warnings}`。
+- `DownloadStartData {task_id, capability, provider, model_id, status}`。
+
+> 切换应先初始化新实例并健康检查，成功后才切流量；下载进度通过 WebSocket `DOWNLOAD_MODEL` 事件回传（见 §6）。已安装且未 `force` 时直接返回 `ERROR "模型已存在"`。
+
+### Service（tag: service）
+
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/service` | `service.list_services` | 服务列表（支持 `running_only`） |
+| GET | `/service/tools` | `service.list_tools` | 所有服务工具定义 |
+| GET | `/service/{service_id}` | `service.get_service` | 服务详情 |
+| GET | `/service/{service_id}/tools` | `service.service_tools` | 单服务工具定义 |
+| GET | `/service/{service_id}/ui` | `service.service_ui` | 服务 UI 描述 |
+| POST | `/service/{service_id}/start` | `service.start_service` | 启动服务 |
+| POST | `/service/{service_id}/stop` | `service.stop_service` | 停止服务 |
+| GET | `/service/{service_id}/config` | `service.get_config` | 读取服务配置 |
+| PUT | `/service/{service_id}/config` | `service.update_config` | 更新服务配置 |
+| PUT | `/service/{service_id}/config/apply` | `service.apply_config` | 应用配置（停 → 启） |
+
+服务状态：`created / running / stopped / not_enabled / error`。现行服务 id：`browser`、`live2d`、`obs`、`qqbot`、`ppt`、`shell`。
+
+> 本次修复：`start_service` 原先把"已注册"当作可启动条件、并在注册前读取服务状态（必然抛错）；现改为未注册才注册、已运行才拒绝。
+
+**请求/响应模型**：
+
+- `ServiceStartRequest {kwargs: Optional[Dict]}`。
+- 响应：`ServiceInfoData` / `ServiceListData` / `ToolData` / `ServiceActionData {id, state}` / `ServiceUIDescription`。
+
+### Skill（tag: skill）
+
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/skill` | `skill.list_skills` | 技能列表（支持 `active_only`） |
+| GET | `/skill/prompt` | `skill.prompt` | 给模型使用的技能提示词 |
+| GET | `/skill/{skill_id}` | `skill.get_skill` | 技能详情 |
+| POST | `/skill/reload` | `skill.reload` | 重新扫描技能目录 |
+| POST | `/skill/{skill_id}/activate` | `skill.activate` | 启用技能 |
+| POST | `/skill/{skill_id}/deactivate` | `skill.deactivate` | 停用技能 |
+| POST | `/skill/{skill_id}/execute` | `skill.execute` | 执行技能（超时 30s） |
+
+- 命令文本只认 `--id`（技能名可重复，id 才唯一）。
+- `shell` / `javascript` 类型技能**仍不支持执行**：可识别、可见、可启用，执行时返回明确"不支持"，不会被静默当作无脚本。
+- 技能执行体跑在 AST 白名单沙盒，输出经 `security/workspace` 限制到 `<workspace>/skill/<skill_id>/`。
+
+**请求/响应模型**：`SkillExecuteRequest {params: Dict}`；响应 `SkillListData` / `SkillInfoData` / `SkillExecuteData {id, ok, result, error}`。
+
+### Workspace（tag: workspace）
+
+工作区是 `security/workspace.py` 的对外控制面，所有服务产出与 shell 命令都受它约束。
+
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/workspace` | `workspace.info` | 当前工作区：root 标签、mode、是否已确认敏感、输出目录 |
+| POST | `/workspace/select` | `workspace.select` | 选择目录与档位（`root`、`mode`） |
+| POST | `/workspace/confirm` | `workspace.confirm` | 显式确认敏感原文暴露（`confirmation_id`） |
+| DELETE | `/workspace` | `workspace.clear` | 撤销选择，回到默认工作区 |
+
+`mode`：`read_only` / `writable` / `unrestricted`。未选择时系统惰性使用默认工作区 `<用户数据目录>/workspace`（`writable`）。
+
+### Audit（tag: audit）
+
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/audit/tree` | `audit.tree` | 服务 → 方法 → 参数 能力树（带运行状态） |
+| GET | `/audit/tools` | `audit.tools` | 扁平工具清单 |
+
+**响应 DTO**：`AuditTreeData {services: [AuditServiceData], total_tools}`；`AuditToolData {service, method, label, parameters, required}`。
+
+> audit controller 呈现的是**可调用能力目录**，不是完整的安全事件审计日志。审计事件 schema 见 [SecurityAndAuditDesign.md](SecurityAndAuditDesign.md) §5。
+
+---
+
+## 3. 对话、语音与进度（tag: pipline，handler 模块 `controllers/pipline.py`）
+
+> 本次重构：对话、TTS、ASR、状态、目录打开、进度流从 `controllers/request.py` 迁入 `controllers/pipline.py`；op 前缀统一为 `pipline.*`。所有端点使用 `requests.py` 请求模型与 `dto.py` 响应模型。
+
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/status` | `pipline.status` | LLM/TTS/ASR 就绪状态 |
+| GET | `/folder/{type}` | `pipline.open_folder` | 打开受支持的本地目录；必须限制 `type` |
+| POST | `/chat` | `pipline.chat_once` | 非流式对话 |
+| POST | `/chat/stream` | `pipline.chat_stream` | SSE 流式对话 |
+| POST | `/tts` | `pipline.tts` | 文本转语音 |
+| POST | `/asr` | `pipline.asr` | base64 音频转文字 |
+| POST | `/progress-stream/{task_id}` | `pipline.progress_stream` | 任务进度流 |
+
+**请求模型**（`requests.py`）：
+
+```python
+class ChatRequest(_Base):
+    text: str
+    source: Literal["text", "asr", "ocr"] = "text"
+    session_id: str = "default"
+    route: Optional[str] = None          # pure_chat | tool_call | mixed
+    stream: bool = False
+    max_tokens: int = 1024
+    temperature: float = 0.7
+
+class TTSRequest(_Base):
+    text: str
+    format: str = "mp3"
+
+class ASRRequest(_Base):
+    audio: str                            # base64
+    format: str = "wav"
+    is_final: bool = True
+```
+
+**响应 DTO**（`dto.py`）：
+
+- `RequestStatusData {llm: AbilityStatus, tts: AbilityStatus, asr: AbilityStatus, ready: bool}`。
+- `ChatResultData {text, route, character_id, mood, commands_executed, tokens_estimate, elapsed_ms}`。
+- `TTSResultData {audio: base64, format, bytes}`。
+- `ASRResultData {text}`。
+
+**SSE 事件**（`text/event-stream`）：
+
+```
+data: {"type": "chunk", "text": "..."}
+data: {"type": "done", "session_id": "...", "elapsed_ms": 1234}
+data: {"type": "error", "message": "..."}
+```
+
+- 非流式对话常用字段：`text`、`source`、`session_id`、`route`、`stream`；`route` 逻辑枚举 `pure_chat` / `tool_call` / `mixed`。
+- 旧文档出现过 `/api/request/chat/stream` 示例，属于路径笔误；注册器统一路径为 `/api/chat/stream`。
+- TTS/ASR 用 base64 时必须限制请求体、音频时长、格式与解码资源；日志不记录音频内容。
+
+---
+
+## 4. 会话、存档、角色与记忆
+
+### Session（tag: session）
+
+| 方法 | 资源路径 | op |
 |---|---|---|
-| GET | /api/pipeline/adapters | 列出 adapter 类型与 provider |
-| GET | /api/pipeline/adapters/{adapter}/providers | 列出某 adapter 的 provider |
-| GET | /api/pipeline/adapters/{adapter}/providers/{provider} | 读取 provider 配置 |
-| POST | /api/pipeline/adapters/{adapter}/switch | 切换 provider |
-| POST | /api/pipeline/adapters/{adapter}/stop | 停止当前 provider |
-| GET | /api/pipeline/configs | 读取各管道配置 |
+| GET | `/session` | `session.list_sessions` |
+| POST | `/session` | `session.create_session` |
+| GET | `/session/{session_id}` | `session.get_session` |
+| DELETE | `/session/{session_id}` | `session.delete_session` |
+| POST | `/session/{session_id}/switch` | `session.switch_session` |
+| GET | `/session/{session_id}/messages` | `session.messages` |
+| POST | `/session/{session_id}/messages` | `session.append_message` |
+| POST | `/session/flush` | `session.flush` |
 
-provider 切换建议先初始化新实例并健康检查，成功后切换流量；不要让新 provider 初始化失败导致旧 provider 已不可用。
+**请求模型**：`SessionCreateRequest {name, character_id}` / `MessageAppendRequest {role, content, source}` / `FlushRequest {session_id: Optional}`。
 
-### Service — 逻辑资源前缀 /api/service
+**响应 DTO**：`SessionInfoData` / `SessionListData` / `MessageItem` / `MessageListData`。
 
-| 方法 | 路径 | 说明 |
+### Save（tag: save，本次修正重复前缀）
+
+| 方法 | 资源路径（修正后） | op | 说明 |
+|---|---|---|---|
+| GET | `/save/slots` | `save.list_slots` | 存档槽列表 |
+| POST | `/save/slots` | `save.create_slot` | 创建存档槽 |
+| GET | `/save/slots/{slot_id}` | `save.get_slot` | 存档详情 |
+| DELETE | `/save/slots/{slot_id}` | `save.delete_slot` | 删除存档槽 |
+| POST | `/save/slots/{slot_id}/toggle` | `save.toggle_slot` | 切换存档 |
+| POST | `/save/slots/{slot_id}/save` | `save.save_slot` | 保存存档 |
+| POST | `/save/slots/{slot_id}/load` | `save.load_slot` | 加载存档 |
+
+> **本次修复**：`endpoints.json` 原来把这 7 条写成 `/api/save/slots...`，`register_all_routers` 再加 `/api`，实际 URL 变成 `/api/api/save/slots...`，与前端 `src/api/services/save.ts` 不符。现统一为资源相对路径，最终 `/api/save/slots...`。
+>
+> **待办**：前端 `save.ts` 还有 `restore` / `sync` / `section` 三个方法，后端未注册，需补实现或移除客户端方法。
+
+**请求模型**：`SlotCreateRequest {name, slot_id: Optional}` / `SlotSectionUpdateRequest {data, slot_id}` / `SlotSyncRequest {session_id: Optional}`。
+
+**响应 DTO**：`SlotInfoData {id, name, meta: SlotMeta}` / `SlotListData` / `SlotActionData {id, ok}`。
+
+### Character（tag: character）
+
+| 方法 | 资源路径 | op |
 |---|---|---|
-| GET | /api/service | 服务列表 |
-| GET | /api/service/tools | 所有服务可用工具定义 |
-| GET | /api/service/{service_id} | 服务详情 |
-| GET | /api/service/{service_id}/tools | 单个服务工具定义 |
-| GET | /api/service/{service_id}/ui | 服务 UI 描述 |
-| POST | /api/service/{service_id}/start | 启动服务 |
-| POST | /api/service/{service_id}/stop | 停止服务 |
-| GET | /api/service/{service_id}/config | 读取服务配置 |
-| PUT | /api/service/{service_id}/config | 更新服务配置 |
-| PUT | /api/service/{service_id}/config/apply | 应用配置（具体字段以 DTO 为准） |
+| DELETE | `/character/{character_id}` | `character.delete_character` |
+| POST | `/character/{character_id}/switch` | `character.switch_character` |
+| GET | `/character/{character_id}/state` | `character.get_state` |
+| POST | `/character/{character_id}/state` | `character.update_state` |
 
-服务状态包括 stopped/starting/running/stopping/error 一类状态；实际枚举以 DTO/manager 定义为准。
+**请求模型**：`CharacterCreateRequest` / `CharacterUpdateRequest` / `CharacterStateUpdateRequest {mood, affection}`。
 
-### Skill — 逻辑资源前缀 /api/skill
+**响应 DTO**：`CharacterInfoData {id, name, status, attributes, state}` / `CharacterListData` / `CharacterStateData` / `CharacterAttributesData`。
 
-| 方法 | 路径 | 说明 |
+> 待办：`groups.json` 还声明了 `character.presets` / `character.current` / `character.get` / `character.update` 等 op，当前 `endpoints.json` 未注册，需以端点清单为准。
+
+### Memory（tag: memory）
+
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/ memory/layers` | `memory.layers` | short_term / long_term / detailed |
+| GET | `/ memory/short` | `memory.short_term` | 短期记忆摘要 |
+| GET | `/ memory/long` | `memory.long_term` | 长期记忆 |
+| POST | `/ memory/search` | `memory.search` | 语义/相关记忆搜索 |
+| GET | `/ memory/compressed` | `memory.compressed` | 压缩记忆 |
+| GET | `/ memory/stats` | `memory.stats` | 容量统计 |
+| POST | `/ memory/decay` | `memory.decay` | 手动触发衰减 |
+| POST | `/ memory/flush` | `memory.flush` | 等待后台写入 |
+| DELETE | `/ memory/{memory_id}` | `memory.delete_memory` | 删除单条记忆 |
+
+**请求模型**：`MemorySearchRequest {query, top_k, session_id}` / `MemoryLayersRequest`。
+
+**响应 DTO**：`MemoryLayersData` / `MemorySearchData` / `MemoryStatsData` / `DetailedMemoryItem` / `CompressedItem`。
+
+所有记忆 API 必须在存储查询**前**按 session 范围过滤；删除语义见 [MemoryDesign.md](MemoryDesign.md)。
+
+---
+
+## 5. 任务与 PPT
+
+### Task（tag: task）
+
+| 方法 | 资源路径 | op |
 |---|---|---|
-| GET | /api/skill | 技能列表 |
-| GET | /api/skill/prompt | 给模型使用的技能提示内容 |
-| GET | /api/skill/{skill_id} | 技能详情 |
-| POST | /api/skill/reload | 重新扫描技能目录 |
-| POST | /api/skill/{skill_id}/activate | 启用技能 |
-| POST | /api/skill/{skill_id}/deactivate | 停用技能 |
-| POST | /api/skill/{skill_id}/execute | 执行技能 |
+| GET | `/task/{task_id}` | `task.get_task` |
+| POST | `/task/{task_id}/cancel` | `task.cancel_task` |
 
-执行技能必须通过后端权限、参数、资源限制和沙盒策略。项目既有说明指出 shell 类型当前不支持执行、JavaScript 类型未完整实现；未经过安全评审不得宣称为可安全执行能力。
+**请求模型**：`TaskCancelRequest {reason: str}`。
 
-## 3. 对话、SSE 与语音
+**响应 DTO**：`TaskStatusData {task_id, state, result, error, elapsed_ms}`。
 
-### Request — 逻辑资源前缀 /api
+### PPT（tag: ppt，本次补齐注册）
 
-| 方法 | 路径 | 说明 |
+| 方法 | 资源路径 | op | 说明 |
+|---|---|---|---|
+| GET | `/ppt/templates` | `ppt.templates` | 模板列表 |
+| POST | `/ppt/outline` | `ppt.outline` | 生成内容大纲（不渲染） |
+| POST | `/ppt/render` | `ppt.render` | 提交后台任务，返回 `task_id` |
+| POST | `/ppt/render/async` | `ppt.render_async` | 提交后台任务 |
+| GET | `/ppt/job/{task_id}` | `ppt.status` | 查询生成任务 |
+| GET | `/ppt/download/{file_name}` | `ppt.download` | 取回产出文件（base64 + 路径） |
+
+- 请求 DTO：`PptOutlineRequest {topic, pages, template_id, audience, scenario, style, material}` / `PptRenderRequest {deck, topic, pages, template_id, style, colors, file_name, material}`。
+- 响应 DTO：`PptTemplateListData` / `PptOutlineData` / `PptRenderData {ok, task_id, ...}` / `PptJobData` / `PptDownloadData {file_name, file_path, size, content_base64}`。
+- **产出目录固定为 `<workspace>/ppt/`**（`security.workspace.service_output_dir("ppt")`）。
+- 下载只接受 `basename`，并再次经工作区边界复验；不接受任意绝对路径。
+
+> `groups.json` 里存在 `ppt.*` 声明但 `endpoints.json` 原先无条目，导致 PPT HTTP 接口实际未注册；本次补齐 6 条。
+
+---
+
+## 6. WebSocket 事件契约
+
+路径：`ws://<host>:<port>/`。
+
+### 6.1 帧协议（统一 DTO）
+
+**入站帧**（`requests.py`）：
+
+```python
+class WebSocketRequest(_Base):
+    type: str
+    data: Dict[str, Any] = Field(default_factory=dict)
+    client_id: str = ""
+
+class WsChatPayload(_Base):
+    text: str = ""
+    session_id: str = "default"
+    source: str = "text"
+    route: Optional[str] = None
+
+class WsAsrPayload(_Base):
+    audio: str = ""            # base64
+    is_final: bool = True
+
+class WsTtsPayload(_Base):
+    text: str = ""
+
+class WsCommandPayload(_Base):
+    text: str = ""
+
+class WsSubscribePayload(_Base):
+    events: List[str] = Field(default_factory=list)
+
+class WsCancelPayload(_Base):
+    request_id: str = ""
+
+class WsDownloadModelPayload(_Base):
+    model_name: str = ""        # "ocr:paddle" / "ocr:paddle:ppocr" / 别名
+    force: bool = False
+```
+
+**出站帧**（`response.py`）：
+
+```python
+class WebSocketAPIResponse(Base, Generic[T]):
+    type: str
+    ok: bool = True
+    message: str = "ok"
+    data: Optional[T] = None
+    from_id: Optional[str] = None
+```
+
+**下载事件 DTO**（`dto.py`）：
+
+```python
+class WsDownloadStartedData:      # type=STARTED
+    model: str = ""
+    capability: str = ""
+    provider: str = ""
+    model_id: str = ""
+    task_id: str = ""
+
+class WsDownloadProgressData:     # type=RUNNING
+    model: str = ""
+    progress: float = 0.0
+    file: str = ""
+    phase: str = "download"       # download | extract
+
+class WsDownloadCompletedData:    # type=COMPLETED
+    model: str = ""
+    target_dir: str = ""
+    items: List[Dict[str, Any]] = []
+
+class WsDownloadFailedData:       # type=FAILED
+    model: str = ""
+    error: str = ""
+    items: List[Dict[str, Any]] = []
+
+class WsDownloadErrorData:        # type=ERROR
+    model: str = ""
+    reason: str = ""
+```
+
+### 6.2 行为约束
+
+- `type` 必填，`data.client_id` 必须与连接分配的 id 一致，否则回错误但**不切断连接**。
+- 心跳：`type=heartbeat` 单独响应，不进入业务派发。
+- 单连接在途请求上限 `MAX_INFLIGHT_PER_CLIENT = 8`；超出返回"请求过于频繁"。
+- 服务端 → 客户端统一 `WebSocketAPIResponse{type, ok, message, data, from_id}`。
+- 事件总线经 `ClientEventBridge` 绑定；Web loop 与调度器 loop 分离，工具事件由事件总线转投，不跨 loop 直接操作 transport。
+
+### 6.3 DOWNLOAD_MODEL 事件（`type=download_model`）
+
+用于本地模型下载：进度走 WS，HTTP 端只负责触发。
+
+入站：
+
+```json
+{
+  "type": "download_model",
+  "data": {
+    "model_name": "ocr:paddle" | "ocr:paddle:ppocr" | "image:comfyui-local" | "paddle_ocr",
+    "force": false
+  }
+}
+```
+
+- 新格式：`"ocr:paddle"` / `"ocr:paddle:ppocr"` / `"image:comfyui-local"`，按 `:` 分割，第二段是 provider，第三段是 model_id。
+- 兼容别名：`paddle_ocr → ocr:paddle`、`umi_ocr → ocr:umi`、`whisper → asr:whisper`、`google_facelandmarker` 保持原路径（暂不在 provider 框架内）。
+- 已安装的 provider 会先被 `download_status` 探测；`installed=true` 直接回 `ERROR` "模型已存在" 并不触发下载（`force=true` 可跳过，仅新格式支持）。
+
+出站事件：
+
+| 事件 | DTO | 含义 |
 |---|---|---|
-| GET | /api/status | LLM/TTS/ASR 就绪状态 |
-| GET | /api/folder/{type} | 打开受支持的本地目录；必须限制目录类型 |
-| POST | /api/chat | 非流式对话 |
-| POST | /api/chat/stream | SSE 流式对话 |
-| POST | /api/tts | 文本转语音 |
-| POST | /api/asr | base64 音频转文字 |
-| POST | /api/progress-stream/{task_id} | 任务进度流；具体事件字段以实现为准 |
+| `STARTED` | `WsDownloadStartedData` | 下载已接受 |
+| `RUNNING` | `WsDownloadProgressData` | 进度 0–100 |
+| `COMPLETED` | `WsDownloadCompletedData` | 全部文件完成 |
+| `FAILED` | `WsDownloadFailedData` | 任一文件失败 |
+| `ERROR` | `WsDownloadErrorData` | 前置条件不满足 |
 
-非流式对话的常用请求字段：text、source、session_id、route、stream。route 的逻辑枚举包含 pure_chat、tool_call、mixed；真实 DTO 为准。
+单连接在途下载上限 2；超出返回 `ERROR "已有下载任务在进行"` 并不切断连接。
 
-SSE 的概念事件：
-- chunk：一段增量文本。
-- done：最终状态与必要的 route/character metadata。
-- error：稳定错误码与 message。
+### 6.4 待核对项
 
-旧文档出现过 /api/request/chat/stream 的示例，但 request controller 的路径是 /chat/stream 且由 /api 前缀统一挂载。应将此作为路径笔误修正。实际 SSE 的终态/错误事件需由控制器实现核对，不可只靠示例推断。
+多并发 stream 的 `request_id/correlation_id` 区分、订阅生命周期、心跳超时后的清理阈值，需以 `controllers/websocket/manager.py` 与契约测试为准。
 
-TTS/ASR 使用 base64 时必须限制请求体、音频时长、格式和解码资源；不在普通日志记录音频内容。
+---
 
-## 4. 会话与存档
+## 7. 桌面 Bridge 与前端客户端
 
-### Session — 逻辑资源前缀 /api/session
+- `ops.register_all()` 把 `desktop=true` 端点注册为 `ApiGateway` 的 op；`call_sync()` 在无运行中 loop 的线程里复用调度器 loop，不每次新建销毁。
+- Web 与 Qt bridge 必须使用同一解包规则、同一成功 code、同一 DTO。
+- Vue 前端调用集中在 `src/api/services/*`，由 `scripts/api/generate.py` 生成；须统一契约来源、生成脚本与校验流程。
+- Python SDK 目录是否存在以当前源码为准，不按旧文档假定。
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/session | 会话列表 |
-| POST | /api/session | 新建会话 |
-| GET | /api/session/{session_id} | 会话详情 |
-| DELETE | /api/session/{session_id} | 删除会话/消息文件 |
-| POST | /api/session/{session_id}/switch | 切换当前会话 |
-| GET | /api/session/{session_id}/messages | 查询消息 |
-| POST | /api/session/{session_id}/messages | 追加消息，不触发模型推理 |
-| POST | /api/session/flush | 强制持久化会话 |
+---
 
-### Save — 目标逻辑资源前缀 /api/save
+## 8. shell 服务与命令契约（非 HTTP）
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/save/slots | 存档槽列表 |
-| POST | /api/save/slots | 创建存档槽 |
-| GET | /api/save/slots/{slot_id} | 存档详情 |
-| DELETE | /api/save/slots/{slot_id} | 删除存档槽 |
-| POST | /api/save/slots/{slot_id}/toggle | 切换存档 |
-| POST | /api/save/slots/{slot_id}/save | 保存存档 |
-| POST | /api/save/slots/{slot_id}/load | 加载存档 |
-| PUT | /api/save/slots/{slot_id}/section | 更新某 section |
-| POST | /api/save/slots/sync | 会话数据同步入当前存档 |
-| POST | /api/save/slots/restore | 从存档恢复到会话（前端 service 已有调用；需核实当前控制器是否注册） |
+shell 不是独立 HTTP 资源，而是**命令层服务**，通过 `/api/service/shell/tools` 暴露工具声明，由 `core/tools` 链路调用。
 
-存档 section 以实际 DTO 为准；现有文档提到 characters、ui、chat_history、achievements、story。加载/删除为高影响操作，建议加入 manifest/hash 校验和恢复预演。
+- 命令文本：模型直接写原生命令原文（`cd docs`、`ls -la`、`mkdir report`），**不需要** `shell --command` 之类包装。
+- 解析规则：不属于 `skill` / `error` / 已注册服务命令，且命中 `shell/commands.py` 命令白名单的行，转成 `service="shell", method="run", params={"command":"<整行>"}`；其它行保留为自然语言。
+- 系统映射：Windows `cmd.exe /C`，Linux/macOS `/bin/sh -c`；`dir→ls`、`copy→cp`、`del/erase→rm`、`type→cat`、`move→mv`、`cls→clear`。
+- 拒绝项：`rm`、`rmdir`、`del`、`format`、`mkfs`、`dd`、`shutdown`、`sudo`、`chmod`、`chown`、`kill`/`taskkill`、`reg`、`diskpart`，以及 `|` / `;` / `&` / 反引号 / `>` / `>>` 等拼接与重定向。
+- 执行边界：cwd 锁定工作区、路径参数经 `realpath` + `is_within` 复验、环境变量净化、超时与输出上限；拒绝返回稳定原因码。
 
-## 5. 角色与记忆
+详见 [BackendDesign.md](BackendDesign.md) §6.1、§8。
 
-### Character — 逻辑资源前缀 /api/character
+---
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/character | 角色列表 |
-| GET | /api/character/presets | 角色预设 |
-| GET | /api/character/current | 当前角色 |
-| GET | /api/character/{character_id} | 角色详情 |
-| POST | /api/character | 创建角色 |
-| PUT | /api/character/{character_id} | 更新角色 |
-| DELETE | /api/character/{character_id} | 删除角色 |
-| POST | /api/character/{character_id}/switch | 切换角色 |
-| GET | /api/character/{character_id}/state | 查询角色运行时状态 |
-| POST | /api/character/{character_id}/state | 更新角色运行时状态 |
+## 9. 源码差异与本次修复清单
 
-### Memory — 逻辑资源前缀 /api/memory
+| 优先级 | 发现 | 依据 | 状态 |
+|---|---|---|---|
+| P0 | save 端点 path 自带 `/api`，注册器又加 `/api` | `endpoints.json`、`controllers/__init__.py` | ✅ 本次修复为 `/save/slots...` |
+| P0 | 成功 code 分叉：后端 200，desktop bridge 判 0 | `exceptions.py`、`src/api/http.ts` | ⬜ 待办：共用 decoder |
+| P0 | `services.service.manager` / `services.keys` / `service.decorator` 等失效导入导致启动期 handler 解析失败 | `ctl.py`、`controllers/*`、`services/*` | ✅ 本次修复 + 兼容层 |
+| P0 | 对话 / 语音 / 进度与供应商端点混在 `request.py` / `pipline.py` 旧路由中，op 命名不一致 | `controllers/request.py`、`controllers/providers.py` | ✅ 本次重构：对话迁入 `pipline.py`，供应商归入 `providers.py`，op 前缀统一为 `pipline.*` / `providers.*` |
+| P0 | WebSocket 帧未复用 DTO，入站/出站字段散落 | `controllers/websocket/*` | ✅ 本次统一为 `WebSocketRequest` / `WsXxxPayload` / `WebSocketAPIResponse` |
+| P1 | PPT / audit HTTP 端点未注册 | `groups.json` vs `endpoints.json` | ✅ 本次补齐 8 条 |
+| P1 | WebSocket 注册在 `/`，旧文档写 `/ws` | `controllers/websocket/__init__.py` | ✅ 文档更正 |
+| P1 | SSE 旧文档出现 `/api/request/chat/stream` | `controllers/pipline.py` | ✅ 文档更正为 `/api/chat/stream` |
+| P1 | `ApiGateway._ok` 形参与调用顺序颠倒 | `gateway.py` | ✅ 本次修复 |
+| P1 | `response.py` 未处理异常回显内部详情 | `response.py` | ⬜ 待办 |
+| P1 | `raw=true` 可请求敏感配置原值 | `controllers/pipline.py` 及配置 controller | ⬜ 待办 |
+| P1 | 前端 `save.ts` 的 `restore`/`sync`/`section` 后端未注册 | `src/api/services/save.ts` | ⬜ 待办 |
+| P1 | PPT 渲染器调用不存在的 `RuntimePath.get_output_dir()` | `services/ppt/renderer.py` | ✅ 本次修复并改到工作区 |
+| P1 | `handle_download_model` 硬编码 `model_name` 分支，与 provider 体系脱节 | `controllers/websocket/events.py`、`providers/manager.py` | ✅ 本次改为 `provider_manager.download_model` |
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/memory/layers | 读取 short_term/long_term/detailed |
-| GET | /api/memory/short | 查询短期记忆摘要 |
-| GET | /api/memory/long | 查询长期记忆 |
-| POST | /api/memory/search | 语义/相关记忆搜索 |
-| GET | /api/memory/compressed | 查询压缩记忆 |
-| GET | /api/memory/stats | 统计记忆容量 |
-| POST | /api/memory/decay | 手动触发衰减 |
-| POST | /api/memory/flush | 等待后台记忆写入 |
-| DELETE | /api/memory/{memory_id} | 删除单条记忆 |
+---
 
-layers query 包括 session_id 与 detail_top_k；search request 需以 MemorySearchRequest DTO 核对 query、top_k 等字段。所有记忆 API 必须在存储查询前按 session 范围过滤。删除的向量、映射、压缩引用、缓存和快照恢复语义见 MemoryDesign.md。
-
-## 6. 任务、日志、审计与 PPT
-
-### Task — 逻辑资源前缀 /api/task
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/task/{task_id} | 查询任务状态与结果 |
-| POST | /api/task/{task_id}/cancel | 请求取消任务 |
-
-任务状态以 Task DTO 为准；旧文档的 pending/running/done/failed/timeout 应检查是否还包含 cancelled 或其他终态。
-
-### Logger — 逻辑资源前缀 /api/logger
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/logger/level | 当前日志级别 |
-| PUT | /api/logger/level | 修改日志级别 |
-| GET | /api/logger/levels | 允许的日志级别 |
-| GET | /api/logger/stats | 日志统计 |
-| GET | /api/logger/records | 近期日志查询 |
-| POST | /api/logger/flush | 强制落盘 |
-
-### Audit — 目标逻辑资源前缀 /api/audit
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/audit/tree | 服务/工具能力树 |
-| GET | /api/audit/tools | 扁平工具清单 |
-
-当前 audit controller 主要呈现可调用服务/工具能力，不代表具备完整的安全操作审计事件流。
-
-### PPT — 逻辑资源前缀 /api/ppt
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | /api/ppt/templates | 模板列表 |
-| POST | /api/ppt/outline | 生成内容大纲 |
-| POST | /api/ppt/render | 同步渲染 PPT |
-| POST | /api/ppt/render/async | 提交后台生成任务 |
-| GET | /api/ppt/job/{task_id} | 查询生成任务 |
-| GET | /api/ppt/download/{file_name} | 下载已生成文件 |
-
-文件下载需验证 basename、路径边界和文件存在性，不应接受可任意访问的绝对路径。
-
-### Device
-
-控制器集合会注册 device router，但设备接口的准确路径/方法需从实际 device 子目录控制器导出后再加入正式端点清单。
-
-## 7. WebSocket 事件契约
-
-旧文档描述了 /ws、chat/asr/tts/command/subscribe/unsubscribe/ping/cancel 等消息。然而当前 websocket 路由注册函数使用 app.websocket("/")，不是在函数内部声明 /ws；因此实际 WebSocket URL 与旧文档有不一致风险。
-
-待核对项：
-- server 初始化是否在其他位置重写/挂载 WebSocket 根路径。
-- 消息模型的 type/data 与 controller 实际接收的字段。
-- server → client 的 type 命名、终态和错误字段。
-- 每连接在途请求上限、心跳超时、事件订阅是否在实现中持续生效。
-- request_id/correlation_id 是否能区分多个同时进行的 stream。
-
-在确认实际注册结果前，不应承诺 /ws、/ws/ 或根路径中的任意一个是最终稳定路径。目标是把路径和事件 schema 明确化，并由测试覆盖。
-
-## 8. Python SDK 与前端客户端
-
-- Python SDK 位于 modules/api/client（以当前目录存在状态为准）；推荐使用 SDK 统一超时、信封和错误处理，避免各处裸调请求。
-- Vue 前端调用集中在 src/api/services。
-- 前端 service/types 有自动生成痕迹；须统一契约来源、生成脚本和校验流程。
-- Web 与 Qt bridge 必须使用同一响应解包规则、同一错误码和同一 DTO。
-
-## 9. 安全和性能约束
-
-- 默认只绑定 loopback。远程访问必须显式启用认证和严格来源限制。
-- 秘密字段默认遮蔽；不要常态化开放 raw=true。
-- 对 chat、audio、文件、PPT 和工具请求限制 body size、超时、并发和输出大小。
-- 长任务返回 task_id 并具有状态、失败、超时与取消语义。
-- 不对非幂等 POST 默认重试；provider 重试应遵守总预算。
-- 日志避免保存 key、完整 prompt、音频和私人记忆正文。
-
-## 10. 路由注册规则
-
-期望规则：Controller router 只声明资源路径（例如 /save、/audit），统一由 register_all_routers 添加一次 /api。当前 controllers/__init__.py 确实为所有 router 添加 prefix=/api；但 save.py router prefix 当前是 /api/save，audit.py 当前是 /api/audit，可能产生重复 /api/api 路径。这是源码差异，不可仅用文档掩盖。应导出 FastAPI 的实际 registered paths、修正 controller prefix，并同步客户端。
-
-同理，WebSocket 当前在 app.websocket("/") 注册，而旧文档写 /ws；需统一为明确且被测试的路径。
-
-## 11. 契约变更要求
+## 10. 契约变更要求
 
 每次 API 修改需：
-1. 更新本文件与请求/响应 DTO。
-2. 更新前端 service/types 的权威生成源并运行统一生成器。
-3. 为正常、业务错误、404、超时、取消和边界参数添加契约测试。
+
+1. 更新 `endpoints.json`（权威源）、`groups.json` 与本文。
+2. 更新 `requests.py` / `dto.py` 与前端生成源，运行统一生成器。
+3. 为正常、业务错误、404、超时、取消与边界参数补契约测试。
 4. 给旧路径/字段/事件定义兼容期与移除标准。
-5. 在 API 表中注明 current/target，避免设计目标被误认为已部署。
+5. 在表中注明「现行 / 待办」，避免设计目标被误认为已部署。
 
-## 12. 源码差异与需核对项
+任何目标端点都必须先在 `endpoints.json` 注册并通过 `_validate()`，才可从"目标设计"升级为"当前接口"。
 
-| 优先级 | 发现 | 文件依据 | 建议 |
-|---|---|---|---|
-| P0 | 成功 code 分叉：后端 200，desktop bridge 判断 0 | modules/api/exceptions.py、src/api/http.ts | 共用 decoder，以 200 为统一成功 code |
-| P0 | save/audit router 自带 /api，注册器又加 /api | controllers/__init__.py、controllers/save.py、controllers/audit.py | controller prefix 改为资源名，再从 app.routes 导出验证 |
-| P1 | WebSocket route 当前声明在 /，旧文档写 /ws | controllers/websocket/__init__.py、server.py | 明确稳定路径并对客户端兼容 |
-| P1 | SSE 文档曾出现 /api/request/chat/stream | controllers/request.py | 按注册器统一路径 /api/chat/stream 校对 |
-| P1 | PPT/审计/device 等路由未完全出现在旧文档 | controllers/ppt.py、audit.py、controllers/__init__.py | 统一生成/检查 endpoint inventory |
-| P1 | 前端 save service 有 /save/slots/restore 方法，当前 save controller 清单需核对是否实现 | src/api/services/save.ts、controllers/save.py | 决定补实现或移除未支持客户端方法 |
-| P1 | response.py 的 unhandled exception message 可能暴露内部异常详情 | modules/api/response.py | 对外通用错误 + request_id，内部日志脱敏 |
-| P1 | raw=true 可请求敏感配置原值 | controllers/pipline.py 及配置 controller | 移除通用原文输出，或加本地受控权限 |
+### 附：模型归属速查
 
-本轮文档提交不修复这些实现风险，也未运行应用导出真实路由；路线和方法清单中已标注应以 FastAPI 实际注册结果为最终依据。
+| 分类 | 请求模型（`requests.py`） | 响应 DTO（`dto.py`） |
+|---|---|---|
+| 对话 / 语音 | `ChatRequest`、`ChatStreamRequest`、`TTSRequest`、`ASRRequest` | `RequestStatusData`、`ChatResultData`、`TTSResultData`、`ASRResultData`、`AbilityStatus` |
+| 供应商 | `ProviderSwitchRequest`、`ProviderDownloadRequest` | `AdapterInfo`、`SwitchResultData`、`ProviderStatusData`、`DownloadStatusData`、`DownloadStartData` |
+| WebSocket | `WebSocketRequest`、`WsChatPayload`、`WsAsrPayload`、`WsTtsPayload`、`WsCommandPayload`、`WsSubscribePayload`、`WsCancelPayload`、`WsDownloadModelPayload` | `WebSocketAPIResponse[T]`、`WsDownloadStartedData`、`WsDownloadProgressData`、`WsDownloadCompletedData`、`WsDownloadFailedData`、`WsDownloadErrorData` |
+| 会话 / 存档 / 角色 | `SessionCreateRequest`、`MessageAppendRequest`、`FlushRequest`、`SlotCreateRequest`、`SlotSectionUpdateRequest`、`SlotSyncRequest`、`CharacterCreateRequest`、`CharacterUpdateRequest`、`CharacterStateUpdateRequest` | `SessionInfoData`、`SessionListData`、`MessageItem`、`MessageListData`、`SlotInfoData`、`SlotMeta`、`SlotListData`、`SlotActionData`、`CharacterInfoData`、`CharacterListData`、`CharacterStateData`、`CharacterAttributesData` |
+| 记忆 | `MemorySearchRequest`、`MemoryLayersRequest` | `MemoryLayersData`、`MemorySearchData`、`MemoryStatsData`、`DetailedMemoryItem`、`CompressedItem` |
+| 任务 / PPT | `TaskCancelRequest`、`PptOutlineRequest`、`PptRenderRequest` | `TaskStatusData`、`PptTemplateListData`、`PptOutlineData`、`PptRenderData`、`PptJobData`、`PptDownloadData` |
+| 系统 / 日志 / 设备 | `GcRequest`、`LoggerLevelRequest` | `HealthData`、`InfoData`、`StatsData`、`GcData`、`LoggerLevelData`、`LoggerStatsData`、`LogRecordData`、`DeviceInfoData` |
 
+---
 
-## 14. 架构设计文档索引
+## 11. 架构文档索引
 
-本文件定义外部接口和 transport 契约；以下文档定义实现该契约的模块边界与状态生命周期：
-
-- [FrontendBackendContract.md](FrontendBackendContract.md)：REST/SSE/WebSocket/Qt bridge 共用请求 ID、事件信封、错误与取消语义。
-- [ContextArchitecture.md](ContextArchitecture.md)：session-scoped context/prompt 构建。API 的 session_id 是业务隔离字段，不是可选装饰字段。
-- [GameSaveArchitecture.md](GameSaveArchitecture.md)：Slot、Checkpoint、Full Snapshot 与 restore operation 的目标 API/流程；其中新增 snapshot endpoint 仅为目标设计，未经实现不得当作当前可用 API。
-- [MemoryDesign.md](MemoryDesign.md)：记忆查询、来源、置信度、删改和向量一致性。
-
-任何目标 endpoint 都必须先在源码实现并导出 OpenAPI 后，才可从“目标设计”升级为“当前接口”。当前 session/save API 的兼容性要求维持旧路径和字段，新增 Memento 能力应使用明确的新操作，而不是改变旧 load 的意义。
+- [BackendDesign.md](BackendDesign.md)：模块边界、线程模型、工具链、shell 服务与工作区。
+- [SecurityAndAuditDesign.md](SecurityAndAuditDesign.md)：威胁模型、工作区权限、命令准入、审计事件。
+- [FrontendBackendContract.md](FrontendBackendContract.md)：REST/SSE/WS/Qt bridge 统一契约。
+- [ContextArchitecture.md](ContextArchitecture.md)：session-scoped context 与 prompt 装配。
+- [GameSaveArchitecture.md](GameSaveArchitecture.md)：Slot / Snapshot / restore。
+- [MemoryDesign.md](MemoryDesign.md)：记忆查询、删改与向量一致性。

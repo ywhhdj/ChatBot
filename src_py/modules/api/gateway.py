@@ -1,16 +1,4 @@
 """进程内 API 网关。
-
-修复对应清单：K9–K16
-
-为什么需要它
-────────────
-桌面端（qtwebview2）与 Web 端（uvicorn）**必须调用同一批处理函数**，
-否则会出现两份实现、两套返回格式，前端要写两套解析。
-
-更关键的是桌面端：它走 JS Bridge 进程内调用，**不需要经过 HTTP**。
-原来 `run()` 无条件 `run_web()`，桌面端每次操作都要
-"JS → 本地回环 → uvicorn → 控制器 → 回来"，白白多一次序列化与线程切换。
-
 网关把处理函数抽成一张 op 表：
 
     desktop: JS → Bridge → gateway.call(op)              ← 进程内，零网络
@@ -324,11 +312,15 @@ def _accepts_kwargs(sig: inspect.Signature) -> bool:
     return False
 
 
-def _ok(rid: str, data: Any) -> Dict[str, Any]:
+def _ok(data: Any, rid: str) -> Dict[str, Any]:
     """把 handler 返回值统一成信封。
 
+    调用点是 `_ok(result, rid)`，因此形参顺序必须是 (data, request_id)。
+    原实现写成 `(rid, data)`，会把结果当成 request_id、把 id 当成 data。
+
     handler 可能返回：
-      * `ApiResponse`（pydantic）→ 直接 model_dump，保留其 request_id
+      * 已是信封的 dict → 补齐 request_id/ts 后直接返回
+      * `ApiResponse`（pydantic）→ 直接 model_dump
       * 裸数据 → 包一层
     """
     if isinstance(data, dict) and {"ok", "code", "message"} <= set(data):
@@ -346,8 +338,8 @@ def _try_get_schedular():
     try:
         from .. import runtime
 
-        if getattr(runtime.manager.task_manager, "is_runing", False):
-            return runtime.manager.task_manager  # type: ignore[union-attr]
+        if runtime.manager.scheduler.is_running():
+            return runtime.manager.scheduler  # type: ignore[union-attr]
     except Exception:  # noqa: BLE001
         pass
     return None

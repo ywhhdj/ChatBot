@@ -8,10 +8,10 @@ from typing import Any, Dict, List, Optional
 
 from ...events import on_event_class, types as eventType
 from ...logger import logger
-from ..service.decorator import Service
+from ..manager import Service
 from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
 from ...utils import util
-from ..keys import ServiceKeys
+from ...keys import ServiceKeys
 from ..base import BaseService, ServiceState
 from ..config import ObsConfig
 from . import models
@@ -24,7 +24,6 @@ RECONNECT_MAX_DELAY = 15.0
 @on_event_class([
     (eventType.ObsEventType.OBS_CONNECT, "start"),
     (eventType.ObsEventType.OBS_DISCONNECT, "stop"),
-    # S29：录音开关绑到录音方法，不再绑到 ASR 音频处理
     (eventType.ObsEventType.OBS_START_RECORD, "start_record"),
     (eventType.ObsEventType.OBS_STOP_RECORD, "stop_record"),
 ])
@@ -33,11 +32,12 @@ class OBSClient(BaseService):
     """控制 OBS Studio（录制 / 直播 / 场景切换等）。
 
     References:
-        https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md
+    
+        <a href="https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md">OBS Studio API Protocol</a>
 
     Parameters:
         ip: OBS 服务器 IP
-        obs_password: OBS WebSocket 密码
+        password: OBS WebSocket 密码
         port: 端口，默认 4455
         timeout: 连接超时
     """
@@ -48,7 +48,7 @@ class OBSClient(BaseService):
     def __init__(
         self,
         ip: str = "127.0.0.1",
-        obs_password: str = "",
+        password: str = "",
         port: int = 4455,
         timeout: int = 10
     ):
@@ -56,7 +56,7 @@ class OBSClient(BaseService):
         self.config = ObsConfig(
             enabled=True,
             ip=ip,
-            password=obs_password,
+            password=password,
             port=port,
         )  # type: ignore[union-attr]
         self.timeout = timeout
@@ -72,12 +72,11 @@ class OBSClient(BaseService):
     # ---------- 状态 ----------
 
     def set_status(self) -> None:
-        """S27：走基类，统一写 `state`。"""
+        """走基类，统一写 `state`。"""
         super().set_status(ServiceState.RUNNING if self.__runing else ServiceState.STOPPED)
 
     @property
     def is_connected(self) -> bool:
-        """S25：`closed` 取的是值，不是 hasattr。"""
         ws = self.__ws
         if ws is None:
             return False
@@ -102,7 +101,7 @@ class OBSClient(BaseService):
             asyncio.create_task(self.connect())
 
     def __start_loop_thread(self) -> None:
-        """S28：无运行中 loop 时（如主线程 / 服务线程）自建 loop 线程。
+        """无运行中 loop 时（如主线程 / 服务线程）自建 loop 线程。
 
         OBS 客户端是纯 async 服务，不能要求调用方一定在协程上下文里。
         """
@@ -183,9 +182,9 @@ class OBSClient(BaseService):
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, RECONNECT_MAX_DELAY)
         finally:
-            # S28：只有真正退出循环才标记停止
-            if self.__runing:
-                await self.stop()
+            self.__ws = None
+            self.__runing = False
+            self.set_status()
 
     async def stop(self) -> None:
         self.__runing = False
@@ -205,7 +204,7 @@ class OBSClient(BaseService):
         self.set_status()
 
     async def close(self) -> None:
-        await self.stop()
+        await self.stop_original()
 
     # ---------- 协议 ----------
 

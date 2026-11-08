@@ -7,134 +7,151 @@ from .... import events
 from .manager import get_websocket_manager
 from ....core.pipeline import chat
 
+manager = get_websocket_manager()
+
 async def handle_download_model(client_id: str, model_name: str, save_path: str = ""):
-    manager = get_websocket_manager()
+    if not model_name:
+        await manager.send_json(
+            client_id,
+            type=events.types.DownloadEventType.ERROR,
+            ok=False,
+            message="缺少 model_name",
+        )
+        return
+    from ....providers.manager import provider_manager
 
     async def _send(event_type: str, payload, ok: bool = True, message: str = "ok"):
         await manager.send_json(client_id, type=event_type, data=payload, message=message, ok=ok)
 
-    def success_callback(_):
-        # W6：同步回调，只投递；不能在这里 await（会跨 loop 操作 WebSocket）
-        manager.submit_to_loop(
-            lambda: _send(
+    parsed = _parse_download_target(model_name)
+    if parsed is None:
+        await _send(
+            events.types.DownloadEventType.ERROR,
+            {"model": model_name},
+            ok=False,
+            message="不支持该模型下载",
+        )
+        return
+
+    capability, provider, model_id = parsed
+
+    # 已安装检测
+    status = provider_manager.get_provider_status(capability, provider, model_id)
+    if status is None:
+        await _send(
+            events.types.DownloadEventType.ERROR,
+            {"model": model_name, "capability": capability, "provider": provider},
+            ok=False,
+            message=f"provider {provider} 不存在或不支持下载",
+        )
+        return
+    if status["download_status"].get("installed"):
+        await _send(
+            events.types.DownloadEventType.ERROR,
+            {
+                "model": model_name,
+                "provider": provider
+            },
+            ok=False,
+            message="模型已存在，无需下载",
+        )
+        return
+
+    task_id = f"{capability}:{provider}:{model_id or ''}"
+
+    async def _progress(evt: dict) -> None:
+        phase = evt.get("phase")
+        if phase == "complete":
+            await _send(
                 events.types.DownloadEventType.COMPLETED,
                 {
                     "model": model_name,
+                    "capability": capability,
+                    "provider": provider,
+                    "model_id": model_id,
+                    "target_dir": evt.get("target_dir", ""),
                 },
                 ok=True,
                 message="下载完成",
             )
-        )
-
-    def error_callback(e: Exception):
-        manager.submit_to_loop(
-            lambda: _send(
-                events.types.DownloadEventType.FAILED,
-                {
-                    "model": model_name,
-                },
-                ok=False,
-                message=f"下载失败: {e}",
-            )
-        )
-
-    def running_callback(progress: int):
-        # W5：原实现是 async，而下载函数在同步线程里调用它 ->
-        # 返回的协程从未被 await，进度全部丢失 + "coroutine was never awaited" 警告
-        manager.submit_to_loop(
-            lambda: _send(
-                events.types.DownloadEventType.RUNNING,
-                {
-                    "model": model_name,
-                    "progress": progress,
-                },
-                ok=True,
-                message=f"下载进度: {progress}",
-            )
-        )
-
-    # 惰性导入：下载器依赖较重，且只在需要时加载
-    try:
-        if model_name == "google_facelandmarker":
-            #先检查模型目录下是否存在，如果没指定则使用默认路径
-            path=RuntimePath.get_models_path("mediapipe/face_landmarker.task")
-            if path.exists():
-                await _send(
-                events.types.DownloadEventType.ERROR,
-                {
-                    "model": model_name,
-                },
-                ok=False,
-                message="模型已存在，无需下载",
-            )
-                return
-
-            from ....core.pipeline.downloads.landmarker import download_google_facelandmarker as downloader
-        elif model_name == "paddle_ocr":
-            path=RuntimePath.get_models_path("paddleocr/paddleocr.task")
-            if path.exists():
-                await _send(
-                events.types.DownloadEventType.ERROR,
-                {
-                    "model": model_name,
-                },
-                ok=False,
-                message="模型已存在，无需下载",
-            )
-                return
-
-            from ....core.pipeline.downloads.ocr import download_paddle_ocr as downloader
-        elif model_name == "umi_ocr":
-            from ....core.pipeline.downloads.ocr import download_umi_ocr as downloader
-        else:
-            # W13：不支持的模型 -> 报错后返回，不能再发 "开始下载"
-            await _send(
-                events.types.DownloadEventType.ERROR,
-                {
-                    "model": model_name,
-                },
-                ok=False,
-                message="不支持该模型下载",
-            )
             return
-    except Exception as e:
         await _send(
-            events.types.DownloadEventType.ERROR,
-                {
-                    "model": model_name,
-                },
-                ok=False,
-                message=f"下载器加载失败: {e}",
-            )
-        return
-
-    try:
-        task_ref = downloader(save_path, running_callback)
-    except Exception as e:
-        await _send(
-            events.types.DownloadEventType.ERROR,
-                {
-                    "model": model_name,
-                },
-                ok=False,
-                message=f"下载启动失败: {e}",
-            )
-        return
-
-    if task_ref:
-        task_ref.then(success_callback, error_callback)
-    else:
-        # 下载器不是异步任务（同步返回），则视为立即完成
-        success_callback(None)
+            events.types.DownloadEventType.RUNNING,
+            {
+                "model": model_name,
+                "capability": capability,
+                "provider": provider,
+                "model_id": model_id,
+                "progress": evt.get("progress", 0),
+                "file": evt.get("file"),
+                "phase": phase or "download",
+            },
+            ok=True,
+            message=f"下载进度: {evt.get('progress', 0)}",
+        )
 
     await _send(
         events.types.DownloadEventType.STARTED,
         {
             "model": model_name,
+            "capability": capability,
+            "provider": provider,
+            "model_id": model_id,
+            "task_id": task_id,
         },
         ok=True,
         message="开始下载",
     )
+
+    try:
+        result = await provider_manager.download_model(
+            capability, provider, model_id,
+            progress_callback=_progress,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await _send(
+            events.types.DownloadEventType.FAILED,
+            {"model": model_name, "capability": capability,
+             "provider": provider, "error": str(exc)},
+            ok=False,
+            message=f"下载失败: {exc}",
+        )
+        return
+
+    if not result.get("success"):
+        await _send(
+            events.types.DownloadEventType.FAILED,
+            {"model": model_name, "capability": capability,
+             "provider": provider, "error": result.get("error", "")},
+            ok=False,
+            message=f"下载失败: {result.get('error', '')}",
+        )
+
+
+def _parse_download_target(model_name: str):
+    """解析下载目标。
+
+    新格式：``"ocr:paddle"`` / ``"ocr:paddle:ppocr"`` / ``"image:comfyui-local"``。
+    兼容别名：
+      * ``paddle_ocr`` → (``ocr``, ``paddle``, None)
+      * ``umi_ocr``    → (``ocr``, ``umi``, None)
+      * ``whisper``    → (``asr``, ``whisper``, None)
+    暂不支持的 ``google_facelandmarker`` 返回 None（由旧逻辑另行处理）。
+    """
+    if model_name == "google_facelandmarker":
+        return None
+    if model_name == "paddle_ocr":
+        return ("ocr", "paddle", None)
+    if model_name == "umi_ocr":
+        return ("ocr", "umi", None)
+    if model_name == "whisper":
+        return ("asr", "whisper", None)
+    parts = model_name.split(":")
+    if len(parts) == 2:
+        return (parts[0], parts[1], None)
+    if len(parts) == 3:
+        return (parts[0], parts[1], parts[2])
+    return None
 
 async def _wm_send_json(client_id: str, event_type: str, payload, ok: bool = True, message: str = "ok"):
     await get_websocket_manager().send_json(
@@ -147,6 +164,14 @@ async def _wm_send_json(client_id: str, event_type: str, payload, ok: bool = Tru
 
 
 async def handle_chat(client_id: str, message: str) -> None:
+    if not message:
+        await manager.send_json(
+            client_id,
+            type=events.types.WebSocketEventType.CHAT,
+            ok=False,
+            message="消息不能为空",
+        )
+        return
     """L5：producer 交给调度器，Web loop 只做转发。"""
     stream=await chat.router_stream(
         user_input=message,
@@ -165,9 +190,27 @@ async def handle_chat(client_id: str, message: str) -> None:
         stream.cancel()
 
 
-async def handle_speech_chunk(client_id: str, audio: bytes, is_final: bool) -> None:
+async def handle_speech_chunk(client_id: str, audio: str, is_final: bool) -> None:
+    if not audio:
+        await manager.send_json(
+            client_id,
+            type=events.types.WebSocketEventType.RECORD_CHUNK,
+            ok=False,
+            message="缺少 audio",
+        )
+        return
+    try:
+        bd_audio = base64.b64decode(audio)
+    except Exception as e:
+        await manager.send_json(
+            client_id,
+            type=events.types.WebSocketEventType.RECORD_CHUNK,
+            ok=False,
+            message=f"audio 解码失败: {e}",
+        )
+        return
     stream=await chat.speech_to_text_stream(
-        audio_bytes=audio,
+        audio_bytes=bd_audio,
         is_final=is_final,
     )
     async for text in stream:
@@ -179,60 +222,33 @@ async def handle_speech_chunk(client_id: str, audio: bytes, is_final: bool) -> N
         )
 
 
-async def handle_event(client_id: str, event: str, data: Optional[Dict[str, Any]] = None) -> None:
-    manager = get_websocket_manager()
+async def dispatch(client_id: str, event: str, data: Optional[Dict[str, Any]] = None) -> None:
     data = data or {}
+    if not data:
+        await _wm_send_json(
+            client_id,
+            events.types.WebSocketEventType.ERROR,
+            data,
+            ok=False,
+            message="缺少 data"
+        )
+        return
 
     if event == events.types.WebSocketEventType.CHAT:
-        message = data.get("message")
-        if not message:
-            await manager.send_json(
-                client_id,
-                type=events.types.WebSocketEventType.CHAT,
-                ok=False,
-                message="消息不能为空",
-            )
-            return
-        await handle_chat(client_id, message)
+        await handle_chat(client_id, data.get("message",""))
 
     elif event == events.types.WebSocketEventType.DOWNLOAD_MODEL:
-        model_name = data.get("model_name")
-        if not model_name:
-            await manager.send_json(
-                client_id,
-                type=events.types.DownloadEventType.ERROR,
-                ok=False,
-                message="缺少 model_name",
-            )
-            return
-        await handle_download_model(client_id, model_name, data.get("save_path", "./models"))
+        await handle_download_model(client_id, data.get("model_name",""), data.get("save_path", "./models"))
 
     elif event == events.types.WebSocketEventType.RECORD_START:
         await manager.send_json(
-            client_id, type=events.types.WebSocketEventType.RECORD_START, data=True
+            client_id, 
+            type=events.types.WebSocketEventType.RECORD_START, 
+            data=True
         )
 
     elif event == events.types.WebSocketEventType.RECORD_CHUNK:
-        raw_audio = data.get("audio")
-        if not raw_audio:
-            await manager.send_json(
-                client_id,
-                type=events.types.WebSocketEventType.RECORD_CHUNK,
-                ok=False,
-                message="缺少 audio",
-            )
-            return
-        try:
-            audio = base64.b64decode(raw_audio)
-        except Exception as e:
-            await manager.send_json(
-                client_id,
-                type=events.types.WebSocketEventType.RECORD_CHUNK,
-                ok=False,
-                message=f"audio 解码失败: {e}",
-            )
-            return
-        await handle_speech_chunk(client_id, audio, bool(data.get("is_final", False)))
+        await handle_speech_chunk(client_id, data.get("audio",""), bool(data.get("is_final", False)))
 
     elif event == events.types.WebSocketEventType.RECORD_STOP:
         await manager.send_json(
@@ -241,4 +257,10 @@ async def handle_event(client_id: str, event: str, data: Optional[Dict[str, Any]
             ok=True,
             message="录音已停止",
         )
-
+    else:
+        await manager.send_json(
+            client_id,
+            type=events.types.WebSocketEventType.ERROR,
+            message="未知事件",
+            ok=False
+        )

@@ -1,6 +1,4 @@
-"""PPT 渲染服务：DeckSpec + TemplateSpec → 原生可编辑 .pptx。
-
-修复对应清单：K20 / K21 / K22
+"""PPT 渲染服务：DeckSpec + TemplateSpec → 原生可编辑 .pptx
 
 官方强调的三条在这里落地：
   * **产出真文件**：用 python-pptx 的文本框 / 表格 / 原生图表对象，
@@ -16,10 +14,11 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from typing import Any, Dict, List, Optional
 
 from ...logger import logger
-from ...runtime import RuntimePath
+from ...security import WorkspaceBoundaryError, output_path, service_output_dir
 from .models import DeckSpec, RenderResult, SlideSpec, TemplateSpec
 
 try:  # python-pptx 是可选依赖
@@ -49,18 +48,32 @@ def _rgb(hex_color: str, default: str = "000000") -> "RGBColor":
 class PptRenderService:
     """把结构化大纲渲染成 .pptx。"""
 
-    def __init__(self, output_dir: Optional[str] = None) -> None:
-        self._output_dir = output_dir
+    #: 版式 → 方法名。旧实现在 `_draw` 里每页重建一个含 10 个绑定方法的
+    #: 字典，N 页就是 N 次字典 + N*10 次方法绑定；改成类级常量后只查一次。
+    _LAYOUT_HANDLERS: Dict[str, str] = {
+        "cover": "_cover",
+        "agenda": "_agenda",
+        "section": "_section",
+        "bullets": "_bullets",
+        "two_column": "_two_column",
+        "metrics": "_metrics",
+        "quote": "_quote",
+        "table": "_table",
+        "chart": "_chart",
+        "closing": "_closing",
+    }
 
     @property
     def available(self) -> bool:
         return _PPTX_OK
 
     def output_dir(self) -> str:
-        if self._output_dir:
-            os.makedirs(self._output_dir, exist_ok=True)
-            return self._output_dir
-        return str(RuntimePath.get_output_dir())
+        """PPT 产出目录固定为 `<workspace>/ppt/`。
+
+        产出位置只由 `security/workspace` 决定；不再保留任何可传入的
+        目录构造参数，避免外部绝对路径绕过边界。
+        """
+        return service_output_dir("ppt")
 
     # ═══════════════════════════════════════════════════════
     #  主入口
@@ -75,34 +88,45 @@ class PptRenderService:
         if not _PPTX_OK:
             return RenderResult(ok=False, message="未安装 python-pptx：pip install python-pptx")
 
-        import uuid
-
         name = file_name or f"ppt_{uuid.uuid4().hex[:12]}.pptx"
         if not name.endswith(".pptx"):
             name += ".pptx"
         # 防目录穿越
         name = os.path.basename(name)
 
-        out_dir = self.output_dir()
-        path = os.path.join(out_dir, name)
+        # 文件名只取 basename，并再经 security/workspace 做一次
+        # realpath 边界复验（防符号链接替换 / 目录穿越）。
+        try:
+            path = output_path("ppt", name)
+        except WorkspaceBoundaryError as exc:
+            return RenderResult(
+                ok=False, message=f"产出路径被拒绝: {exc.reason.value}"
+            )
 
+        if not deck.slides:
+            return RenderResult(ok=False, message="大纲为空，没有可渲染的页面")
+        tmp_path = f"{path}.{uuid.uuid4().hex[:8]}.tmp"
         try:
             prs = Presentation()
             prs.slide_width = Inches(13.333)
             prs.slide_height = Inches(7.5)
             blank = prs.slide_layouts[6]
 
-            if not deck.slides:
-                return RenderResult(ok=False, message="大纲为空，没有可渲染的页面")
-
             for idx, spec in enumerate(deck.slides):
                 slide = prs.slides.add_slide(blank)
                 self._draw(slide, spec, template, idx, len(deck.slides))
 
-            prs.save(path)
+            prs.save(tmp_path)
+            os.replace(tmp_path, path)
         except Exception as e:  # noqa: BLE001
             logger.error(f"[PPT] 渲染失败: {e}")
             return RenderResult(ok=False, message=f"渲染失败: {e}")
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
         return RenderResult(
             ok=True,
@@ -126,18 +150,9 @@ class PptRenderService:
         total: int
     ) -> None:
         layout = (spec.layout or "bullets").lower()
-        handler = {
-            "cover": self._cover,
-            "agenda": self._agenda,
-            "section": self._section,
-            "bullets": self._bullets,
-            "two_column": self._two_column,
-            "metrics": self._metrics,
-            "quote": self._quote,
-            "table": self._table,
-            "chart": self._chart,
-            "closing": self._closing,
-        }.get(layout, self._bullets)
+        handler = getattr(
+            self, self._LAYOUT_HANDLERS.get(layout, "_bullets")
+        )
 
         self._background(slide, tpl)
         # K21：深色底模板用浅色文字，避免"白字白底"
@@ -193,10 +208,17 @@ class PptRenderService:
     def _text(
         self,
         slide,
-        text: str, left: float, top: float,
-              width: float, height: float, tpl: TemplateSpec,
-              size: int = 18, bold: bool = False,
-              color: Optional[str] = None, align: str = "left") -> None:
+        text: str, 
+        left: float,
+        top: float,
+        width: float,
+        height: float,
+        tpl: TemplateSpec,
+        size: int = 18,
+        bold: bool = False,
+        color: Optional[str] = None,
+        align: str = "left"
+    ) -> None:
         from pptx.util import Inches, Pt
 
         box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
@@ -208,12 +230,22 @@ class PptRenderService:
         p.font.bold = bold
         p.font.name = tpl.font_body
         p.font.color.rgb = _rgb(color or tpl.colors.text)
-        p.alignment = {"left": PP_ALIGN.LEFT, "center": PP_ALIGN.CENTER,
-                       "right": PP_ALIGN.RIGHT}.get(align, PP_ALIGN.LEFT)
+        p.alignment = {
+            "left": PP_ALIGN.LEFT,
+            "center": PP_ALIGN.CENTER,
+            "right": PP_ALIGN.RIGHT
+        }.get(align, PP_ALIGN.LEFT)
         return box
 
-    def _bullets_block(self, slide, points: List[str], tpl: TemplateSpec,
-                       left: float, top: float, width: float) -> None:
+    def _bullets_block(
+        self,
+        slide,
+        points: List[str],
+        tpl: TemplateSpec,
+        left: float,
+        top: float,
+        width: float
+    ) -> None:
         from pptx.util import Inches, Pt
 
         box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(4.6))
@@ -240,13 +272,29 @@ class PptRenderService:
         accent.line.fill.background()
         accent.text_frame.text = ""
 
-        self._text(slide, spec.title or "演示标题", 1.0, 2.5, 11.3, 1.6,
-                   tpl, size=tpl.title_size, bold=True,
-                   color=tpl.colors.primary, align="center")
+        self._text(
+            slide, 
+            spec.title or "演示标题",
+            1.0, 2.5, 11.3, 1.6,
+            tpl,
+            size=tpl.title_size,
+            bold=True,
+            color=tpl.colors.primary,
+            align="center"
+        )
         if spec.subtitle:
-            self._text(slide, spec.subtitle, 1.0, 4.2, 11.3, 0.8,
-                       tpl, size=tpl.body_size + 4,
-                       color=tpl.colors.muted, align="center")
+            self._text(
+                slide,
+                spec.subtitle,
+                1.0,
+                4.2,
+                11.3,
+                0.8,
+                tpl,
+                size=tpl.body_size + 4,
+                color=tpl.colors.muted,
+                align="center"
+            )
         line = slide.shapes.add_textbox(Inches(5.6), Inches(5.1), Inches(2.1), Inches(0.06))
         line.fill.solid()
         line.fill.fore_color.rgb = _rgb(tpl.colors.secondary)
@@ -258,8 +306,11 @@ class PptRenderService:
 
     def _agenda(self, slide, spec: SlideSpec, tpl: TemplateSpec) -> None:
         items = spec.points or [c.get("title", "") for c in spec.columns]
-        self._bullets_block(slide, [f"{i + 1}. {x}" for i, x in enumerate(items[:6])],
-                            tpl, 1.0, 1.8, 11.0)
+        self._bullets_block(
+            slide, 
+            [f"{i + 1}. {x}" for i, x in enumerate(items[:6])],
+            tpl, 1.0, 1.8, 11.0
+        )
 
     def _section(self, slide, spec: SlideSpec, tpl: TemplateSpec) -> None:
         from pptx.util import Inches, Pt
@@ -410,10 +461,13 @@ class PptRenderService:
         data = CategoryChartData()
         data.categories = [str(c) for c in categories]
         for s in series[:4]:
-            data.add_series(
-                str(s.get("name") or "系列"),
-                [float(v) for v in (s.get("values") or [])]
-            )
+            values: List[float] = []
+            for value in (s.get("values") or []):
+                try:
+                    values.append(float(value))
+                except (TypeError, ValueError):
+                    values.append(0.0)  # LLM 给了非数字：补 0 而不是整份渲染失败
+            data.add_series(str(s.get("name") or "系列"), values)
 
         ctype = str(chart_spec.get("type") or "column").lower()
         xl = {

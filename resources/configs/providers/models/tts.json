@@ -1,0 +1,501 @@
+{
+  "$schema": "../../../schemas/providers.schema.json",
+  "schema_version": 1,
+  "openai-tts": {
+    "meta": {
+      "label": "OpenAI TTS",
+      "tags": [
+        "cloud",
+        "paid",
+        "tts",
+        "audio"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.openai.com/v1",
+      "speech_path": "/audio/speech",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      },
+      "timeout": 120
+    },
+    "models": [
+      {
+        "id": "gpt-4o-mini-tts",
+        "label": "GPT-4o Mini TTS"
+      },
+      {
+        "id": "tts-1",
+        "label": "TTS-1"
+      },
+      {
+        "id": "tts-1-hd",
+        "label": "TTS-1 HD"
+      }
+    ],
+    "params": {
+      "voice": {
+        "type": "string",
+        "default": "alloy",
+        "scope": "request",
+        "enum": [
+          "alloy",
+          "echo",
+          "fable",
+          "onyx",
+          "nova",
+          "shimmer"
+        ]
+      },
+      "response_format": {
+        "type": "string",
+        "default": "mp3",
+        "scope": "request"
+      },
+      "speed": {
+        "type": "number",
+        "default": 1.0,
+        "scope": "request"
+      }
+    }
+  },
+  "elevenlabs": {
+    "meta": {
+      "label": "ElevenLabs",
+      "tags": [
+        "cloud",
+        "paid",
+        "tts",
+        "audio"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.elevenlabs.io",
+      "speech_path": "/v1/text-to-speech/{voice_id}",
+      "auth": {
+        "type": "header",
+        "header": "xi-api-key",
+        "field": "api_key"
+      },
+      "timeout": 120
+    },
+    "models": [
+      {
+        "id": "eleven_multilingual_v2",
+        "label": "Multilingual v2"
+      },
+      {
+        "id": "eleven_turbo_v2_5",
+        "label": "Turbo v2.5"
+      }
+    ],
+    "params": {
+      "voice_id": {
+        "type": "string",
+        "scope": "request",
+        "required": true
+      },
+      "output_format": {
+        "type": "string",
+        "default": "mp3_44100_128",
+        "scope": "request",
+        "description": "codec_sample_rate_bitrate"
+      },
+      "model_id": {
+        "type": "string",
+        "scope": "request"
+      },
+      "text": {
+        "type": "string",
+        "scope": "request",
+        "required": true
+      }
+    }
+  },
+  "azure-tts": {
+    "meta": {
+      "label": "Azure TTS",
+      "tags": [
+        "cloud",
+        "paid",
+        "tts",
+        "audio"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://{region}.tts.speech.microsoft.com",
+      "speech_path": "/cognitiveservices/v1",
+      "protocol": "azure_ssml",
+      "auth": {
+        "type": "header",
+        "header": "Ocp-Apim-Subscription-Key",
+        "field": "api_key"
+      },
+      "headers": {
+        "Content-Type": "application/ssml+xml"
+      },
+      "timeout": 120
+    },
+    "models": [
+      {
+        "id": "azure-neural",
+        "label": "Azure Neural TTS"
+      }
+    ],
+    "params": {
+      "voice_name": {
+        "type": "string",
+        "default": "zh-CN-XiaoxiaoNeural",
+        "scope": "request"
+      },
+      "language": {
+        "type": "string",
+        "default": "zh-CN",
+        "scope": "request"
+      },
+      "output_format": {
+        "type": "string",
+        "default": "audio-16khz-128kbitrate-mono-mp3",
+        "scope": "request",
+        "description": "映射到 X-Microsoft-OutputFormat 头"
+      }
+    }
+  },
+  "deepgram": {
+    "meta": {
+      "label": "Deepgram TTS",
+      "tags": [
+        "cloud",
+        "paid",
+        "tts",
+        "audio"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.deepgram.com",
+      "speech_path": "/v1/speak",
+      "auth": {
+        "type": "header",
+        "header": "Authorization",
+        "prefix": "Token ",
+        "field": "api_key"
+      },
+      "timeout": 60
+    },
+    "models": [
+      {
+        "id": "aura-2-thalia-en",
+        "label": "Aura-2 Thalia"
+      },
+      {
+        "id": "aura-asteria-en",
+        "label": "Aura Asteria"
+      }
+    ],
+    "params": {
+      "model": {
+        "type": "string",
+        "default": "aura-2-thalia-en",
+        "scope": "request"
+      },
+      "encoding": {
+        "type": "string",
+        "default": "mp3",
+        "scope": "request"
+      }
+    }
+  },
+  "playht": {
+    "meta": {
+      "label": "PlayHT",
+      "tags": [
+        "cloud",
+        "paid",
+        "tts",
+        "audio"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://api.play.ht",
+      "speech_path": "/api/v2/tts/stream",
+      "auth": {
+        "type": "header",
+        "header": "AUTHORIZATION",
+        "prefix": "",
+        "field": "api_key"
+      },
+      "headers": {
+        "X-USER-ID": "${PLAYHT_USER_ID}"
+      },
+      "timeout": 120
+    },
+    "models": [
+      {
+        "id": "playht-3.0-mini",
+        "label": "PlayHT 3.0 Mini"
+      },
+      {
+        "id": "playht-2.0",
+        "label": "PlayHT 2.0"
+      }
+    ],
+    "params": {
+      "voice": {
+        "type": "string",
+        "scope": "request",
+        "required": true
+      },
+      "output_format": {
+        "type": "string",
+        "default": "mp3",
+        "scope": "request"
+      },
+      "speed": {
+        "type": "number",
+        "default": 1.0,
+        "scope": "request"
+      }
+    }
+  },
+  "google-tts": {
+    "meta": {
+      "label": "Google Cloud TTS",
+      "tags": [
+        "cloud",
+        "paid",
+        "tts",
+        "audio"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "https://texttospeech.googleapis.com",
+      "speech_path": "/v1/text:synthesize",
+      "protocol": "google_tts",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "access_token"
+      },
+      "timeout": 120
+    },
+    "models": [
+      {
+        "id": "google-neural2",
+        "label": "Neural2"
+      },
+      {
+        "id": "google-chirp3-hd",
+        "label": "Chirp 3 HD"
+      }
+    ],
+    "params": {
+      "voice_name": {
+        "type": "string",
+        "default": "cmn-CN-Wavenet-A",
+        "scope": "request"
+      },
+      "language_code": {
+        "type": "string",
+        "default": "cmn-CN",
+        "scope": "request"
+      },
+      "audio_encoding": {
+        "type": "string",
+        "default": "MP3",
+        "scope": "request"
+      }
+    }
+  },
+  "bv2": {
+    "meta": {
+      "label": "BV2 (本地)",
+      "tags": [
+        "local",
+        "free",
+        "tts",
+        "audio"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "${BV2_API_URL}",
+      "auth": {
+        "type": "none"
+      }
+    },
+    "models": [
+      {
+        "id": "bv2",
+        "label": "BV2"
+      }
+    ],
+    "params": {
+      "speaker_id": {
+        "type": "integer",
+        "default": 0,
+        "scope": "request"
+      },
+      "audio_format": {
+        "type": "string",
+        "default": "wav",
+        "scope": "request"
+      },
+      "lang": {
+        "type": "string",
+        "default": "zh",
+        "scope": "request"
+      },
+      "length": {
+        "type": "number",
+        "default": 1.0,
+        "scope": "request"
+      }
+    }
+  },
+  "gptsovits": {
+    "meta": {
+      "label": "GPT-SoVITS (本地)",
+      "tags": [
+        "local",
+        "free",
+        "tts",
+        "audio"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "${GPTSOVITS_API_URL}",
+      "auth": {
+        "type": "none"
+      }
+    },
+    "models": [
+      {
+        "id": "gptsovits",
+        "label": "GPT-SoVITS"
+      }
+    ],
+    "params": {
+      "prompt_language": {
+        "type": "string",
+        "default": "zh",
+        "scope": "request"
+      },
+      "text_language": {
+        "type": "string",
+        "default": "zh",
+        "scope": "request"
+      },
+      "speed_factor": {
+        "type": "number",
+        "default": 1.0,
+        "scope": "request"
+      }
+    }
+  },
+  "vits": {
+    "meta": {
+      "label": "VITS (本地)",
+      "tags": [
+        "local",
+        "free",
+        "tts",
+        "audio"
+      ],
+      "deployment": "local"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "${VITS_API_URL}",
+      "auth": {
+        "type": "none"
+      }
+    },
+    "models": [
+      {
+        "id": "vits",
+        "label": "VITS"
+      }
+    ],
+    "params": {
+      "ref_audio_path": {
+        "type": "string",
+        "default": "",
+        "scope": "request"
+      },
+      "prompt_language": {
+        "type": "string",
+        "default": "zh",
+        "scope": "request"
+      },
+      "text_language": {
+        "type": "string",
+        "default": "zh",
+        "scope": "request"
+      }
+    }
+  },
+  "aivis": {
+    "meta": {
+      "label": "AIVIS",
+      "tags": [
+        "cloud",
+        "paid",
+        "tts",
+        "audio"
+      ],
+      "deployment": "cloud"
+    },
+    "endpoint": {
+      "transport": "http",
+      "base_url": "${AIVIS_API_URL}",
+      "speech_path": "/v1/audio/speech",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "field": "api_key"
+      }
+    },
+    "models": [
+      {
+        "id": "aivis-default",
+        "label": "AIVIS 默认模型"
+      }
+    ],
+    "params": {
+      "model_uuid": {
+        "type": "string",
+        "scope": "init",
+        "required": true
+      },
+      "speaker_uuid": {
+        "type": "string",
+        "scope": "init"
+      },
+      "audio_format": {
+        "type": "string",
+        "default": "mp3",
+        "scope": "request"
+      }
+    }
+  }
+}
