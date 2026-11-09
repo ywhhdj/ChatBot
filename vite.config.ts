@@ -6,10 +6,12 @@ import Components from 'unplugin-vue-components/vite';
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 import viteImagemin from 'vite-plugin-imagemin'
-import viteCompression from 'vite-plugin-compression'
+// import viteCompression from 'vite-plugin-compression'
 import tailwindcss from '@tailwindcss/vite';
 
-const pathSrc = path.resolve(__dirname, 'src');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pathSrc = path.resolve(__dirname, 'web');
+
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
@@ -25,51 +27,27 @@ export default defineConfig({
       dts: path.resolve(pathSrc, 'components.d.ts'),
     }),
     viteImagemin({
-      gifsicle: {
-        optimizationLevel: 3,
-        interlaced: false,
-      },
-      optipng: {
-        optimizationLevel: 5,
-      },
-      mozjpeg: {
-        quality: 20,
-      },
-      pngquant: {
-        quality: [0.8, 0.9],
-        speed: 4,
-      },
+      gifsicle: { optimizationLevel: 3, interlaced: false },
+      optipng: { optimizationLevel: 5 },
+      mozjpeg: { quality: 20 },
+      pngquant: { quality: [0.8, 0.9], speed: 4 },
       svgo: {
         plugins: [
-          {
-            name: 'removeViewBox',
-          },
-          {
-            name: 'removeEmptyAttrs',
-            active: true,
-          },
+          { name: 'removeViewBox' },
+          { name: 'removeEmptyAttrs', active: true },
         ],
       },
     }),
-    // viteCompression({
-    //   verbose: true,
-    //   algorithm: 'gzip',
-    //   ext: '.gz',
-    //   threshold: 1024,
-    //   deleteOriginFile: true
-    // })
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./web', import.meta.url))
     },
   },
   server: {
     watch: {
       ignored: [
-        "lib",
-        "android",
-        "ios",
+        "mobile",
         "log",
         "src_py",
         "memory",
@@ -96,11 +74,8 @@ export default defineConfig({
         assetFileNames: (assetsInfo) => {
           const names = assetsInfo.name?.split('.') || []
           const extname = names[names.length - 1]
-          if (extname === "css") {
-            return "assets/css/[name]-[hash][extname]"
-          } else if (extname === "js") {
-            return "assets/js/[name]-[hash][extname]"
-          }
+          if (extname === "css") return "assets/css/[name]-[hash][extname]"
+          if (extname === "js") return "assets/js/[name]-[hash][extname]"
           return `assets/[name]-[hash][extname]`
         },
         manualChunks(id) {
@@ -112,10 +87,7 @@ export default defineConfig({
     },
     minify: 'terser',
     terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-      }
+      compress: { drop_console: true, drop_debugger: true }
     },
   },
 })

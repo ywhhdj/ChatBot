@@ -50,7 +50,7 @@
       "op": "character.update_state",
       "handler": "modules.api.controllers.character:update_state",
       "http": {
-        "method": "POST",
+        "method": "PUT",
         "path": "/character/{character_id}/state"
       },
       "tags": [
@@ -137,428 +137,8 @@
       }
     },
     {
-      "op": "device.device_info",
-      "handler": "modules.api.controllers.device:device_info",
-      "http": {
-        "method": "GET",
-        "path": "/device/info"
-      },
-      "tags": [
-        "device"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "device_info"
-      }
-    },
-    {
-      "op": "logger.get_level",
-      "handler": "modules.api.controllers.logger:get_level",
-      "http": {
-        "method": "GET",
-        "path": "/logger/level"
-      },
-      "tags": [
-        "logger"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_level"
-      }
-    },
-    {
-      "op": "logger.set_level",
-      "handler": "modules.api.controllers.logger:set_level",
-      "http": {
-        "method": "PUT",
-        "path": "/logger/level"
-      },
-      "tags": [
-        "logger"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "set_level"
-      }
-    },
-    {
-      "op": "logger.list_levels",
-      "handler": "modules.api.controllers.logger:list_levels",
-      "http": {
-        "method": "GET",
-        "path": "/logger/levels"
-      },
-      "tags": [
-        "logger"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_levels"
-      }
-    },
-    {
-      "op": "logger.stats",
-      "handler": "modules.api.controllers.logger:stats",
-      "http": {
-        "method": "GET",
-        "path": "/logger/stats"
-      },
-      "tags": [
-        "logger"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "stats"
-      }
-    },
-    {
-      "op": "logger.records",
-      "handler": "modules.api.controllers.logger:records",
-      "http": {
-        "method": "GET",
-        "path": "/logger/records"
-      },
-      "tags": [
-        "logger"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "records"
-      }
-    },
-    {
-      "op": "logger.flush",
-      "handler": "modules.api.controllers.logger:flush",
-      "http": {
-        "method": "POST",
-        "path": "/logger/flush"
-      },
-      "tags": [
-        "logger"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "flush"
-      }
-    },
-    {
-      "op": "memory.layers",
-      "handler": "modules.api.controllers.memory:layers",
-      "http": {
-        "method": "GET",
-        "path": "/memory/layers"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "layers"
-      }
-    },
-    {
-      "op": "memory.short_term",
-      "handler": "modules.api.controllers.memory:short_term",
-      "http": {
-        "method": "GET",
-        "path": "/memory/short"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "short_term"
-      }
-    },
-    {
-      "op": "memory.long_term",
-      "handler": "modules.api.controllers.memory:long_term",
-      "http": {
-        "method": "GET",
-        "path": "/memory/long"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "long_term"
-      }
-    },
-    {
-      "op": "memory.search",
-      "handler": "modules.api.controllers.memory:search",
-      "http": {
-        "method": "POST",
-        "path": "/memory/search"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "search"
-      }
-    },
-    {
-      "op": "memory.compressed",
-      "handler": "modules.api.controllers.memory:compressed",
-      "http": {
-        "method": "GET",
-        "path": "/memory/compressed"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "compressed"
-      }
-    },
-    {
-      "op": "memory.stats",
-      "handler": "modules.api.controllers.memory:stats",
-      "http": {
-        "method": "GET",
-        "path": "/memory/stats"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "stats"
-      }
-    },
-    {
-      "op": "memory.decay",
-      "handler": "modules.api.controllers.memory:decay",
-      "http": {
-        "method": "POST",
-        "path": "/memory/decay"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "decay"
-      }
-    },
-    {
-      "op": "memory.flush",
-      "handler": "modules.api.controllers.memory:flush",
-      "http": {
-        "method": "POST",
-        "path": "/memory/flush"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "flush"
-      }
-    },
-    {
-      "op": "memory.delete_memory",
-      "handler": "modules.api.controllers.memory:delete_memory",
-      "http": {
-        "method": "DELETE",
-        "path": "/memory/{memory_id}"
-      },
-      "tags": [
-        "memory"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "delete_memory"
-      }
-    },
-    {
-      "op": "pipline.list_adapters",
-      "handler": "modules.api.controllers.pipline:list_adapters",
-      "http": {
-        "method": "GET",
-        "path": "/pipeline/adapters"
-      },
-      "tags": [
-        "pipeline"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_adapters"
-      }
-    },
-    {
-      "op": "pipline.list_providers",
-      "handler": "modules.api.controllers.pipline:list_providers",
-      "http": {
-        "method": "GET",
-        "path": "/pipeline/adapters/{adapter}/providers"
-      },
-      "tags": [
-        "pipeline"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_providers"
-      }
-    },
-    {
-      "op": "pipline.get_provider",
-      "handler": "modules.api.controllers.pipline:get_provider",
-      "http": {
-        "method": "GET",
-        "path": "/pipeline/adapters/{adapter}/providers/{provider}"
-      },
-      "tags": [
-        "pipeline"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_provider"
-      }
-    },
-    {
-      "op": "pipline.switch",
-      "handler": "modules.api.controllers.pipline:switch",
-      "http": {
-        "method": "POST",
-        "path": "/pipeline/adapters/{adapter}/switch"
-      },
-      "tags": [
-        "pipeline"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "switch"
-      }
-    },
-    {
-      "op": "pipline.stop_adapter",
-      "handler": "modules.api.controllers.pipline:stop_adapter",
-      "http": {
-        "method": "POST",
-        "path": "/pipeline/adapters/{adapter}/stop"
-      },
-      "tags": [
-        "pipeline"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "stop_adapter"
-      }
-    },
-    {
-      "op": "pipline.all_configs",
-      "handler": "modules.api.controllers.pipline:all_configs",
-      "http": {
-        "method": "GET",
-        "path": "/pipeline/configs"
-      },
-      "tags": [
-        "pipeline"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "all_configs"
-      }
-    },
-    {
-      "op": "request.open_folder",
-      "handler": "modules.api.controllers.request:open_folder",
-      "http": {
-        "method": "GET",
-        "path": "/folder/{type}"
-      },
-      "tags": [
-        "常规请求"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "open_folder"
-      }
-    },
-    {
-      "op": "request.status",
-      "handler": "modules.api.controllers.request:status",
-      "http": {
-        "method": "GET",
-        "path": "/status"
-      },
-      "tags": [
-        "常规请求"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "status"
-      }
-    },
-    {
-      "op": "request.chat_once",
-      "handler": "modules.api.controllers.request:chat_once",
-      "http": {
-        "method": "POST",
-        "path": "/chat"
-      },
-      "tags": [
-        "常规请求"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "chat_once"
-      }
-    },
-    {
-      "op": "request.chat_stream",
-      "handler": "modules.api.controllers.request:chat_stream",
-      "http": {
-        "method": "POST",
-        "path": "/chat/stream"
-      },
-      "tags": [
-        "常规请求"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "chat_stream"
-      }
-    },
-    {
-      "op": "request.tts",
-      "handler": "modules.api.controllers.request:tts",
-      "http": {
-        "method": "POST",
-        "path": "/tts"
-      },
-      "tags": [
-        "常规请求"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "tts"
-      }
-    },
-    {
-      "op": "request.asr",
-      "handler": "modules.api.controllers.request:asr",
-      "http": {
-        "method": "POST",
-        "path": "/asr"
-      },
-      "tags": [
-        "常规请求"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "asr"
-      }
-    },
-    {
-      "op": "request.progress_stream",
-      "handler": "modules.api.controllers.request:progress_stream",
+      "op": "pipline.progress_stream",
+      "handler": "modules.api.controllers.pipline:progress_stream",
       "http": {
         "method": "POST",
         "path": "/progress-stream/{task_id}"
@@ -674,6 +254,51 @@
       "desktop": true,
       "meta": {
         "label": "load_slot"
+      }
+    },
+    {
+      "op": "save.update_section",
+      "handler": "modules.api.controllers.save:update_section",
+      "http": {
+        "method": "PUT",
+        "path": "/api/save/slots/{slot_id}/section"
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "meta": {
+        "label": "update_section"
+      }
+    },
+    {
+      "op": "save.sync_from_sessions",
+      "handler": "modules.api.controllers.save:sync_from_sessions",
+      "http": {
+        "method": "POST",
+        "path": "/api/save/slots/sync"
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "meta": {
+        "label": "sync_from_sessions"
+      }
+    },
+    {
+      "op": "save.restore_to_sessions",
+      "handler": "modules.api.controllers.save:restore_to_sessions",
+      "http": {
+        "method": "POST",
+        "path": "/api/save/slots/restore"
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "meta": {
+        "label": "restore_to_sessions"
       }
     },
     {
@@ -1124,36 +749,6 @@
       "desktop": true,
       "meta": {
         "label": "ping"
-      }
-    },
-    {
-      "op": "task.get_task",
-      "handler": "modules.api.controllers.task:get_task",
-      "http": {
-        "method": "GET",
-        "path": "/task/{task_id}"
-      },
-      "tags": [
-        "task"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_task"
-      }
-    },
-    {
-      "op": "task.cancel_task",
-      "handler": "modules.api.controllers.task:cancel_task",
-      "http": {
-        "method": "POST",
-        "path": "/task/{task_id}/cancel"
-      },
-      "tags": [
-        "task"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "cancel_task"
       }
     }
   ]
