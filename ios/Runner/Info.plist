@@ -1,4 +1,0 @@
-<key>NSCameraUsageDescription</key>
-<string>需要使用相机进行 AR 实时预览</string>
-<key>NSMotionUsageDescription</key>
-<string>需要读取设备姿态以驱动角色跟随转向</string>

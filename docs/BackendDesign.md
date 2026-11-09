@@ -4,22 +4,6 @@
 >
 > 配套阅读：[api.md](api.md)（外部接口）、[SecurityAndAuditDesign.md](SecurityAndAuditDesign.md)（威胁模型与工作区边界）、[README.md](README.md)（文档索引）。
 
-## 0. 本次更新摘要
-
-| 项 | 旧文档状态 | 现行基线 |
-|---|---|---|
-| 模块地图 | 写成 `modules/pipeline/`、`modules/tools/`、`modules/context/` | 实际为 `modules/core/pipeline/`、`modules/core/tools/`、`modules/core/context/` |
-| 路由来源 | 描述为各 controller 自带 `APIRouter` 并统一加 `/api` | 实际由 `resources/config/api/endpoints.json` 驱动 `EndpointLoader` 生成 **89** 个端点（基线 77 + 补齐 12），`controllers/*.py` 中的 `APIRouter` 为遗留声明 |
-| 服务/安全 | 只提"shell 默认拒绝""技能沙盒" | 新增 **shell 受控服务** + **security/workspace 工作区边界** + **服务输出目录规范** |
-| 工作区代码 | 已实现但无任何业务模块引用 | 已接入 PPT 产出、技能执行输出、shell 命令执行与 cwd |
-| 导入路径 | 未记录 | 第三轮**删除** `services/service/*` 与 `services/keys.py` 兼容层，全仓库统一 `modules.services.manager` / `modules.keys` 正式导入，并清掉残留的 `from src_py.*` 绝对导入 |
-| 供应商 / 编排 | 两套适配器实现并存、`manager.pipeline` 等模块不存在 | 收敛到 `providers/Registry → factory → shim → transport` 单一链路；补齐 `logger/audit.py`、`logger/trail.py`；编排初始化改为跨 loop 安全 |
-| 审计留痕 | 6 个模块 import 不存在的 `audit`，调用全被 except 吞掉 | `logger/audit.py`（结构化事件）+ `logger/trail.py`（执行轨迹）落地，见 §9.1 |
-| 服务运行时 | async 服务用"跑完 start 就关"的临时 loop，长连接启动瞬间被自己取消 | 每个 async 服务独占持久 `run_forever()` loop；同步服务共用 `services/_async.py` 共享 loop；工具调用回到服务所属 loop（§7.1） |
-| PPT 链路 | 大纲 `events.emit(字符串)` 无监听者且必抛异常；模板 YAML 缺失导致构造即失败 | 大纲走 `providers.LLM` 门面、内置 5 套预设模板回落、产出原子替换（§7.2） |
-
-本次改造的分步说明见仓库根 `CHANGELOG_更新说明.md`（第二轮「供应商接入与对话编排」、第三轮「services 聚焦优化」）。
-
 ---
 
 ## 1. 部署形态与进程/线程模型
@@ -102,25 +86,24 @@ API 层：EndpointLoader → controller 处理函数 → ApiResponse 信封
 应用编排层：CLTTool / Orchestrator / ApiGateway / 各 Application 边界
       │            │            │             │
       ▼            ▼            ▼             ▼
-core/pipeline  core/tools    memory/       manager/
+core/pipeline  core/tools   memory/       manager/
 (adapters)    (policy/     (retrieval)   (session/save/
                executor)                 character)
       │            │            │             │
       ▼            ▼            ▼             ▼
-基础设施：services/ · security/workspace · SQLite/Markdown/FAISS · native Rust · 文件系统
+基础设施：services/ · security/workspace · SQLite/Markdown/Milvus · native Rust · 文件系统
 ```
 
-| 层 | 应负责 | 不应负责 |
-|---|---|---|
-| `api/controllers` | 参数绑定、调用网关/服务、响应映射 | 实现检索算法、命令执行策略或文件事务 |
-| `api/loader` + `gateway` | 端点清单注册、op 分发、信封归一 | 业务权限判断 |
-| `core/tools` | 命令解析、格式校验、安全策略、执行与结果截断 | 直接信任 LLM 参数；自行决定输出路径 |
-| `services/*` | 单一职责的外部能力 + `get_tools()` 工具声明 | 绕过 `security/workspace` 读写工作区外文件 |
-| `security/workspace` | 路径边界、三档权限、脱敏、服务输出目录、命令准入 | 依赖 FastAPI / Qt / 具体 provider |
-| `runtime` | 应用目录与生命周期 | 在业务模块复制路径规则 |
+| 层| 应负责| 不应负责 |
+| ------------------------ | ------------------------------------------------ | ------------------------------------------ |
+| `api/controllers`        | 参数绑定、调用网关/服务、响应映射                | 实现检索算法、命令执行策略或文件事务       |
+| `api/loader` + `gateway` | 端点清单注册、op 分发、信封归一                  | 业务权限判断                               |
+| `core/tools`             | 命令解析、格式校验、安全策略、执行与结果截断     | 直接信任 LLM 参数；自行决定输出路径        |
+| `services/*`             | 单一职责的外部能力 + `get_tools()` 工具声明      | 绕过 `security/workspace` 读写工作区外文件 |
+| `security/workspace`     | 路径边界、三档权限、脱敏、服务输出目录、命令准入 | 依赖 FastAPI / Qt / 具体 provider          |
+| `runtime`                | 应用目录与生命周期                               | 在业务模块复制路径规则                     |
 
 依赖朝内：领域层不依赖 FastAPI、Vue、Qt widget 或具体 LLM SDK。
-
 ---
 
 ## 4. 三种入口共用同一套契约
@@ -152,7 +135,7 @@ Web.init()
 
 ### 4.4 统一信封与错误码
 
-`ApiResponse{ok, code, message, data, request_id, ts}`，成功业务 `code=200`（不是 `0`）。错误码 1001/1002/1003/2001/2002/3001/3002 及 HTTP 映射见 [api.md](api.md) §0.2。`X-Request-ID` 由中间件注入 contextvar 并回写响应头。
+`ApiResponse{ok, code, message, data, request_id, ts}`，成功业务 `code=200`。错误码 1001/1002/1003/2001/2002/3001/3002 及 HTTP 映射见 [api.md](api.md) §0.2。`X-Request-ID` 由中间件注入 contextvar 并回写响应头。
 
 > 约束：未处理异常不得把 `type(exc).__name__: exc` 回传客户端，只回稳定 message + request_id；详情写脱敏本地日志。
 
@@ -203,19 +186,6 @@ service_manager.get_service(sid).method(**params)
 - 统一 `request_id` 贯穿路由、工具、结果回填与最终答复；拒绝也要留下低基数 `reason_code`。
 - 命令格式以 `PromptBuilder.build_commands_prompt` 生成的 `service method --param value` 为准；`obs --switch_scene ...` 这类旧注释写法无法被解析器识别。
 
-### 6.1 shell 兜底服务（新增）
-
-`modules/services/shell/` 注册为服务 id `shell`，是**唯一被允许的进程执行入口**：
-
-- 模型直接写原生命令原文（`cd docs`、`ls -la`、`mkdir report`）；解析器把「非服务命令且命中命令白名单」的行转成 `service="shell", method="run", params={"command": "<整行>"}`，**不需要** `shell --command` 之类包装。
-- `shell/commands.py` 按 `sys.platform` 做系统映射：Windows 用 `cmd.exe /C`（必要时 PowerShell），Linux/macOS 用 `/bin/sh -c`；提供 `dir→ls`、`copy→cp`、`del/erase→rm`、`type→cat`、`move→mv`、`cls→clear` 等别名。
-- 危险命令硬拦截：`rm`、`rmdir`、`del`、`erase`、`format`、`mkfs`、`dd`、`shutdown`、`reboot`、`taskkill`、`kill`、`sudo`、`chmod`、`chown`、`reg`、`diskpart`、`attrib -r` 等，以及 `> / >> / | / & / ; / \` ` 等组合与重定向（防止绕过单命令白名单）。
-- cwd 锁定在 `security/workspace` 解析出的工作区根目录；`cd` 只在本次调用内生效并做 `realpath` + `is_within` 边界校验，禁止 `..` 逃逸、绝对路径越界与符号链接逃逸。
-- 环境变量净化（剔除凭据类变量、置 `PATH` 为受控值）、超时、输出字节上限、退出码与 stderr 结构化返回。
-- 工作区未选择或权限不足时返回稳定拒绝原因，不降级到"直接执行"。
-
-`ToolPolicy` 对 shell 命令额外做一次纯函数初筛（`ReasonCode.COMMAND_FORBIDDEN`）；**最终准入以 ShellService 内部的白名单 + 工作区判定为准**，两层都不信任模型文本。
-
 ---
 
 ## 7. 服务模型（services）
@@ -239,31 +209,17 @@ ToolFunction/ToolFunctionParameters  OpenAI 风格工具声明（core/pipeline/m
 
 服务状态：`created / running / stopped / not_enabled / error`。
 
-本次修复的服务层缺陷：
-
-| 缺陷 | 处置 |
-|---|---|
-| `services/manager.py` 开头 `from .manager import service_manager, T` 自引用导致 ImportError | 删除错误导入与重复 typing import |
-| 4 处 `services.service.manager`、多处 `services.service.decorator`、`services.keys`、`..keys` 指向不存在的路径 | 前两轮临时补兼容层；**第三轮已删除兼容层**，所有调用方改为正式导入 |
-| `BaseServiceConfig.__getattr__` 无限递归 | 改为抛 `AttributeError` |
-| `ServiceManager.stop()` 使用循环外 `service_id` 与不存在的 `save_manager.server` | 改为按 id 落盘并容错 |
-| `ApiGateway._ok(rid, data)` 形参与调用 `_ok(result, rid)` 顺序颠倒 | 统一为 `_ok(data, rid)` |
-| `controllers/service.py::start_service` 把"已注册"当成功条件并提前读未注册服务状态 | 改为未注册才注册、已运行才拒绝 |
-| `controllers/skill.py` 调用不存在的 `mgr.build_prompt()` / `skill.executable` | 补 `build_prompt()`，判定改用 `supported` |
-| `controllers/audit.py::tools()` 引用不存在的 `data["skills"]` | 去掉并修正计数 |
-| `RuntimePath.get_output_dir()` 被 PPT 渲染器调用但不存在 | 补齐并委托工作区 |
-
 ### 7.1 第三轮：服务运行时模型（重要）
 
 旧 `ServiceManager.__run_loop()` 为 async 服务建一个临时 loop，`run_until_complete(start)` 一结束就取消**全部** pending task 并 `loop.close()`。后果是 OBS / QQBot 的 `asyncio.create_task(connect())` 在启动瞬间被自己取消，Browser 的 Playwright 对象留在已关闭的 loop 上，第一次 `open_page` 就跨 loop 报错。
 
 现行模型：
 
-| 服务类型 | 启动 | 工具方法执行 |
-|---|---|---|
+| 服务类型                         | 启动                                                         | 工具方法执行                                                 |
+| -------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | async（`Browser`/`OBS`/`QQBot`） | 独占 `_ServiceLoop`（`run_forever()` 线程），`start_original` 经 `run_coroutine_threadsafe` 投递并**等待完成**才回成功（60s 上限） | `CommandExecutor._invoke()` 读 `ServiceManager.get_service_loop(id)`，用 `wrap_future(run_coroutine_threadsafe(...))` 投回同一 loop |
-| 同步（`PPT`/`Shell`） | daemon 线程跑 `start_original` | `CmdExec` 专用线程池；需要调异步 LLM 时经 `services/_async.run_coroutine()` 走共享持久 loop |
-| 主线程（`Live2D`） | `ui.dispatcher` 投递到主线程 | 同上；明确拒绝异步 `start` |
+| 同步（`PPT`/`Shell`）            | daemon 线程跑 `start_original`                               | `CmdExec` 专用线程池；需要调异步 LLM 时经 `services/_async.run_coroutine()` 走共享持久 loop |
+| 主线程（`Live2D`）               | `ui.dispatcher` 投递到主线程                                 | 同上；明确拒绝异步 `start`                                   |
 
 共享 loop 存在的理由：`httpx.AsyncClient` 按 loop 池化，同步服务若每次 `asyncio.run()` 都新建临时 loop，连接池每次重建且淘汰的 client 无法回收。停机时 `ServiceManager.stop()` 调 `shutdown_service_loop()`，先在该 loop 上 `await shutdown_clients()` 再关 loop。
 
@@ -281,17 +237,17 @@ ToolFunction/ToolFunctionParameters  OpenAI 风格工具声明（core/pipeline/m
 
 ---
 
-## 8. 安全沙盒与工作区（本次改造重点）
+## 8. 安全沙盒与工作区
 
 ### 8.1 权限模型
 
 `modules/security/workspace.py` 是**唯一**的路径与命令边界判定者，纯函数、无框架依赖。
 
-| 档位 | 读 | 写 | 删 | 执行 |
-|---|---|---|---|---|
-| `READ_ONLY` | ✓ | ✗ | ✗ | ✗ |
-| `WRITABLE` | ✓ | ✓ | ✗ | ✗ |
-| `UNRESTRICTED` | ✓ | ✓ | ✓ | ✓ |
+| 档位           | 读   | 写   | 删   | 执行 |
+| -------------- | ---- | ---- | ---- | ---- |
+| `READ_ONLY`    | ✓    | ✗    | ✗    | ✗    |
+| `WRITABLE`     | ✓    | ✓    | ✗    | ✗    |
+| `UNRESTRICTED` | ✓    | ✓    | ✓    | ✓    |
 
 - `resolve_in()` 用 `realpath` + `is_within()` 判定，区分 `OUTSIDE_ROOT` 与 `SYMLINK_ESCAPE`。
 - `check()` 返回 `AccessVerdict{allowed, reason, path, operation, scrub_required}`；轨迹文件在任何档位下都禁止删除/截断（`TRAIL_PROTECTED`），且轨迹物理存放在应用数据目录，不在工作区内。
@@ -302,22 +258,15 @@ ToolFunction/ToolFunctionParameters  OpenAI 风格工具声明（core/pipeline/m
 
 **任何服务/工具产生的文件都必须落在工作区内，按 service_id 分目录**：
 
-| 产出方 | 目录 |
-|---|---|
-| PPT 服务 | `<workspace>/ppt/` |
-| 浏览器截图 | `<workspace>/browser/`（第三轮接入） |
-| 技能（tools/skills）执行输出 | `<workspace>/skill/<skill_id>/` |
-| 其它服务 | `<workspace>/<service_id>/` |
-| shell 命令 cwd | `<workspace>/`（或 `<workspace>/<service_id>/`，不得越界） |
+| 产出方                       | 目录                                                       |
+| ---------------------------- | ---------------------------------------------------------- |
+| PPT 服务                     | `<workspace>/ppt/`                                         |
+| 浏览器截图                   | `<workspace>/browser/`（第三轮接入）                       |
+| 技能（tools/skills）执行输出 | `<workspace>/skill/<skill_id>/`                            |
+| 其它服务                     | `<workspace>/<service_id>/`                                |
+| shell 命令 cwd               | `<workspace>/`（或 `<workspace>/<service_id>/`，不得越界） |
 
 统一入口：`service_output_dir(service_id, subpath="")`、`output_path(service_id, name)`、`make_output_writer(service_id)`。这些函数会检查工作区已选择、档位允许写、最终路径仍在 root 内，并自动建目录。
-
-落地情况：
-
-- `services/ppt/renderer.py::output_dir()` 与 `api/controllers/ppt.py::download()` 都改为 `service_output_dir("ppt")`，不再各自定义 `data/output`；下载只接受 `basename` 并经工作区边界复验。
-- `ExternalSkillManager.execute_skill()` 把 `output_dir` 与受限 `write_output(name, text)` 注入沙盒 context；技能沙盒本身禁用 `open`/`os`/`pathlib`/`subprocess`，`write_output` 是技能落盘的唯一通道，且只能写到 `<workspace>/skill/<skill_id>/`。
-- `ShellService` 的 cwd、所有路径参数都经 `check()` / `resolve_in()` 复验。
-- `Browser.screenshot()` 只取 basename 再走 `output_path("browser", name)`；路径越界返回稳定原因码，不写工作区外。`scroll()` 的像素参数先转整数并夹取，避免拼进 JS 文本造成注入。
 
 ### 8.3 技能沙盒
 
@@ -333,10 +282,10 @@ ToolFunction/ToolFunctionParameters  OpenAI 风格工具声明（core/pipeline/m
 - **编排**：`core/pipeline/chat.py`（入口与初始化）→ `orchestrator.py`（意图分流 / 命令规划 / 结果摘要）→ `core/tools/ctl.py`（命令执行）→ `providers/entity.py`（能力门面），详见 §9.1。
 - **任务**：`core/native/*` 调度器；状态 `pending → running → succeeded/failed/cancelled/timeout`，旧 `done` 作为兼容终态。PPT 异步生成返回 `task_id`，通过 `/api/ppt/job/{task_id}` 查询。
 - **存档**：`manager/saves/` 的 Slot + Memento 不可变快照；详见 [GameSaveArchitecture.md](GameSaveArchitecture.md)。
-- **记忆**：` memory/` 的分层检索、衰减、压缩与向量索引；查询必须先按 session 过滤，详见 [MemoryDesign.md](MemoryDesign.md)。
+- **记忆**：`memory/` 的分层检索、衰减、压缩与向量索引；查询必须先按 session 过滤，详见 [MemoryDesign.md](MemoryDesign.md)。
 - **上下文**：`core/context/` 的 PromptBuilder 按 priority + token budget 装配；`UserContext` 单例共享 deque 的跨 session 污染风险仍列为 P0 待办，详见 [ContextArchitecture.md](ContextArchitecture.md)。
 
-### 9.1 供应商接入与对话编排（第二轮落地）
+### 9.1 供应商接入与对话编排
 
 **配置层**：`resources/config/providers/{models,schemas}/<capability>.json` 由 `Registry` 一次解析、按 `(capability, provider, model)` 缓存；`${ENV}` 缺失保留占位并记录 `missing_env`，不静默换成空串。文件 mtime/size **以及被引用环境变量的"已设置/未设置"状态**共同构成热更新签名，避免"凭据已配好、describe 仍报不可用"。`flat_config()` 默认脱敏，`describe()` 只回元数据。
 
@@ -350,28 +299,63 @@ ToolFunction/ToolFunctionParameters  OpenAI 风格工具声明（core/pipeline/m
 
 ---
 
-## 10. 路由注册规则与本次修复的差异
+### 9.2 第四轮：存档 / 会话系统与快捷键映射
 
-| 优先级 | 差异 | 本次处置 |
-|---|---|---|
-| P0 | `endpoints.json` 中 7 个 save 端点 path 自带 `/api/save/...`，`register_all_routers` 再加 `/api` → 实际 `/api/api/save/...` | 改为资源相对路径 `/save/slots...`，最终 `/api/save/...`，与前端 `src/api/services/save.ts` 对齐 |
-| P1 | `groups.json` 声明了 `ppt.*` / `audit.*` op，但 `endpoints.json` 无对应条目，PPT/审计 HTTP 接口实际未注册 | 补 6 个 ppt 端点 + 2 个 audit 端点 |
-| P1 | WebSocket 注册在 `/`，旧文档写 `/ws` | 文档更正为 `/` |
-| P0 | 前端 `src/api/http.ts` 桌面 bridge 判 `code===0`，后端成功为 `200` | 仍为待办：共用 decoder（本次未改前端） |
-| P1 | `response.py::_unhandled_handler` 回显异常详情 | 仍为待办：对外通用 message + request_id |
-| P1 | 前端 `save.ts` 的 `restore` / `sync` / `section` 方法后端未注册 | 仍为待办：补实现或移除客户端方法 |
-| P0 | async 服务用临时 loop，长连接启动即被取消；工具方法跨 loop 调用必崩 | ✅ 第三轮改持久 loop + 执行器回投服务 loop（§7.1） |
-| P0 | PPT 大纲链路从未可用、模板 YAML 缺失使服务无法构造 | ✅ 第三轮改走 LLM 门面 + 内置预设（§7.2） |
-| P1 | `PPT` / `Shell` 构造即 `running`，管理器再启动被"已在运行"拒绝 | ✅ 第三轮构造状态交给管理器，`start` 才置 RUNNING |
-| P1 | OBS / QQBot 在 `finally` 里 `await self.stop()`（装饰后是同步管理器方法） | ✅ 第三轮改为清理引用 / `stop_original()`，断线重连不再被误停 |
-| P1 | `QQBotClient` 必填 `appid`、读不存在的 `config.appid` / `config.sandbox`；OBS 用 `obs_password` 与 UI 的 `password` 不匹配 | ✅ 第三轮统一为 UI 配置字段名 |
-| P1 | `Browser.current_url` 是 property 却被当函数调用；Live2D 声明了不存在的 `set_position` | ✅ 第三轮执行器支持 property、工具声明统一为真实方法的 `ToolFunction` |
+**会话与存档分离**。旧实现把两者写进同一个 `<user_data>/saves/` 目录：会话是 `<sid>.yaml` + `<sid>.messages.pkl`，存档槽是 `index.yaml` + `<sid>.save` + `slots/<sid>/`。会话 id 取 `index` 就会覆盖存档索引，会话列表扫描目录时也会把存档文件当成会话。现会话独立到 `<user_data>/sessions/`，启动时把旧目录里属于会话的文件一次性迁移过去（排除 `index.yaml`、`*.save`、临时文件与 `slots/`）。
 
-所有"仍为待办"项不得在文档中写成已实现；每次端点变更必须同步 `endpoints.json`、`api.md`、前端生成源与契约测试。
+**id 即路径，必须先校验**。`session_id` / `slot_id` 统一白名单 `^[A-Za-z0-9_-]{1,64}$`，所有路径再经 `utils/file/atomic.safe_join()` 兜底；非法 id 返回稳定错误而不是拼出 `../../` 写任意文件。
+
+```
+前端（录制交互 / 设置页 UI）  ──组合键字符串──▶  PUT /api/hotkeys[/{action}]
+                                                    │
+                                          HotkeyRegistry（唯一权威）
+                                           · 动作白名单 / 规范化
+                                           · 保留键 / 冲突校验
+                                           · revision 乐观并发
+                                           · 原子写 <user_data>/config/hotkeys.json
+                                                    │ subscribe 通知
+                                                    ▼
+                                          KeyboardDevice 重载映射（组合键 + hold/press）
+```
+
+---
+
+### 9.3 第五轮：日志系统
+
+**运行时模型**（`modules/logger/`）：
+
+```
+业务线程 ──LoggerRecord（已脱敏/限长）──▶ 有界 queue(maxsize)
+                                          │
+                                    LoggerThread（唯一消费者）
+                                      ├─ 控制台：每批一次 write + flush
+                                      ├─ GET_LOG 事件：缓存导入 / 异常隔离 / 失败冷却
+                                      └─ 当前批次 ─▶ LogWriter（单线程池）
+                                                       └─ 按日 <YYYY-MM-DD>.log，每批 flush
+```
+
+---
+
+## 10 .App装填与UI
+**启动顺序**：`Application.init()`（配置 + `logger.reconfigure()`）→ `runtime.instance().init()`（调度器 / 事件总线 / 网关 op / 存档管理器）→ `logger.start()` → 信号 → `UIApp.show()`（`QApplication` → 16ms dispatcher / 200ms 心跳 → 托盘 → 桌面窗口或 Web → `exec()`）。原来 `logger.start()` 排在 `runtime.init()` 之前，而 `events.emit()` 读的是模块全局 `runtime.manager`（此时为 None），启动期日志整段消失；现 `events._bus()` 统一惰性取 `runtime.instance()`。
+
+**关闭顺序**：存档保存 → 关桌面窗口 → 停 Web → 停运行时 → 停 UI（dispatcher 最后）→ 停日志。`_shutdown()` 用 `_closing` 幂等守卫、每步 `_step()` 隔离；`self.ui` 可为 None，异常分支不再用 `self.ui.exit_code` 掩盖原始异常。
+
+**运行时管理器**：`RuntimeManager.__init__` 加单例守卫；补齐 `task_manager` 别名（`api/_common.py`、`api/gateway.py`、`services/ppt/service.py` 共 13 处读取，原来根本没这个属性）；调度器不可用时 `NoopScheduler` 兜底；`stop()` 后事件总线只 clear 不置 None。
+
+**Web 装配**：`register_all_routers()` 不再把 `add_api_route()` 的返回值（`None`）传给 `include_router`；静态资源传目录而非 `index.html` 文件；`run_web()` 以 `app.conf` 的 `[Web]` 段为权威（原硬编码 8080，而配置与前端都是 8000）；`init()` 幂等；`is_ready` 要求 `server.started`。
+
+**UI 生命周期**：`show()` 后置 `_running=True`（原来 `stop()` / `exit()` 直接 return，托盘退出点了没反应）；托盘 `QMenu`/`QAction` 挂实例防 GC；`exit()` 只 `quit` 不清 `qt_app`；Web 启动失败自动降级 desktop；`BrowserViewManager` 派发失败时放弃跨线程 Qt 操作；`available_backends()` 结果缓存。
+
+**Bridge 与前端**：`is_running()` 判定修正（原拼作 `is_runing` 且方法当属性用，同步 handler 全部退化到 UI 线程内联执行）；`submit()` 用位置参数调用 handler；`dumps()` 转义 U+2028/2029 与 `</`；前端插件 `install()` 去掉 `async`（避免晚于 `app.mount()`）、`App.vue` watch 参数顺序、WS 默认事件幂等、`LogForwarder` 防前后端日志回环 + teardown。
+
+**新端点**：`POST /api/logger/append` 接收前端 `forward` 模式批量日志（数组、上限 100 条、字段白名单、正文/堆栈限长、`no_frontend_push` 防回环）。端点 94 → **95**。
 
 ---
 
 ## 11. 约束与验收清单
+
+## 
 
 - [ ] 未注册方法不可调用；`EXEC` 能力默认关闭，仅 shell 服务在受控条件下放行进程执行。
 - [ ] 所有路径经 `realpath` + `is_within` 校验，符号链接逃逸返回 `SYMLINK_ESCAPE`。
@@ -384,3 +368,17 @@ ToolFunction/ToolFunctionParameters  OpenAI 风格工具声明（core/pipeline/m
 - [ ] async 服务的 start 与所有工具方法在同一持久 loop 上；停机 await 关闭，无孤儿线程与未关闭的 HTTP client。
 - [ ] 服务配置改动后 `to_dict()` 回显当前值并注入实例；`apply_config` 不返回 `null`。
 - [ ] 服务产出（含浏览器截图、PPT 临时文件）全部落在工作区，渲染失败不留下半截 `.pptx`。
+- [ ] 会话与存档使用独立目录；非法 `session_id` / `slot_id` 不能写出目录边界。
+- [ ] 会话消息落盘后重启可恢复；`flush` / `switch` / `delete` 不丢未落盘消息。
+- [ ] `sync` → `restore` 往返可恢复会话与消息；删除存档槽同时删除主 `.save` 文件。
+- [ ] 热键修改带 `revision`，冲突 / 保留键 / 过期版本均被拒绝且状态不变；设备无需重启即生效。
+- [ ] `PUT /api/logger/level` 改动后底层 logger 与所有 handler 级别一致；`GET /api/logger/stats` 返回真实计数与 `by_level`。
+- [ ] `POST /api/logger/flush` 在日志刚写入时也不丢消息；`logger.exception()` 的 traceback 在文件、控制台与前端事件里都可见。
+- [ ] 事件总线不可用时日志仍完整打印与落盘；凭据形态（`api_key=` / `Bearer` / `sk-`）不出现在任何一路输出。
+- [ ] 启动顺序为「配置 → 运行时 → 日志 → UI」，`run()` 不依赖外部先调 `init()`；日志单例配置在 `reconfigure()` 后生效。
+- [ ] 关闭顺序为「存档 → 关窗 → 停 Web → 停运行时 → 停 UI → 停日志」，任一步失败不影响后续，`_shutdown()` 幂等。
+- [ ] 托盘「退出」与 SIGINT 能真正退出 Qt 主循环；托盘菜单、动作与图标在应用存活期间不被 GC。
+- [ ] Web 端口与 `app.conf` / 前端基址一致；静态资源挂载的是目录；`is_ready` 只在 uvicorn 真正 listen 后为真。
+- [ ] desktop 模式不启 HTTP 且能加载本地 `file://` 资源；Web 启动失败可降级到桌面窗口。
+- [ ] 跨线程 UI 操作派发失败时放弃而不是在非主线程碰 QWidget；Bridge 同步 handler 不占 UI 线程。
+- [ ] `POST /api/logger/append` 拒绝非数组 / 超 100 条 / 超长正文；转发的日志不再回推 `GET_LOG`，无前后端回环。
