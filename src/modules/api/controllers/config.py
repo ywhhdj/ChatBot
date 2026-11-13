@@ -1,10 +1,4 @@
-"""配置接口：读取、局部更新、重载、持久化、字段说明。
-
-对应 api文档.md 第 2 节。
-
-注意：配置对象是 pydantic 模型，**直接 `setattr` 不会触发校验**。
-这里用 `update_from_dict()` 走模型自己的合并逻辑，保证类型正确。
-"""
+"""配置接口：读取、局部更新、重载、持久化、字段说明。"""
 
 from __future__ import annotations
 
@@ -33,6 +27,25 @@ SECTIONS = {
 SECRET_KEYS = ("api_key", "token", "secret", "password")
 
 
+def _raw_allowed() -> bool:
+    """`raw=true` 只在「显式开关 + 本地调试模式」下可用（api.md §2.6 P0）。
+
+    默认运行、远程访问、打包发布环境一律拒绝，避免密钥经 URL/日志/前端外泄。
+    """
+    import os
+
+    if os.environ.get("CHATBOT_ALLOW_RAW_CONFIG") != "1":
+        return False
+    try:
+        cfg = _config_obj()
+        return bool(
+            getattr(cfg, "debug", False)
+            or os.environ.get("CHATBOT_DEBUG") == "1"
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _config_obj():
     from ...config import get_config
 
@@ -57,6 +70,8 @@ async def get_config_api(
     raw: bool = Query(False, description="true 时返回 api_key 等敏感字段原值"),
 ) -> ApiResponse[Dict[str, Any]]:
     """读取完整配置，或 `?section=llm` 读取单段。"""
+    if raw and not _raw_allowed():
+        raise ApiError.conflict("敏感配置原文回显未启用（仅限本地受控调试）")
     if section:
         return success(_section_to_dict(section, raw))
 

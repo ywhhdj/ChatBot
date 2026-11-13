@@ -1,679 +1,268 @@
 {
-  "version": 1,
+  "version": 2,
   "endpoints": [
     {
-      "op": "character.delete_character",
-      "handler": "modules.api.controllers.character:delete_character",
-      "http": {
-        "method": "DELETE",
-        "path": "/character/{character_id}"
-      },
-      "tags": [
-        "character"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "delete_character"
-      }
-    },
-    {
-      "op": "character.switch_character",
-      "handler": "modules.api.controllers.character:switch_character",
-      "http": {
-        "method": "POST",
-        "path": "/character/{character_id}/switch"
-      },
-      "tags": [
-        "character"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "switch_character"
-      }
-    },
-    {
-      "op": "character.get_state",
-      "handler": "modules.api.controllers.character:get_state",
+      "op": "generate.status",
+      "handler": "modules.api.controllers.greater:status",
       "http": {
         "method": "GET",
-        "path": "/character/{character_id}/state"
+        "path": "/status",
+        "status_code": 200,
+        "summary": "查询 LLM/TTS/ASR/图像/OCR/向量能力就绪状态",
+        "deprecated": false
       },
       "tags": [
-        "character"
+        "generate"
       ],
       "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
       "meta": {
-        "label": "get_state"
+        "label": "status",
+        "group": "generate",
+        "status": "新增",
+        "note": "只读探测，不触发模型加载、索引重建或全盘扫描。"
       }
     },
     {
-      "op": "character.update_state",
-      "handler": "modules.api.controllers.character:update_state",
+      "op": "generate.chat",
+      "handler": "modules.api.controllers.greater:chat_once",
       "http": {
-        "method": "PUT",
-        "path": "/character/{character_id}/state"
+        "method": "POST",
+        "path": "/chat",
+        "status_code": 200,
+        "summary": "非流式对话，一次返回完整回复",
+        "deprecated": false
       },
       "tags": [
-        "character"
+        "generate"
       ],
       "desktop": true,
+      "dispatch": "loop",
+      "timeout": 600.0,
+      "enabled": true,
       "meta": {
-        "label": "update_state"
+        "label": "chat_once",
+        "group": "generate",
+        "status": "新增",
+        "note": "route 为空时由意图路由自动判定 pure_chat / tool_call / mixed。"
       }
     },
     {
-      "op": "config.get_config_api",
-      "handler": "modules.api.controllers.config:get_config_api",
+      "op": "generate.chat_stream",
+      "handler": "modules.api.controllers.greater:chat_stream",
+      "http": {
+        "method": "POST",
+        "path": "/chat/stream",
+        "status_code": 200,
+        "summary": "SSE 流式对话",
+        "deprecated": false
+      },
+      "tags": [
+        "generate"
+      ],
+      "desktop": false,
+      "dispatch": "loop",
+      "timeout": 600.0,
+      "enabled": true,
+      "meta": {
+        "label": "chat_stream",
+        "group": "generate",
+        "status": "新增",
+        "note": "每帧 `event:` + `data:`（含 stream_id / request_id / seq / ts）；终态恰为 done / error / cancelled 之一，见 §4.1。"
+      }
+    },
+    {
+      "op": "generate.tts",
+      "handler": "modules.api.controllers.greater:tts",
+      "http": {
+        "method": "POST",
+        "path": "/tts",
+        "status_code": 200,
+        "summary": "文本转语音，返回 base64 音频",
+        "deprecated": false
+      },
+      "tags": [
+        "generate"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "tts",
+        "group": "generate",
+        "status": "新增",
+        "note": "二进制一律 base64；日志不记录音频内容。"
+      }
+    },
+    {
+      "op": "generate.asr",
+      "handler": "modules.api.controllers.greater:asr",
+      "http": {
+        "method": "POST",
+        "path": "/asr",
+        "status_code": 200,
+        "summary": "语音转文本，audio 为 base64 音频",
+        "deprecated": false
+      },
+      "tags": [
+        "generate"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "asr",
+        "group": "generate",
+        "status": "新增",
+        "note": "需限制请求体大小、音频时长与解码资源。"
+      }
+    },
+    {
+      "op": "generate.image",
+      "handler": "modules.api.controllers.greater:image_generate",
+      "http": {
+        "method": "POST",
+        "path": "/image/generations",
+        "status_code": 200,
+        "summary": "图像生成（OpenAI / Stability / ComfyUI 协议）",
+        "deprecated": false
+      },
+      "tags": [
+        "generate"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 600.0,
+      "enabled": true,
+      "meta": {
+        "label": "image_generate",
+        "group": "generate",
+        "status": "新增",
+        "note": "provider/model_id 必须落在 Registry 白名单；extra 展开为供应商原生参数。"
+      }
+    },
+    {
+      "op": "generate.ocr",
+      "handler": "modules.api.controllers.greater:ocr",
+      "http": {
+        "method": "POST",
+        "path": "/ocr",
+        "status_code": 200,
+        "summary": "图片文字识别",
+        "deprecated": false
+      },
+      "tags": [
+        "generate"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "ocr",
+        "group": "generate",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "generate.embedding",
+      "handler": "modules.api.controllers.greater:embedding",
+      "http": {
+        "method": "POST",
+        "path": "/embedding",
+        "status_code": 200,
+        "summary": "批量文本向量化",
+        "deprecated": false
+      },
+      "tags": [
+        "generate"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "embedding",
+        "group": "generate",
+        "status": "新增",
+        "note": "开发态无模型时走 hash 兜底，fingerprint 明确标记，禁止与真实向量混用。"
+      }
+    },
+    {
+      "op": "generate.command",
+      "handler": "modules.api.controllers.greater:command",
+      "http": {
+        "method": "POST",
+        "path": "/command",
+        "status_code": 200,
+        "summary": "执行工具命令文本（策略/沙箱/工作区约束）",
+        "deprecated": false
+      },
+      "tags": [
+        "generate"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "command",
+        "group": "generate",
+        "status": "新增",
+        "note": "命令文本只认 `--id`；shell 与未隔离语言默认拒绝，见 §4.4。"
+      }
+    },
+    {
+      "op": "generate.open_folder",
+      "handler": "modules.api.controllers.greater:open_folder",
       "http": {
         "method": "GET",
-        "path": "/config"
+        "path": "/folder/{type}",
+        "status_code": 200,
+        "summary": "打开受支持的本地数据目录",
+        "deprecated": false
       },
       "tags": [
-        "config"
+        "generate"
       ],
       "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
       "meta": {
-        "label": "get_config_api"
+        "label": "open_folder",
+        "group": "generate",
+        "status": "新增",
+        "note": "type 白名单：images / roles / memory / workspace；禁止任意路径。"
       }
     },
     {
-      "op": "config.patch_section",
-      "handler": "modules.api.controllers.config:patch_section",
-      "http": {
-        "method": "PATCH",
-        "path": "/config/{section}"
-      },
-      "tags": [
-        "config"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "patch_section"
-      }
-    },
-    {
-      "op": "config.reload",
-      "handler": "modules.api.controllers.config:reload",
+      "op": "generate.progress_stream",
+      "handler": "modules.api.controllers.greater:progress_stream",
       "http": {
         "method": "POST",
-        "path": "/config/reload"
+        "path": "/progress-stream/{task_id}",
+        "status_code": 200,
+        "summary": "SSE 任务进度流",
+        "deprecated": false
       },
       "tags": [
-        "config"
+        "generate"
       ],
-      "desktop": true,
+      "desktop": false,
+      "dispatch": "loop",
+      "timeout": 600.0,
+      "enabled": true,
       "meta": {
-        "label": "reload"
-      }
-    },
-    {
-      "op": "config.save",
-      "handler": "modules.api.controllers.config:save",
-      "http": {
-        "method": "POST",
-        "path": "/config/save"
-      },
-      "tags": [
-        "config"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "save"
-      }
-    },
-    {
-      "op": "config.schema",
-      "handler": "modules.api.controllers.config:schema",
-      "http": {
-        "method": "GET",
-        "path": "/config/schema"
-      },
-      "tags": [
-        "config"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "schema"
-      }
-    },
-    {
-      "op": "pipline.progress_stream",
-      "handler": "modules.api.controllers.pipline:progress_stream",
-      "http": {
-        "method": "POST",
-        "path": "/progress-stream/{task_id}"
-      },
-      "tags": [
-        "常规请求"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "progress_stream"
-      }
-    },
-    {
-      "op": "save.list_slots",
-      "handler": "modules.api.controllers.save:list_slots",
-      "http": {
-        "method": "GET",
-        "path": "/api/save/slots"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_slots"
-      }
-    },
-    {
-      "op": "save.create_slot",
-      "handler": "modules.api.controllers.save:create_slot",
-      "http": {
-        "method": "POST",
-        "path": "/api/save/slots"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "create_slot"
-      }
-    },
-    {
-      "op": "save.get_slot",
-      "handler": "modules.api.controllers.save:get_slot",
-      "http": {
-        "method": "GET",
-        "path": "/api/save/slots/{slot_id}"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_slot"
-      }
-    },
-    {
-      "op": "save.delete_slot",
-      "handler": "modules.api.controllers.save:delete_slot",
-      "http": {
-        "method": "DELETE",
-        "path": "/api/save/slots/{slot_id}"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "delete_slot"
-      }
-    },
-    {
-      "op": "save.toggle_slot",
-      "handler": "modules.api.controllers.save:toggle_slot",
-      "http": {
-        "method": "POST",
-        "path": "/api/save/slots/{slot_id}/toggle"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "toggle_slot"
-      }
-    },
-    {
-      "op": "save.save_slot",
-      "handler": "modules.api.controllers.save:save_slot",
-      "http": {
-        "method": "POST",
-        "path": "/api/save/slots/{slot_id}/save"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "save_slot"
-      }
-    },
-    {
-      "op": "save.load_slot",
-      "handler": "modules.api.controllers.save:load_slot",
-      "http": {
-        "method": "POST",
-        "path": "/api/save/slots/{slot_id}/load"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "load_slot"
-      }
-    },
-    {
-      "op": "save.update_section",
-      "handler": "modules.api.controllers.save:update_section",
-      "http": {
-        "method": "PUT",
-        "path": "/api/save/slots/{slot_id}/section"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "update_section"
-      }
-    },
-    {
-      "op": "save.sync_from_sessions",
-      "handler": "modules.api.controllers.save:sync_from_sessions",
-      "http": {
-        "method": "POST",
-        "path": "/api/save/slots/sync"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "sync_from_sessions"
-      }
-    },
-    {
-      "op": "save.restore_to_sessions",
-      "handler": "modules.api.controllers.save:restore_to_sessions",
-      "http": {
-        "method": "POST",
-        "path": "/api/save/slots/restore"
-      },
-      "tags": [
-        "save"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "restore_to_sessions"
-      }
-    },
-    {
-      "op": "service.list_services",
-      "handler": "modules.api.controllers.service:list_services",
-      "http": {
-        "method": "GET",
-        "path": "/service"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_services"
-      }
-    },
-    {
-      "op": "service.list_tools",
-      "handler": "modules.api.controllers.service:list_tools",
-      "http": {
-        "method": "GET",
-        "path": "/service/tools"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_tools"
-      }
-    },
-    {
-      "op": "service.get_service",
-      "handler": "modules.api.controllers.service:get_service",
-      "http": {
-        "method": "GET",
-        "path": "/service/{service_id}"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_service"
-      }
-    },
-    {
-      "op": "service.service_tools",
-      "handler": "modules.api.controllers.service:service_tools",
-      "http": {
-        "method": "GET",
-        "path": "/service/{service_id}/tools"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "service_tools"
-      }
-    },
-    {
-      "op": "service.service_ui",
-      "handler": "modules.api.controllers.service:service_ui",
-      "http": {
-        "method": "GET",
-        "path": "/service/{service_id}/ui"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "service_ui"
-      }
-    },
-    {
-      "op": "service.start_service",
-      "handler": "modules.api.controllers.service:start_service",
-      "http": {
-        "method": "POST",
-        "path": "/service/{service_id}/start"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "start_service"
-      }
-    },
-    {
-      "op": "service.stop_service",
-      "handler": "modules.api.controllers.service:stop_service",
-      "http": {
-        "method": "POST",
-        "path": "/service/{service_id}/stop"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "stop_service"
-      }
-    },
-    {
-      "op": "service.get_config",
-      "handler": "modules.api.controllers.service:get_config",
-      "http": {
-        "method": "GET",
-        "path": "/service/{service_id}/config"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_config"
-      }
-    },
-    {
-      "op": "service.update_config",
-      "handler": "modules.api.controllers.service:update_config",
-      "http": {
-        "method": "PUT",
-        "path": "/service/{service_id}/config"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "update_config"
-      }
-    },
-    {
-      "op": "service.apply_config",
-      "handler": "modules.api.controllers.service:apply_config",
-      "http": {
-        "method": "PUT",
-        "path": "/service/{service_id}/config/apply"
-      },
-      "tags": [
-        "service"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "apply_config"
-      }
-    },
-    {
-      "op": "session.list_sessions",
-      "handler": "modules.api.controllers.session:list_sessions",
-      "http": {
-        "method": "GET",
-        "path": "/session"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_sessions"
-      }
-    },
-    {
-      "op": "session.create_session",
-      "handler": "modules.api.controllers.session:create_session",
-      "http": {
-        "method": "POST",
-        "path": "/session"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "create_session"
-      }
-    },
-    {
-      "op": "session.get_session",
-      "handler": "modules.api.controllers.session:get_session",
-      "http": {
-        "method": "GET",
-        "path": "/session/{session_id}"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_session"
-      }
-    },
-    {
-      "op": "session.delete_session",
-      "handler": "modules.api.controllers.session:delete_session",
-      "http": {
-        "method": "DELETE",
-        "path": "/session/{session_id}"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "delete_session"
-      }
-    },
-    {
-      "op": "session.switch_session",
-      "handler": "modules.api.controllers.session:switch_session",
-      "http": {
-        "method": "POST",
-        "path": "/session/{session_id}/switch"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "switch_session"
-      }
-    },
-    {
-      "op": "session.messages",
-      "handler": "modules.api.controllers.session:messages",
-      "http": {
-        "method": "GET",
-        "path": "/session/{session_id}/messages"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "messages"
-      }
-    },
-    {
-      "op": "session.append_message",
-      "handler": "modules.api.controllers.session:append_message",
-      "http": {
-        "method": "POST",
-        "path": "/session/{session_id}/messages"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "append_message"
-      }
-    },
-    {
-      "op": "session.flush",
-      "handler": "modules.api.controllers.session:flush",
-      "http": {
-        "method": "POST",
-        "path": "/session/flush"
-      },
-      "tags": [
-        "session"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "flush"
-      }
-    },
-    {
-      "op": "skill.list_skills",
-      "handler": "modules.api.controllers.skill:list_skills",
-      "http": {
-        "method": "GET",
-        "path": "/skill"
-      },
-      "tags": [
-        "skill"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "list_skills"
-      }
-    },
-    {
-      "op": "skill.prompt",
-      "handler": "modules.api.controllers.skill:prompt",
-      "http": {
-        "method": "GET",
-        "path": "/skill/prompt"
-      },
-      "tags": [
-        "skill"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "prompt"
-      }
-    },
-    {
-      "op": "skill.get_skill",
-      "handler": "modules.api.controllers.skill:get_skill",
-      "http": {
-        "method": "GET",
-        "path": "/skill/{skill_id}"
-      },
-      "tags": [
-        "skill"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "get_skill"
-      }
-    },
-    {
-      "op": "skill.reload",
-      "handler": "modules.api.controllers.skill:reload",
-      "http": {
-        "method": "POST",
-        "path": "/skill/reload"
-      },
-      "tags": [
-        "skill"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "reload"
-      }
-    },
-    {
-      "op": "skill.activate",
-      "handler": "modules.api.controllers.skill:activate",
-      "http": {
-        "method": "POST",
-        "path": "/skill/{skill_id}/activate"
-      },
-      "tags": [
-        "skill"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "activate"
-      }
-    },
-    {
-      "op": "skill.deactivate",
-      "handler": "modules.api.controllers.skill:deactivate",
-      "http": {
-        "method": "POST",
-        "path": "/skill/{skill_id}/deactivate"
-      },
-      "tags": [
-        "skill"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "deactivate"
-      }
-    },
-    {
-      "op": "skill.execute",
-      "handler": "modules.api.controllers.skill:execute",
-      "http": {
-        "method": "POST",
-        "path": "/skill/{skill_id}/execute"
-      },
-      "tags": [
-        "skill"
-      ],
-      "desktop": true,
-      "meta": {
-        "label": "execute"
+        "label": "progress_stream",
+        "group": "generate",
+        "status": "修正",
+        "note": "生产者调用 greater.set_progress(task_id, data) 写入；0.3s 轮询、终态清理、有 deadline；事件名随 status，帧带 stream_id / request_id / seq / ts。"
       }
     },
     {
@@ -681,14 +270,23 @@
       "handler": "modules.api.controllers.system:health",
       "http": {
         "method": "GET",
-        "path": "/system/health"
+        "path": "/system/health",
+        "status_code": 200,
+        "summary": "Web、调度器、主线程、记忆与服务健康状态",
+        "deprecated": false
       },
       "tags": [
         "system"
       ],
       "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
       "meta": {
-        "label": "health"
+        "label": "health",
+        "group": "system",
+        "status": "现行",
+        "note": ""
       }
     },
     {
@@ -696,14 +294,23 @@
       "handler": "modules.api.controllers.system:info",
       "http": {
         "method": "GET",
-        "path": "/system/info"
+        "path": "/system/info",
+        "status_code": 200,
+        "summary": "版本、配置路径与数据目录",
+        "deprecated": false
       },
       "tags": [
         "system"
       ],
       "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
       "meta": {
-        "label": "info"
+        "label": "info",
+        "group": "system",
+        "status": "现行",
+        "note": ""
       }
     },
     {
@@ -711,14 +318,23 @@
       "handler": "modules.api.controllers.system:stats",
       "http": {
         "method": "GET",
-        "path": "/system/stats"
+        "path": "/system/stats",
+        "status_code": 200,
+        "summary": "uptime、日志、任务、连接与记忆统计",
+        "deprecated": false
       },
       "tags": [
         "system"
       ],
       "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
       "meta": {
-        "label": "stats"
+        "label": "stats",
+        "group": "system",
+        "status": "现行",
+        "note": ""
       }
     },
     {
@@ -726,14 +342,23 @@
       "handler": "modules.api.controllers.system:gc",
       "http": {
         "method": "POST",
-        "path": "/system/gc"
+        "path": "/system/gc",
+        "status_code": 200,
+        "summary": "触发记忆衰减/清理与日志排空",
+        "deprecated": false
       },
       "tags": [
         "system"
       ],
       "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
       "meta": {
-        "label": "gc"
+        "label": "gc",
+        "group": "system",
+        "status": "现行",
+        "note": ""
       }
     },
     {
@@ -741,14 +366,2543 @@
       "handler": "modules.api.controllers.system:ping",
       "http": {
         "method": "GET",
-        "path": "/system/ping"
+        "path": "/system/ping",
+        "status_code": 200,
+        "summary": "轻量连通性探测",
+        "deprecated": false
       },
       "tags": [
         "system"
       ],
       "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
       "meta": {
-        "label": "ping"
+        "label": "ping",
+        "group": "system",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "config.get",
+      "handler": "modules.api.controllers.config:get_config_api",
+      "http": {
+        "method": "GET",
+        "path": "/config",
+        "status_code": 200,
+        "summary": "读取配置，可按 section 过滤",
+        "deprecated": false
+      },
+      "tags": [
+        "config"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_config_api",
+        "group": "config",
+        "status": "现行",
+        "note": "涉及密钥时默认遮蔽；raw 明文回显仅限本地受控调试，属待收敛项。"
+      }
+    },
+    {
+      "op": "config.schema",
+      "handler": "modules.api.controllers.config:schema",
+      "http": {
+        "method": "GET",
+        "path": "/config/schema",
+        "status_code": 200,
+        "summary": "配置字段描述",
+        "deprecated": false
+      },
+      "tags": [
+        "config"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "schema",
+        "group": "config",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "config.reload",
+      "handler": "modules.api.controllers.config:reload",
+      "http": {
+        "method": "POST",
+        "path": "/config/reload",
+        "status_code": 200,
+        "summary": "从配置文件重新加载",
+        "deprecated": false
+      },
+      "tags": [
+        "config"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "reload",
+        "group": "config",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "config.save",
+      "handler": "modules.api.controllers.config:save",
+      "http": {
+        "method": "POST",
+        "path": "/config/save",
+        "status_code": 200,
+        "summary": "持久化配置到磁盘",
+        "deprecated": false
+      },
+      "tags": [
+        "config"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "save",
+        "group": "config",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "config.patch_section",
+      "handler": "modules.api.controllers.config:patch_section",
+      "http": {
+        "method": "PATCH",
+        "path": "/config/{section}",
+        "status_code": 200,
+        "summary": "局部更新配置段",
+        "deprecated": false
+      },
+      "tags": [
+        "config"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "patch_section",
+        "group": "config",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "logger.get_level",
+      "handler": "modules.api.controllers.logger:get_level",
+      "http": {
+        "method": "GET",
+        "path": "/logger/level",
+        "status_code": 200,
+        "summary": "当前日志级别",
+        "deprecated": false
+      },
+      "tags": [
+        "logger"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_level",
+        "group": "logger",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "logger.set_level",
+      "handler": "modules.api.controllers.logger:set_level",
+      "http": {
+        "method": "PUT",
+        "path": "/logger/level",
+        "status_code": 200,
+        "summary": "设置日志级别",
+        "deprecated": false
+      },
+      "tags": [
+        "logger"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "set_level",
+        "group": "logger",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "logger.list_levels",
+      "handler": "modules.api.controllers.logger:list_levels",
+      "http": {
+        "method": "GET",
+        "path": "/logger/levels",
+        "status_code": 200,
+        "summary": "可用日志级别列表",
+        "deprecated": false
+      },
+      "tags": [
+        "logger"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_levels",
+        "group": "logger",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "logger.stats",
+      "handler": "modules.api.controllers.logger:stats",
+      "http": {
+        "method": "GET",
+        "path": "/logger/stats",
+        "status_code": 200,
+        "summary": "日志计数与按级别统计",
+        "deprecated": false
+      },
+      "tags": [
+        "logger"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "stats",
+        "group": "logger",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "logger.records",
+      "handler": "modules.api.controllers.logger:records",
+      "http": {
+        "method": "GET",
+        "path": "/logger/records",
+        "status_code": 200,
+        "summary": "最近日志记录",
+        "deprecated": false
+      },
+      "tags": [
+        "logger"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "records",
+        "group": "logger",
+        "status": "新增",
+        "note": "limit / level 为查询参数；正文限长，不回传凭据。"
+      }
+    },
+    {
+      "op": "logger.flush",
+      "handler": "modules.api.controllers.logger:flush",
+      "http": {
+        "method": "POST",
+        "path": "/logger/flush",
+        "status_code": 200,
+        "summary": "排空日志缓冲",
+        "deprecated": false
+      },
+      "tags": [
+        "logger"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "flush",
+        "group": "logger",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "logger.append",
+      "handler": "modules.api.controllers.logger:append_log",
+      "http": {
+        "method": "POST",
+        "path": "/logger/append",
+        "status_code": 200,
+        "summary": "接收前端 LogForwarder 批量日志",
+        "deprecated": false
+      },
+      "tags": [
+        "logger"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "append_log",
+        "group": "logger",
+        "status": "新增",
+        "note": "单次上限 100 条、字段白名单、正文 4000 / 堆栈 12000 字符；no_frontend_push=true 不广播 GET_LOG，避免日志回环。"
+      }
+    },
+    {
+      "op": "device.info",
+      "handler": "modules.api.controllers.device:device_info",
+      "http": {
+        "method": "GET",
+        "path": "/device/info",
+        "status_code": 200,
+        "summary": "设备与平台信息（CPU/GPU/内存/推荐帧率）",
+        "deprecated": false
+      },
+      "tags": [
+        "device"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "device_info",
+        "group": "device",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "provider.list_adapters",
+      "handler": "modules.api.controllers.providers:list_adapters",
+      "http": {
+        "method": "GET",
+        "path": "/provider/adapters",
+        "status_code": 200,
+        "summary": "能力、可选 provider、当前选中与用量",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_adapters",
+        "group": "provider",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "provider.all_configs",
+      "handler": "modules.api.controllers.providers:all_configs",
+      "http": {
+        "method": "GET",
+        "path": "/provider/configs",
+        "status_code": 200,
+        "summary": "各能力供应商配置（敏感字段已掩码）",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "all_configs",
+        "group": "provider",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "provider.list_providers",
+      "handler": "modules.api.controllers.providers:list_providers",
+      "http": {
+        "method": "GET",
+        "path": "/provider/adapters/{adapter}/providers",
+        "status_code": 200,
+        "summary": "某能力下的 provider 清单",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_providers",
+        "group": "provider",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "provider.get",
+      "handler": "modules.api.controllers.providers:get_provider",
+      "http": {
+        "method": "GET",
+        "path": "/provider/adapters/{adapter}/providers/{provider}",
+        "status_code": 200,
+        "summary": "读取 provider 配置（已掩码）",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_provider",
+        "group": "provider",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "provider.status",
+      "handler": "modules.api.controllers.providers:status",
+      "http": {
+        "method": "GET",
+        "path": "/provider/adapters/{adapter}/providers/{provider}/status",
+        "status_code": 200,
+        "summary": "provider 完整状态与本地模型文件状态",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "status",
+        "group": "provider",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "provider.switch",
+      "handler": "modules.api.controllers.providers:switch",
+      "http": {
+        "method": "POST",
+        "path": "/provider/adapters/{adapter}/switch",
+        "status_code": 200,
+        "summary": "切换 provider / 模型",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "switch",
+        "group": "provider",
+        "status": "新增",
+        "note": "先初始化新实例并健康检查，成功后才切流量；配置覆盖走白名单。"
+      }
+    },
+    {
+      "op": "provider.stop",
+      "handler": "modules.api.controllers.providers:stop_adapter",
+      "http": {
+        "method": "POST",
+        "path": "/provider/adapters/{adapter}/stop",
+        "status_code": 200,
+        "summary": "停止当前 provider，保留能力门面",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "stop_adapter",
+        "group": "provider",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "provider.download",
+      "handler": "modules.api.controllers.providers:download_model",
+      "http": {
+        "method": "POST",
+        "path": "/provider/adapters/{adapter}/providers/{provider}/download",
+        "status_code": 200,
+        "summary": "触发本地模型下载（进度走 WebSocket）",
+        "deprecated": false
+      },
+      "tags": [
+        "provider"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 30.0,
+      "enabled": true,
+      "meta": {
+        "label": "download_model",
+        "group": "provider",
+        "status": "新增",
+        "note": "返回 task_id；已安装且未 force 时返回 1001「模型已存在」。"
+      }
+    },
+    {
+      "op": "service.list",
+      "handler": "modules.api.controllers.service:list_services",
+      "http": {
+        "method": "GET",
+        "path": "/service",
+        "status_code": 200,
+        "summary": "服务列表（支持 running_only）",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_services",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.list_tools",
+      "handler": "modules.api.controllers.service:list_tools",
+      "http": {
+        "method": "GET",
+        "path": "/service/tools",
+        "status_code": 200,
+        "summary": "所有服务工具定义",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_tools",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.get",
+      "handler": "modules.api.controllers.service:get_service",
+      "http": {
+        "method": "GET",
+        "path": "/service/{service_id}",
+        "status_code": 200,
+        "summary": "服务详情",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_service",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.tools",
+      "handler": "modules.api.controllers.service:service_tools",
+      "http": {
+        "method": "GET",
+        "path": "/service/{service_id}/tools",
+        "status_code": 200,
+        "summary": "单服务工具定义",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "service_tools",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.ui",
+      "handler": "modules.api.controllers.service:service_ui",
+      "http": {
+        "method": "GET",
+        "path": "/service/{service_id}/ui",
+        "status_code": 200,
+        "summary": "服务 UI 描述",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "service_ui",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.register",
+      "handler": "modules.api.controllers.service:register_service",
+      "http": {
+        "method": "POST",
+        "path": "/service/{service_id}/register",
+        "status_code": 200,
+        "summary": "注册服务实例",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "register_service",
+        "group": "service",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.start",
+      "handler": "modules.api.controllers.service:start_service",
+      "http": {
+        "method": "POST",
+        "path": "/service/{service_id}/start",
+        "status_code": 200,
+        "summary": "启动服务",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "start_service",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.stop",
+      "handler": "modules.api.controllers.service:stop_service",
+      "http": {
+        "method": "POST",
+        "path": "/service/{service_id}/stop",
+        "status_code": 200,
+        "summary": "停止服务",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "stop_service",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.get_config",
+      "handler": "modules.api.controllers.service:get_config",
+      "http": {
+        "method": "GET",
+        "path": "/service/{service_id}/config",
+        "status_code": 200,
+        "summary": "读取服务配置",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_config",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.update_config",
+      "handler": "modules.api.controllers.service:update_config",
+      "http": {
+        "method": "PUT",
+        "path": "/service/{service_id}/config",
+        "status_code": 200,
+        "summary": "更新服务配置",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "update_config",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "service.apply_config",
+      "handler": "modules.api.controllers.service:apply_config",
+      "http": {
+        "method": "PUT",
+        "path": "/service/{service_id}/config/apply",
+        "status_code": 200,
+        "summary": "应用配置（停 → 启）",
+        "deprecated": false
+      },
+      "tags": [
+        "service"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 120.0,
+      "enabled": true,
+      "meta": {
+        "label": "apply_config",
+        "group": "service",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "skill.list",
+      "handler": "modules.api.controllers.skill:list_skills",
+      "http": {
+        "method": "GET",
+        "path": "/skill",
+        "status_code": 200,
+        "summary": "技能列表（支持 active_only）",
+        "deprecated": false
+      },
+      "tags": [
+        "skill"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_skills",
+        "group": "skill",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "skill.prompt",
+      "handler": "modules.api.controllers.skill:prompt",
+      "http": {
+        "method": "GET",
+        "path": "/skill/prompt",
+        "status_code": 200,
+        "summary": "给模型使用的技能提示词",
+        "deprecated": false
+      },
+      "tags": [
+        "skill"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "prompt",
+        "group": "skill",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "skill.reload",
+      "handler": "modules.api.controllers.skill:reload",
+      "http": {
+        "method": "POST",
+        "path": "/skill/reload",
+        "status_code": 200,
+        "summary": "重新扫描技能目录",
+        "deprecated": false
+      },
+      "tags": [
+        "skill"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "reload",
+        "group": "skill",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "skill.get",
+      "handler": "modules.api.controllers.skill:get_skill",
+      "http": {
+        "method": "GET",
+        "path": "/skill/{skill_id}",
+        "status_code": 200,
+        "summary": "技能详情",
+        "deprecated": false
+      },
+      "tags": [
+        "skill"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_skill",
+        "group": "skill",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "skill.activate",
+      "handler": "modules.api.controllers.skill:activate",
+      "http": {
+        "method": "POST",
+        "path": "/skill/{skill_id}/activate",
+        "status_code": 200,
+        "summary": "启用技能",
+        "deprecated": false
+      },
+      "tags": [
+        "skill"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "activate",
+        "group": "skill",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "skill.deactivate",
+      "handler": "modules.api.controllers.skill:deactivate",
+      "http": {
+        "method": "POST",
+        "path": "/skill/{skill_id}/deactivate",
+        "status_code": 200,
+        "summary": "停用技能",
+        "deprecated": false
+      },
+      "tags": [
+        "skill"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "deactivate",
+        "group": "skill",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "skill.execute",
+      "handler": "modules.api.controllers.skill:execute",
+      "http": {
+        "method": "POST",
+        "path": "/skill/{skill_id}/execute",
+        "status_code": 200,
+        "summary": "执行技能（超时 30s，AST 白名单沙盒）",
+        "deprecated": false
+      },
+      "tags": [
+        "skill"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 30.0,
+      "enabled": true,
+      "meta": {
+        "label": "execute",
+        "group": "skill",
+        "status": "现行",
+        "note": "shell / javascript 类型可见但不支持执行；输出限制到 <workspace>/skill/<skill_id>/。"
+      }
+    },
+    {
+      "op": "workspace.info",
+      "handler": "modules.api.controllers.workspace:info",
+      "http": {
+        "method": "GET",
+        "path": "/workspace",
+        "status_code": 200,
+        "summary": "当前工作区、权限档位与输出目录",
+        "deprecated": false
+      },
+      "tags": [
+        "workspace"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "info",
+        "group": "workspace",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "workspace.select",
+      "handler": "modules.api.controllers.workspace:select",
+      "http": {
+        "method": "POST",
+        "path": "/workspace/select",
+        "status_code": 200,
+        "summary": "选择目录与权限档位",
+        "deprecated": false
+      },
+      "tags": [
+        "workspace"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "select",
+        "group": "workspace",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "workspace.confirm",
+      "handler": "modules.api.controllers.workspace:confirm",
+      "http": {
+        "method": "POST",
+        "path": "/workspace/confirm",
+        "status_code": 200,
+        "summary": "显式确认敏感原文暴露",
+        "deprecated": false
+      },
+      "tags": [
+        "workspace"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "confirm",
+        "group": "workspace",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "workspace.clear",
+      "handler": "modules.api.controllers.workspace:clear",
+      "http": {
+        "method": "DELETE",
+        "path": "/workspace",
+        "status_code": 200,
+        "summary": "撤销选择，回到默认工作区",
+        "deprecated": false
+      },
+      "tags": [
+        "workspace"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "clear",
+        "group": "workspace",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "audit.tree",
+      "handler": "modules.api.controllers.audit:tree",
+      "http": {
+        "method": "GET",
+        "path": "/audit/tree",
+        "status_code": 200,
+        "summary": "服务 → 方法 → 参数 能力树",
+        "deprecated": false
+      },
+      "tags": [
+        "audit"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "tree",
+        "group": "audit",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "audit.tools",
+      "handler": "modules.api.controllers.audit:tools",
+      "http": {
+        "method": "GET",
+        "path": "/audit/tools",
+        "status_code": 200,
+        "summary": "扁平工具清单",
+        "deprecated": false
+      },
+      "tags": [
+        "audit"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "tools",
+        "group": "audit",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "session.list",
+      "handler": "modules.api.controllers.session:list_sessions",
+      "http": {
+        "method": "GET",
+        "path": "/session",
+        "status_code": 200,
+        "summary": "会话列表",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_sessions",
+        "group": "session",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "session.create",
+      "handler": "modules.api.controllers.session:create_session",
+      "http": {
+        "method": "POST",
+        "path": "/session",
+        "status_code": 200,
+        "summary": "创建会话",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "create_session",
+        "group": "session",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "session.flush",
+      "handler": "modules.api.controllers.session:flush",
+      "http": {
+        "method": "POST",
+        "path": "/session/flush",
+        "status_code": 200,
+        "summary": "等待会话后台写入落盘",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "flush",
+        "group": "session",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "session.get",
+      "handler": "modules.api.controllers.session:get_session",
+      "http": {
+        "method": "GET",
+        "path": "/session/{session_id}",
+        "status_code": 200,
+        "summary": "会话详情",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_session",
+        "group": "session",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "session.delete",
+      "handler": "modules.api.controllers.session:delete_session",
+      "http": {
+        "method": "DELETE",
+        "path": "/session/{session_id}",
+        "status_code": 200,
+        "summary": "删除会话",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "delete_session",
+        "group": "session",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "session.switch",
+      "handler": "modules.api.controllers.session:switch_session",
+      "http": {
+        "method": "POST",
+        "path": "/session/{session_id}/switch",
+        "status_code": 200,
+        "summary": "切换当前会话",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "switch_session",
+        "group": "session",
+        "status": "现行",
+        "note": "切换是状态边界：先取消旧 session 的活动 stream 再加载新数据。"
+      }
+    },
+    {
+      "op": "session.messages",
+      "handler": "modules.api.controllers.session:messages",
+      "http": {
+        "method": "GET",
+        "path": "/session/{session_id}/messages",
+        "status_code": 200,
+        "summary": "会话消息列表",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "messages",
+        "group": "session",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "session.append",
+      "handler": "modules.api.controllers.session:append_message",
+      "http": {
+        "method": "POST",
+        "path": "/session/{session_id}/messages",
+        "status_code": 200,
+        "summary": "追加一条消息",
+        "deprecated": false
+      },
+      "tags": [
+        "session"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "append_message",
+        "group": "session",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.all",
+      "handler": "modules.api.controllers.save:all_slots",
+      "http": {
+        "method": "GET",
+        "path": "/save",
+        "status_code": 200,
+        "summary": "全量存档槽（含未激活）",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "all_slots",
+        "group": "save",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.snapshot_status",
+      "handler": "modules.api.controllers.save:snapshot_status",
+      "http": {
+        "method": "GET",
+        "path": "/save/snapshot/status",
+        "status_code": 200,
+        "summary": "恢复事务、自动存档与调度器 gate 状态",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "snapshot_status",
+        "group": "save",
+        "status": "新增",
+        "note": "组合根未由应用层装配时返回 2001，不假造成功。"
+      }
+    },
+    {
+      "op": "save.snapshot_graph",
+      "handler": "modules.api.controllers.save:snapshot_graph",
+      "http": {
+        "method": "GET",
+        "path": "/save/snapshot/graph",
+        "status_code": 200,
+        "summary": "revision DAG（parent_revision / branch_id）",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "snapshot_graph",
+        "group": "save",
+        "status": "新增",
+        "note": "slot_id 为 query 参数，缺省取当前槽。"
+      }
+    },
+    {
+      "op": "save.snapshot_preview",
+      "handler": "modules.api.controllers.save:snapshot_preview",
+      "http": {
+        "method": "POST",
+        "path": "/save/snapshot/preview",
+        "status_code": 200,
+        "summary": "恢复预演（只读、无副作用）",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "snapshot_preview",
+        "group": "save",
+        "status": "新增",
+        "note": "slot_id / revision 为 query 参数；Preview → Prepare → Commit → Verify 中不改动运行态。"
+      }
+    },
+    {
+      "op": "save.snapshot",
+      "handler": "modules.api.controllers.save:snapshot",
+      "http": {
+        "method": "POST",
+        "path": "/save/snapshot",
+        "status_code": 200,
+        "summary": "创建不可变 Snapshot revision",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 300.0,
+      "enabled": true,
+      "meta": {
+        "label": "snapshot",
+        "group": "save",
+        "status": "新增",
+        "note": "stage → validate → publish；parent 默认取最近成功恢复的 revision。"
+      }
+    },
+    {
+      "op": "save.snapshot_restore",
+      "handler": "modules.api.controllers.save:snapshot_restore",
+      "http": {
+        "method": "POST",
+        "path": "/save/snapshot/restore",
+        "status_code": 200,
+        "summary": "执行恢复事务（失败自动回滚）",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 300.0,
+      "enabled": true,
+      "meta": {
+        "label": "snapshot_restore",
+        "group": "save",
+        "status": "新增",
+        "note": "墓碑优先于旧快照；事务结束后恢复调度并启动 pre-restore 缓冲期计时。"
+      }
+    },
+    {
+      "op": "save.list_slots",
+      "handler": "modules.api.controllers.save:list_slots",
+      "http": {
+        "method": "GET",
+        "path": "/save/slots",
+        "status_code": 200,
+        "summary": "存档槽列表",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_slots",
+        "group": "save",
+        "status": "修正",
+        "note": "修正旧端点 path 自带 /api 造成的 /api/api/... 重复前缀。"
+      }
+    },
+    {
+      "op": "save.create",
+      "handler": "modules.api.controllers.save:create_slot",
+      "http": {
+        "method": "POST",
+        "path": "/save/slots",
+        "status_code": 200,
+        "summary": "创建存档槽",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "create_slot",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.sync",
+      "handler": "modules.api.controllers.save:sync_from_sessions",
+      "http": {
+        "method": "POST",
+        "path": "/save/slots/sync",
+        "status_code": 200,
+        "summary": "从会话同步到存档槽",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "sync_from_sessions",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.restore",
+      "handler": "modules.api.controllers.save:restore_to_sessions",
+      "http": {
+        "method": "POST",
+        "path": "/save/slots/restore",
+        "status_code": 200,
+        "summary": "从存档槽恢复到会话",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "restore_to_sessions",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.get",
+      "handler": "modules.api.controllers.save:get_slot",
+      "http": {
+        "method": "GET",
+        "path": "/save/slots/{slot_id}",
+        "status_code": 200,
+        "summary": "存档槽详情",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_slot",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.delete",
+      "handler": "modules.api.controllers.save:delete_slot",
+      "http": {
+        "method": "DELETE",
+        "path": "/save/slots/{slot_id}",
+        "status_code": 200,
+        "summary": "删除存档槽",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "delete_slot",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.toggle",
+      "handler": "modules.api.controllers.save:toggle_slot",
+      "http": {
+        "method": "POST",
+        "path": "/save/slots/{slot_id}/toggle",
+        "status_code": 200,
+        "summary": "切换激活存档槽",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "toggle_slot",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.save",
+      "handler": "modules.api.controllers.save:save_slot",
+      "http": {
+        "method": "POST",
+        "path": "/save/slots/{slot_id}/save",
+        "status_code": 200,
+        "summary": "写入存档",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "save_slot",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.load",
+      "handler": "modules.api.controllers.save:load_slot",
+      "http": {
+        "method": "POST",
+        "path": "/save/slots/{slot_id}/load",
+        "status_code": 200,
+        "summary": "加载存档",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "load_slot",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "save.update_section",
+      "handler": "modules.api.controllers.save:update_section",
+      "http": {
+        "method": "PUT",
+        "path": "/save/slots/{slot_id}/section",
+        "status_code": 200,
+        "summary": "更新存档分段",
+        "deprecated": false
+      },
+      "tags": [
+        "save"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "update_section",
+        "group": "save",
+        "status": "修正",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.list",
+      "handler": "modules.api.controllers.character:list_characters",
+      "http": {
+        "method": "GET",
+        "path": "/character",
+        "status_code": 200,
+        "summary": "角色列表",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_characters",
+        "group": "character",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.presets",
+      "handler": "modules.api.controllers.character:presets",
+      "http": {
+        "method": "GET",
+        "path": "/character/presets",
+        "status_code": 200,
+        "summary": "角色预设（情绪映射等）",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "presets",
+        "group": "character",
+        "status": "新增",
+        "note": "静态路径必须先于 /character/{character_id} 注册。"
+      }
+    },
+    {
+      "op": "character.current",
+      "handler": "modules.api.controllers.character:current",
+      "http": {
+        "method": "GET",
+        "path": "/character/current",
+        "status_code": 200,
+        "summary": "当前角色",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "current",
+        "group": "character",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.create",
+      "handler": "modules.api.controllers.character:create_character",
+      "http": {
+        "method": "POST",
+        "path": "/character",
+        "status_code": 200,
+        "summary": "创建角色",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "create_character",
+        "group": "character",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.get",
+      "handler": "modules.api.controllers.character:get_character",
+      "http": {
+        "method": "GET",
+        "path": "/character/{character_id}",
+        "status_code": 200,
+        "summary": "角色详情",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_character",
+        "group": "character",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.update",
+      "handler": "modules.api.controllers.character:update_character",
+      "http": {
+        "method": "PUT",
+        "path": "/character/{character_id}",
+        "status_code": 200,
+        "summary": "更新角色",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "update_character",
+        "group": "character",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.delete",
+      "handler": "modules.api.controllers.character:delete_character",
+      "http": {
+        "method": "DELETE",
+        "path": "/character/{character_id}",
+        "status_code": 200,
+        "summary": "删除角色",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "delete_character",
+        "group": "character",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.switch",
+      "handler": "modules.api.controllers.character:switch_character",
+      "http": {
+        "method": "POST",
+        "path": "/character/{character_id}/switch",
+        "status_code": 200,
+        "summary": "切换当前角色",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "switch_character",
+        "group": "character",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.get_state",
+      "handler": "modules.api.controllers.character:get_state",
+      "http": {
+        "method": "GET",
+        "path": "/character/{character_id}/state",
+        "status_code": 200,
+        "summary": "角色运行状态",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_state",
+        "group": "character",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "character.update_state",
+      "handler": "modules.api.controllers.character:update_state",
+      "http": {
+        "method": "PUT",
+        "path": "/character/{character_id}/state",
+        "status_code": 200,
+        "summary": "更新角色状态",
+        "deprecated": false
+      },
+      "tags": [
+        "character"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "update_state",
+        "group": "character",
+        "status": "现行",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.layers",
+      "handler": "modules.api.controllers.memories:layers",
+      "http": {
+        "method": "GET",
+        "path": "/memory/layers",
+        "status_code": 200,
+        "summary": "分层记忆（short_term / long_term / detailed）",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "layers",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.short_term",
+      "handler": "modules.api.controllers.memories:short_term",
+      "http": {
+        "method": "GET",
+        "path": "/memory/short",
+        "status_code": 200,
+        "summary": "短期记忆摘要",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "short_term",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.long_term",
+      "handler": "modules.api.controllers.memories:long_term",
+      "http": {
+        "method": "GET",
+        "path": "/memory/long",
+        "status_code": 200,
+        "summary": "长期记忆",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "long_term",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.search",
+      "handler": "modules.api.controllers.memories:search",
+      "http": {
+        "method": "POST",
+        "path": "/memory/search",
+        "status_code": 200,
+        "summary": "语义 / 相关记忆检索",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "search",
+        "group": "memory",
+        "status": "新增",
+        "note": "必须先按 session_id 过滤再查询存储。"
+      }
+    },
+    {
+      "op": "memory.compressed",
+      "handler": "modules.api.controllers.memories:compressed",
+      "http": {
+        "method": "GET",
+        "path": "/memory/compressed",
+        "status_code": 200,
+        "summary": "压缩记忆列表",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "compressed",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.stats",
+      "handler": "modules.api.controllers.memories:stats",
+      "http": {
+        "method": "GET",
+        "path": "/memory/stats",
+        "status_code": 200,
+        "summary": "记忆容量统计",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "stats",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.decay",
+      "handler": "modules.api.controllers.memories:decay",
+      "http": {
+        "method": "POST",
+        "path": "/memory/decay",
+        "status_code": 200,
+        "summary": "手动触发记忆衰减",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "decay",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.flush",
+      "handler": "modules.api.controllers.memories:flush",
+      "http": {
+        "method": "POST",
+        "path": "/memory/flush",
+        "status_code": 200,
+        "summary": "等待后台写入完成",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "flush",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.retention",
+      "handler": "modules.api.controllers.memories:retention",
+      "http": {
+        "method": "POST",
+        "path": "/memory/retention",
+        "status_code": 200,
+        "summary": "设置记忆保留期 / 层级（默认预演）",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "retention",
+        "group": "memory",
+        "status": "新增",
+        "note": "静态路径必须先于 /memory/{memory_id} 注册；dry_run 默认 true，code 为稳定拒绝码（bad_scope / not_found / no_change…），不是 HTTP 错误。"
+      }
+    },
+    {
+      "op": "memory.pin",
+      "handler": "modules.api.controllers.memories:pin",
+      "http": {
+        "method": "POST",
+        "path": "/memory/pin",
+        "status_code": 200,
+        "summary": "固定 / 取消固定一条记忆",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "pin",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "memory.revive",
+      "handler": "modules.api.controllers.memories:revive",
+      "http": {
+        "method": "POST",
+        "path": "/memory/revive",
+        "status_code": 200,
+        "summary": "唤醒 faded / archived 记忆",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "revive",
+        "group": "memory",
+        "status": "新增",
+        "note": "复用 MemoryAPI.retention_service，提升稳定度但不重置时间轴；scope 先按 session_id 校验。"
+      }
+    },
+    {
+      "op": "memory.delete",
+      "handler": "modules.api.controllers.memories:delete_memory",
+      "http": {
+        "method": "DELETE",
+        "path": "/memory/{memory_id}",
+        "status_code": 200,
+        "summary": "删除单条记忆（墓碑协议）",
+        "deprecated": false
+      },
+      "tags": [
+        "memory"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "delete_memory",
+        "group": "memory",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "task.get",
+      "handler": "modules.api.controllers.task:get_task",
+      "http": {
+        "method": "GET",
+        "path": "/task/{task_id}",
+        "status_code": 200,
+        "summary": "查询后台任务状态与结果",
+        "deprecated": false
+      },
+      "tags": [
+        "task"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "get_task",
+        "group": "task",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "task.cancel",
+      "handler": "modules.api.controllers.task:cancel_task",
+      "http": {
+        "method": "POST",
+        "path": "/task/{task_id}/cancel",
+        "status_code": 200,
+        "summary": "取消任务（尽力而为）",
+        "deprecated": false
+      },
+      "tags": [
+        "task"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "cancel_task",
+        "group": "task",
+        "status": "新增",
+        "note": "同步线程不保证强制终止；超时只标记放弃等待。"
+      }
+    },
+    {
+      "op": "ppt.templates",
+      "handler": "modules.api.controllers.ppt:templates",
+      "http": {
+        "method": "GET",
+        "path": "/ppt/templates",
+        "status_code": 200,
+        "summary": "PPT 模板列表",
+        "deprecated": false
+      },
+      "tags": [
+        "ppt"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "templates",
+        "group": "ppt",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "ppt.outline",
+      "handler": "modules.api.controllers.ppt:outline",
+      "http": {
+        "method": "POST",
+        "path": "/ppt/outline",
+        "status_code": 200,
+        "summary": "生成内容大纲（不渲染）",
+        "deprecated": false
+      },
+      "tags": [
+        "ppt"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 300.0,
+      "enabled": true,
+      "meta": {
+        "label": "outline",
+        "group": "ppt",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "ppt.render",
+      "handler": "modules.api.controllers.ppt:render",
+      "http": {
+        "method": "POST",
+        "path": "/ppt/render",
+        "status_code": 200,
+        "summary": "提交渲染后台任务，返回 task_id",
+        "deprecated": false
+      },
+      "tags": [
+        "ppt"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 600.0,
+      "enabled": true,
+      "meta": {
+        "label": "render",
+        "group": "ppt",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "ppt.render_async",
+      "handler": "modules.api.controllers.ppt:render_async",
+      "http": {
+        "method": "POST",
+        "path": "/ppt/render/async",
+        "status_code": 200,
+        "summary": "提交渲染后台任务（render 的显式异步别名）",
+        "deprecated": false
+      },
+      "tags": [
+        "ppt"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 600.0,
+      "enabled": true,
+      "meta": {
+        "label": "render_async",
+        "group": "ppt",
+        "status": "新增",
+        "note": "与 /ppt/render 共用同一实现、DTO 与 task_id 语义；保留别名兼容旧前端 renderAsync 调用，不新建第二套队列。"
+      }
+    },
+    {
+      "op": "ppt.status",
+      "handler": "modules.api.controllers.ppt:job_status",
+      "http": {
+        "method": "GET",
+        "path": "/ppt/job/{task_id}",
+        "status_code": 200,
+        "summary": "查询渲染任务",
+        "deprecated": false
+      },
+      "tags": [
+        "ppt"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "job_status",
+        "group": "ppt",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "ppt.download",
+      "handler": "modules.api.controllers.ppt:download",
+      "http": {
+        "method": "GET",
+        "path": "/ppt/download/{file_name}",
+        "status_code": 200,
+        "summary": "取回产出文件（base64 + 路径）",
+        "deprecated": false
+      },
+      "tags": [
+        "ppt"
+      ],
+      "desktop": true,
+      "dispatch": "thread",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "download",
+        "group": "ppt",
+        "status": "新增",
+        "note": "只接受 basename，并再次经工作区边界复验；产出固定落在 <workspace>/ppt/。"
+      }
+    },
+    {
+      "op": "hotkeys.list",
+      "handler": "modules.api.controllers.hotkeys:list_hotkeys",
+      "http": {
+        "method": "GET",
+        "path": "/hotkeys",
+        "status_code": 200,
+        "summary": "快捷键清单与 revision",
+        "deprecated": false
+      },
+      "tags": [
+        "hotkeys"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "list_hotkeys",
+        "group": "hotkeys",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "hotkeys.validate",
+      "handler": "modules.api.controllers.hotkeys:validate_hotkey",
+      "http": {
+        "method": "POST",
+        "path": "/hotkeys/validate",
+        "status_code": 200,
+        "summary": "录制中实时校验组合键",
+        "deprecated": false
+      },
+      "tags": [
+        "hotkeys"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "validate_hotkey",
+        "group": "hotkeys",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "hotkeys.reset",
+      "handler": "modules.api.controllers.hotkeys:reset_hotkeys",
+      "http": {
+        "method": "POST",
+        "path": "/hotkeys/reset",
+        "status_code": 200,
+        "summary": "恢复默认快捷键",
+        "deprecated": false
+      },
+      "tags": [
+        "hotkeys"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "reset_hotkeys",
+        "group": "hotkeys",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "hotkeys.batch_update",
+      "handler": "modules.api.controllers.hotkeys:update_hotkeys",
+      "http": {
+        "method": "PUT",
+        "path": "/hotkeys",
+        "status_code": 200,
+        "summary": "批量更新快捷键",
+        "deprecated": false
+      },
+      "tags": [
+        "hotkeys"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "update_hotkeys",
+        "group": "hotkeys",
+        "status": "新增",
+        "note": "带 revision 乐观并发；冲突 / 保留键 / 过期版本均拒绝且状态不变。"
+      }
+    },
+    {
+      "op": "hotkeys.update",
+      "handler": "modules.api.controllers.hotkeys:update_hotkey",
+      "http": {
+        "method": "PUT",
+        "path": "/hotkeys/{action}",
+        "status_code": 200,
+        "summary": "更新单个快捷键",
+        "deprecated": false
+      },
+      "tags": [
+        "hotkeys"
+      ],
+      "desktop": true,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "update_hotkey",
+        "group": "hotkeys",
+        "status": "新增",
+        "note": ""
+      }
+    },
+    {
+      "op": "catalog.api",
+      "handler": "modules.api.controllers.catelog:api",
+      "http": {
+        "method": "GET",
+        "path": "/catalog",
+        "status_code": 200,
+        "summary": "端点清单 + OpenAPI schema（动态表单用）",
+        "deprecated": false
+      },
+      "tags": [
+        "catalog"
+      ],
+      "desktop": false,
+      "dispatch": "loop",
+      "timeout": 60.0,
+      "enabled": true,
+      "meta": {
+        "label": "api",
+        "group": "catalog",
+        "status": "新增",
+        "note": "返回 {total, groups, endpoints[]}；不计入 desktop bridge op。"
       }
     }
   ]

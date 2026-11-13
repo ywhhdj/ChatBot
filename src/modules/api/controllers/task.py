@@ -11,6 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Query
 
 from ..dto import TaskStatusData
+from ..requests import TaskCancelRequest
 from ..response import ApiError, ApiResponse, success
 from .._common import get_schedular
 
@@ -73,12 +74,23 @@ async def get_task(
     )
 
 
-async def cancel_task(task_id: str) -> ApiResponse[TaskStatusData]:
-    """取消任务（尽力而为）。"""
+async def cancel_task(
+    task_id: str,
+    payload: Optional[TaskCancelRequest] = None,
+) -> ApiResponse[TaskStatusData]:
+    """取消任务（尽力而为）；reason 只写审计日志，不改变取消语义。"""
     s = get_schedular()
     if s.get_task_status(task_id) is None:
         raise ApiError.not_found(f"任务 {task_id}")
 
+    reason = payload.reason if isinstance(payload, TaskCancelRequest) else ""
+    if reason:
+        try:
+            from ...logger import logger
+
+            logger.info(f"[Task] cancel {task_id}: {reason[:120]}")
+        except Exception:  # noqa: BLE001
+            pass
     ok = s.cancel_task(task_id)
     info = s.get_task_status(task_id) or {}
     return success(

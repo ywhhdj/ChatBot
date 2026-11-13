@@ -184,9 +184,6 @@ class ExternalSkillManager:
             logger.warning(f"[Skills] 技能 {skill_id} 校验失败: {'; '.join(errors)}")
             return
 
-        # 原来传的是 file_path.parent（skills 根目录），
-        # 于是 __get_exec_type 去找 skills/scripts —— 永远不存在，
-        # exec_type 恒为 0(none)。这里传技能自己的目录。
         exec_type, entry, code = self._probe_scripts(skill_dir)
 
         with self._lock:

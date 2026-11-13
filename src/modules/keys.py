@@ -13,6 +13,9 @@ class ServiceKeys:
     QQBOT = "qqbot"
     PPT = "ppt"
     SHELL = "shell"
+    
+    class Game:
+        MINECRAFT = "game.minecraft"
 
 ALL_SERVICE_IDS = (
     ServiceKeys.BROWSER,

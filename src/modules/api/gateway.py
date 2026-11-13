@@ -38,6 +38,7 @@ from typing import Any, Callable, Dict, Optional
 from ..logger import logger
 from .response import (
     CODE_INTERNAL,
+    MESSAGES,
     ApiError,
     error_body,
     get_request_id,
@@ -123,8 +124,9 @@ class ApiGateway:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[Gateway] op {op} 失败: {exc}")
-            return error_body(ApiError(str(exc), code=CODE_INTERNAL), rid)
+            # 与 REST 一致：详情只写脱敏日志，客户端拿稳定 message + request_id
+            logger.warning(f"[Gateway] op {op} 失败 request_id={rid}: {type(exc).__name__}")
+            return error_body(ApiError(MESSAGES[CODE_INTERNAL], code=CODE_INTERNAL), rid)
 
         return _ok(result, rid)
 
@@ -339,6 +341,14 @@ def _ok(data: Any, rid: str) -> Dict[str, Any]:
         data.setdefault("request_id", rid)
         data.setdefault("ts", time.time())
         return data
+    # handler 返回 ApiResponse（pydantic）时直接展开，不能再包一层 data
+    if hasattr(data, "model_dump") and all(
+        hasattr(data, key) for key in ("ok", "code", "message")
+    ):
+        out = data.model_dump()
+        out["request_id"] = out.get("request_id") or rid
+        out.setdefault("ts", time.time())
+        return out
     return success(
         data,
         request_id=rid,

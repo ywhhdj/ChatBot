@@ -93,6 +93,17 @@ async def render(payload: Optional[PptRenderRequest] = None) -> ApiResponse[PptR
     return success(PptRenderData(ok=True, task_id=task_id, message="任务已提交"))
 
 
+async def render_async(
+    payload: Optional[PptRenderRequest] = None,
+) -> ApiResponse[PptRenderData]:
+    """提交渲染后台任务（`/ppt/render` 的显式异步别名，api.md §7 P1）。
+
+    两者共用同一实现、同一 DTO 与同一 `task_id` 语义；保留别名是为兼容
+    旧前端 `renderAsync` 调用，不新建第二套任务队列。
+    """
+    return await render(payload)
+
+
 async def job_status(task_id: str) -> ApiResponse[PptJobData]:
     svc = _service()
     st = await to_thread(svc.job_status, task_id)

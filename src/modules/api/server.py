@@ -186,14 +186,14 @@ class Web:
             return
         self.__register_router()
         from ..config import get_config
-        config = get_config()
+        config = get_config().web
         from fastapi.middleware.cors import CORSMiddleware
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=allow_origins or config.web.allow_origins,
-            allow_credentials=config.web.allow_credentials,
-            allow_methods=allow_methods or config.web.allow_methods,
-            allow_headers=allow_headers or config.web.allow_headers,
+            allow_origins=allow_origins or config.allow_origins,
+            allow_credentials=config.allow_credentials,
+            allow_methods=allow_methods or config.allow_methods,
+            allow_headers=allow_headers or config.allow_headers,
         )
         from .controllers.websocket import register_websocket_routes  # noqa: F401
         register_websocket_routes(self.get_app())

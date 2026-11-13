@@ -1,11 +1,4 @@
-"""记忆系统配置（json 驱动，与 api / providers 一致）。
-
-`config/memory.json` 是唯一外部入口；不存在或解析失败时回退内置默认值
-并记 warning，绝不让一个写错的配置把应用起不来。
-
-所有向量配置都在 `vector` 段里。**没有 index_path**：向量索引由
-Milvus 服务端管理，本地不再保存任何索引文件或 id 映射。
-"""
+"""记忆系统配置（json 驱动，与 api / providers 一致）"""
 
 from __future__ import annotations
 
@@ -78,11 +71,10 @@ class MemoryConfig(BaseModel):
             k: v for k, v in (self.consolidation or {}).items() if k in known
         })
 
-
+from ..runtime import RuntimePath
 def load_memory_config(path: str = "") -> MemoryConfig:
-    """从 `config/memory.json` 加载；不存在或解析失败时用默认值。"""
     target = Path(path) if path else (
-        Path(os.getenv(MEMORY_CONFIG_ENV, DEFAULT_MEMORY_CONFIG_DIR)) / "memory.json"
+        RuntimePath.get_memories_path("system.json")
     )
     if not target.is_file():
         return MemoryConfig()

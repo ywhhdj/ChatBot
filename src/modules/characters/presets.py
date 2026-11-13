@@ -10,7 +10,7 @@ from typing import List, Optional
 from ..runtime import RuntimePath
 
 from .models import Character, CharacterAttributes, CharacterState
-from ..core.pipeline.emotion.predictor import id_to_name
+from ..core.pipeline.emotion import id_to_emotion
 from..utils.file import yaml
 
 def create_custom(
@@ -47,7 +47,7 @@ def create_custom(
             topics_allowed=topics_allowed or [],
             topics_forbidden=topics_forbidden or [],
             affection_level=affection,
-            mood=id_to_name(mood),
+            mood=id_to_emotion(mood),
             mood_modifiers=mood_modifiers or {},
             random_words=random_words or [],
             action_verbs=action_verbs or [],
@@ -121,6 +121,6 @@ def load_character(path: str) -> List[Character]:
 
 
 def create_defaults() :
-    path=str(RuntimePath.get_templates_path("roles.yaml"))
+    path=str(RuntimePath.get_template_path("roles.yaml"))
     return load_character(path)
     

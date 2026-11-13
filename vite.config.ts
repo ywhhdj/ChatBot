@@ -10,7 +10,7 @@ import viteImagemin from 'vite-plugin-imagemin'
 import tailwindcss from '@tailwindcss/vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pathSrc = path.resolve(__dirname, 'web');
+const pathSrc = path.resolve(__dirname, 'ui');
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -24,6 +24,7 @@ export default defineConfig({
       dts: path.resolve(pathSrc, 'auto-imports.d.ts'),
     }),
     Components({
+      dirs: ['ui/components'],        // 相对 root
       dts: path.resolve(pathSrc, 'components.d.ts'),
     }),
     viteImagemin({
@@ -41,7 +42,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./web', import.meta.url))
+      '@': pathSrc,
     },
   },
   server: {
@@ -49,15 +50,14 @@ export default defineConfig({
       ignored: [
         "mobile",
         "log",
-        "src_py",
+        "src",
         "memory",
         "resources",
         "tests",
         "docs",
         "others",
         "node_modules",
-        "dist",
-        "static"
+        "dist"
       ]
     }
   },
@@ -87,7 +87,10 @@ export default defineConfig({
     },
     minify: 'terser',
     terserOptions: {
-      compress: { drop_console: true, drop_debugger: true }
+      compress: {
+        drop_console: true,
+        drop_debugger: true
+      }
     },
   },
 })

@@ -1,14 +1,4 @@
 """API 层异常定义。
-
-README 目录里 `modules/api/exceptions.py` 独立成文件，
-而此前 `ApiError` 直接写在 `response.py` 里 —— 这里按目录归位，
-`response.py` 再 re-export，保证既有 `from ..response import ApiError` 仍然可用。
-
-设计要点
-────────
-`ApiError` 继承 `HTTPException`：既能 `raise` 让 FastAPI 立刻返回，
-又能被 `install_exception_handlers` 捕获后转成统一信封 ——
-失败响应的 body 与成功响应同构，前端只需判 `ok`。
 """
 
 from __future__ import annotations

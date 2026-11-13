@@ -25,7 +25,6 @@ from ...config import get_config
 from ...logger import logger
 from ..native import decorator
 from .orchestrator import CharacterOrchestrator
-from .emotion.predictor import LLMEmotionClassifier
 from ...providers.entity import LLM, ASR, TTS
 
 from ... import runtime
@@ -50,7 +49,6 @@ _init_lock = threading.Lock()
 _init_future: Optional["concurrent.futures.Future[None]"] = None
 _init_error: Optional[BaseException] = None
 _default_character_id = "qingmei"
-_emotion_classifier: Optional[LLMEmotionClassifier] = None
 
 #: capability → 配置里的字段名（app.conf 允许覆盖 Registry 默认值）
 _CONFIG_KEYS = {
@@ -64,10 +62,7 @@ class Router:
     """把用户输入交给 CharacterOrchestrator，并把结果转成事件广播出去。"""
 
     def __init__(self, llm_manager: LLM) -> None:
-        self._orchestrator = CharacterOrchestrator(
-            llm_manager=llm_manager,
-            emotion_predictor=_emotion_classifier,
-        )
+        self._orchestrator = CharacterOrchestrator(llm_manager=llm_manager)
 
     async def route(
         self,
@@ -250,14 +245,10 @@ async def ensure_initialized_async() -> None:
 
 
 async def _do_initialize() -> None:
-    global _llm, _asr, _tts, _char_router, _saved_sessions, _emotion_classifier
+    global _llm, _asr, _tts, _char_router, _saved_sessions
 
     config = get_config()
     _saved_sessions = runtime.manager.session_manager.get("default") # type: ignore
-
-    # 情绪分类默认纯规则，不额外调用 LLM（每轮省一次完整推理）
-    if _emotion_classifier is None:
-        _emotion_classifier = LLMEmotionClassifier().initialize()
 
     if _llm is None:
         _llm = LLM()

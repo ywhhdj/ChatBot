@@ -45,6 +45,8 @@ class QQBotClient(base.BaseService):
         sandbox: bool = True,
         debug: bool = False,
         token: str = "",
+        blocked_users: list[str] = [],
+        allowed_groups: list[str] = []
     ) -> None:
         super().__init__()
         self.config = QQBotConfig(
@@ -53,6 +55,12 @@ class QQBotClient(base.BaseService):
             token=token,
             secret=secret,
             sandbox=bool(sandbox),
+            blocked_users=blocked_users,
+            allowed_groups=allowed_groups,
+            #需要过滤的事件
+            lifecycle_events=[
+                models.QQBotEvent.LifecycleEvent.C2C_MSG_CREATE
+            ]
         )
         self.debug = debug
         self._token: Optional[str] = None
@@ -82,6 +90,47 @@ class QQBotClient(base.BaseService):
         }
         self.set_status()
         self.bot_info: Optional[models.QQBotData.QQBotInfo] = None
+    
+    def _is_msg_allowed(self, event_type: str, data: Dict) -> bool:
+        """统一的过滤网关"""
+        # 1. 只有特定事件才需要过滤
+        if event_type not in [
+            "GROUP_AT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE", 
+            models.QQBotEvent.LifecycleEvent.C2C_MSG_CREATE
+        ]:
+            return True
+
+        author = data.get("author", {})
+        user_id = author.get("id") or author.get("member_openid")
+        group_id = data.get("group_openid") or data.get("channel_id")
+        content = data.get("content", "").strip()
+        msg_id = data.get("id")
+
+        # 2. 防抖：判断 msg_id 是否已处理过（防止平台重复推送）
+        if msg_id in self._recent_msgs:
+            return False
+        self._recent_msgs[msg_id] = time.time()
+        # 清理过期缓存
+        if len(self._recent_msgs) > 1000:
+            self._recent_msgs = {k: v for k, v in self._recent_msgs.items() if time.time() - v < 60}
+        if self.config:
+            # 3. 黑名单过滤
+            if user_id in self.config.blocked_users:
+                logger.debug(f"[QQBot] 忽略黑名单用户消息: {user_id}")
+                return False
+
+            # 4. 白名单群组过滤
+            if self.config.allowed_groups and group_id not in self.config.allowed_groups:
+                logger.debug(f"[QQBot] 忽略非白名单群组: {group_id}")
+                return False
+
+        # 5. 内容过滤：比如必须 @ 机器人，或者必须带前缀 `/`
+        # 这里以带前缀 `/` 为例（不带前缀的闲聊直接忽略）
+        # if not content.startswith("/") and event_type != "C2C_MESSAGE_CREATE":
+        #     logger.debug(f"[QQBot] 忽略未带指令前缀的消息: {content}")
+        #     return False
+
+        return True
     
     #控制工具命令
     def get_tools(self) -> base.ServiceTool:

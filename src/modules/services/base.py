@@ -70,7 +70,6 @@ class BaseService(ABC, ServiceLifecycleHook):
         self._initialized = True
 
         self.config: Optional["BaseServiceConfig"] = None
-        # S4：总是创建；是否起线程由 ServiceManager 决定
         self.stop_event = threading.Event()
         self.state = "created"
 

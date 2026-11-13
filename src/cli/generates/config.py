@@ -1,6 +1,6 @@
 from modules.runtime import RuntimePath
 from modules.services.config import get_service_classes
-from src_py.modules.keys import ALL_SERVICE_IDS
+from modules.keys import ALL_SERVICE_IDS
 from modules.utils.file import yaml
 
 

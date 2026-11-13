@@ -37,7 +37,6 @@ from ..context.request import RequestContext, set_current, reset_current
 LLMCaller = Callable[[List[Dict[str, str]]], Awaitable[str]]
 CommandExecutor = Callable[[str], Awaitable[Any]]
 from ...types.common import Message
-from .emotion.predictor import DEFAULT_EMOTION_ID
 
 
 async def _resolve(value: Any) -> Any:
@@ -54,15 +53,14 @@ async def _resolve(value: Any) -> Any:
 class CharacterOrchestrator:
     """把用户输入分流到纯角色聊天或后台任务代理。"""
 
-    def __init__(self, llm_manager: LLM, emotion_predictor=None) -> None:
+    def __init__(self, llm_manager: LLM) -> None:
         from ... import runtime
 
         self._char_mgr = runtime.manager.character_manager
         self._llm = llm_manager
         self._router = IntentRouter()
         from ..context.user import UserContext
-        
-        self._emotion_predictor = emotion_predictor
+
         self._user_context = UserContext()
         self._last_result = OrchestrationResult()
         self._service_orch = CLTTool()
@@ -920,39 +918,31 @@ class CharacterOrchestrator:
         text = (result.chat_response or "").strip()
         if not text:
             return
+        from . import emotion
         try:
-            from .emotion.predictor import (
-                DEFAULT_EMOTION_ID,
-                LLMEmotionClassifier,
-            )
+            clf = emotion.get_emotion()
+            emotion.init()
+            self._emotion_clf = clf
 
-            clf = getattr(self, "_emotion_clf", None)
-            if clf is None:
-                injected = getattr(self, "_emotion_predictor", None)
-                clf = injected if callable(getattr(injected, "classify", None)) else LLMEmotionClassifier()
-                self._emotion_clf = clf
-
-            if inspect.iscoroutinefunction(clf.classify): # type: ignore
+            if inspect.iscoroutinefunction(clf.predict): # type: ignore
                 mood = await asyncio.wait_for(
-                    clf.classify(text),  # type: ignore
+                    clf.predict(text),  # type: ignore
                     timeout=self.EMOTION_TIMEOUT
                 )
             else:
                 loop = asyncio.get_running_loop()
                 mood = await asyncio.wait_for(
-                    loop.run_in_executor(None, clf.classify, text), # type: ignore
+                    loop.run_in_executor(None, clf.predict, text), # type: ignore
                     timeout=self.EMOTION_TIMEOUT,
                 )
             if not isinstance(mood, int):
-                mood = DEFAULT_EMOTION_ID
+                mood = emotion.DEFAULT_EMOTION_ID
         except (asyncio.TimeoutError, TimeoutError):
-            # 回落路径本身不能再 import 任何东西：模块加载失败时这里若再抛，
-            # 会顺着 finally 盖掉真正的回复结果。DEFAULT_EMOTION_ID 是模块级常量。
             logger.debug("[Orchestrator] 情绪预测超时，回落平静")
-            mood = DEFAULT_EMOTION_ID
+            mood = emotion.DEFAULT_EMOTION_ID
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[Orchestrator] 情绪预测失败，回落平静: {exc}")
-            mood = DEFAULT_EMOTION_ID
+            mood = emotion.DEFAULT_EMOTION_ID
 
         try:
             old_mood = int(getattr(character.state, "mood", 4) or 4)

@@ -17,11 +17,13 @@ from ..dto import (
     SlotInfoData,
     SlotListData,
     SlotMeta,
+    SnapshotActionData,
 )
 from ..requests import (
     SlotCreateRequest,
     SlotSectionUpdateRequest,
     SlotSyncRequest,
+    SnapshotRequest,
 )
 from ..response import ApiError, ApiResponse, success
 from .._common import to_thread
@@ -190,3 +192,129 @@ async def restore_to_sessions() -> ApiResponse[Dict[str, Any]]:
     sm = _sm()
     result = await to_thread(sm.restore_to_sessions)
     return success(result, message=f"已恢复 {result.get('restored', 0)} 个会话")
+
+
+# ─────────────────── Snapshot revision（api.md §7 P2） ───────────────────
+def _coordinator():
+    """取存档组合根；未由应用层显式装配时返回稳定 2001，不假造成功。"""
+    import sqlite3
+
+    try:
+        from ...manager.saves.coordinator import get_save_coordinator
+        from ...runtime import RuntimePath
+
+        sm = _sm()
+        root = str(
+            getattr(sm, "root", "")
+            or RuntimePath.get_user_data_path("snapshots")
+        )
+        db = RuntimePath.get_user_data_path("memory") / "memories.db"
+
+        def conn_factory():
+            return sqlite3.connect(
+                str(db), timeout=5.0, check_same_thread=False
+            )
+
+        return get_save_coordinator(
+            save_manager=sm, root=root, conn_factory=conn_factory
+        )
+    except Exception:  # noqa: BLE001
+        raise ApiError.not_initialized(
+            "存档组合根", "SaveCoordinator 依赖未由应用层注入"
+        )
+
+
+def _snapshot_data(action: str, p: SnapshotRequest, raw: Any) -> SnapshotActionData:
+    data = dict(raw) if isinstance(raw, dict) else {}
+    return SnapshotActionData(
+        ok=bool(data.get("ok", data.get("success", action in ("preview", "graph", "status")))),
+        slot_id=str(data.get("slot_id", p.slot_id) or ""),
+        revision=str(data.get("revision", p.revision) or ""),
+        action=action,
+        code=str(data.get("code", "") or ""),
+        raw=data,
+    )
+
+
+def _snapshot_payload(payload: Any) -> SnapshotRequest:
+    return payload if isinstance(payload, SnapshotRequest) else (
+        SnapshotRequest.model_validate(payload or {})
+    )
+
+
+async def snapshot(payload: SnapshotRequest) -> ApiResponse[SnapshotActionData]:
+    """创建不可变 Snapshot revision（stage → validate → publish）。"""
+    p = _snapshot_payload(payload)
+    try:
+        raw = await to_thread(
+            _coordinator().snapshot,
+            p.slot_id,
+            trigger=p.trigger,
+            label=p.label,
+            branch_id=p.branch_id,
+        )
+    except ApiError:
+        raise
+    except Exception:  # noqa: BLE001
+        raise ApiError.not_initialized("存档组合根", "快照创建失败")
+    return success(_snapshot_data("snapshot", p, raw), message="快照已创建")
+
+
+async def snapshot_status() -> ApiResponse[SnapshotActionData]:
+    """恢复事务、自动存档与调度器 gate 的当前状态。"""
+    try:
+        raw = await to_thread(_coordinator().status)
+    except ApiError:
+        raise
+    except Exception:  # noqa: BLE001
+        raise ApiError.not_initialized("存档组合根", "状态查询失败")
+    return success(_snapshot_data("status", SnapshotRequest(), raw))
+
+
+async def snapshot_graph(
+    slot_id: str = "",
+) -> ApiResponse[SnapshotActionData]:
+    """revision DAG（parent_revision / branch_id）。"""
+    try:
+        raw = await to_thread(_coordinator().graph, slot_id)
+    except ApiError:
+        raise
+    except Exception:  # noqa: BLE001
+        raise ApiError.not_initialized("存档组合根", "DAG 查询失败")
+    return success(_snapshot_data("graph", SnapshotRequest(slot_id=slot_id), raw))
+
+
+async def snapshot_preview(
+    slot_id: str = "",
+    revision: str = "",
+) -> ApiResponse[SnapshotActionData]:
+    """恢复预演：只读、无副作用（Preview → Prepare → Commit → Verify）。"""
+    try:
+        raw = await to_thread(_coordinator().preview, slot_id, revision)
+    except ApiError:
+        raise
+    except Exception:  # noqa: BLE001
+        raise ApiError.not_initialized("存档组合根", "恢复预演失败")
+    return success(
+        _snapshot_data("preview", SnapshotRequest(slot_id=slot_id, revision=revision), raw),
+        message="恢复预演完成（未改动运行态）",
+    )
+
+
+async def snapshot_restore(payload: SnapshotRequest) -> ApiResponse[SnapshotActionData]:
+    """恢复事务：失败自动 rollback，墓碑优先于旧快照。"""
+    p = _snapshot_payload(payload)
+    try:
+        raw = await to_thread(
+            _coordinator().restore,
+            p.slot_id,
+            p.revision,
+            branch_id=p.branch_id,
+            label=p.label,
+        )
+    except ApiError:
+        raise
+    except Exception:  # noqa: BLE001
+        raise ApiError.not_initialized("存档组合根", "恢复事务失败")
+    data = _snapshot_data("restore", p, raw)
+    return success(data, message="恢复事务已完成" if data.ok else "恢复事务已回滚")

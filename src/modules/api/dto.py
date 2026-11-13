@@ -527,7 +527,13 @@ class ImageGenerateData(_Base):
 
 # ───────────────────────── SSE 事件（text/event-stream） ─────────────────────────
 class SseEventBase(_Base):
+    """统一事件信封：seq 单调递增，每流恰有一个终态（见 api.md §4.1）。"""
+
     type: str
+    stream_id: str = ""
+    request_id: str = ""
+    seq: int = 0
+    ts: float = 0.0
 
 
 class SseChunkEvent(SseEventBase):
@@ -626,3 +632,62 @@ class HotkeyValidateData(_Base):
     normalized: str = ""
     display: str = ""
     conflict_with: str = ""
+
+
+# ─────────────────── 生成类扩展（controllers/greater.py） ───────────────────
+class OCRResultData(_Base):
+    text: str = ""
+    provider: str = ""
+    model: str = ""
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EmbeddingData(_Base):
+    vectors: List[List[float]] = Field(default_factory=list)
+    dim: int = 0
+    model: str = ""
+    count: int = 0
+
+
+class GenerationStatusData(_Base):
+    """各生成能力就绪状态；health 类探测不得触发模型加载。"""
+
+    llm: AbilityStatus = Field(default_factory=AbilityStatus)
+    tts: AbilityStatus = Field(default_factory=AbilityStatus)
+    asr: AbilityStatus = Field(default_factory=AbilityStatus)
+    image: AbilityStatus = Field(default_factory=AbilityStatus)
+    ocr: AbilityStatus = Field(default_factory=AbilityStatus)
+    embedding: AbilityStatus = Field(default_factory=AbilityStatus)
+    ready: bool = False
+
+
+# ─────────────────── 日志转发 / 记忆动作 / 存档快照 ───────────────────
+class LogAppendData(_Base):
+    accepted: int = 0
+    dropped: int = 0
+    total: int = 0
+    no_frontend_push: bool = True
+
+
+class MemoryActionData(_Base):
+    """与 memories.application.retention.ActionResult 一一对应。"""
+
+    memory_id: int = 0
+    session_id: str = ""
+    action: str = ""
+    applied: bool = False
+    code: str = "ok"
+    before: Dict[str, Any] = Field(default_factory=dict)
+    after: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class SnapshotActionData(_Base):
+    """SaveCoordinator / RestoreCoordinator 的稳定返回。"""
+
+    ok: bool = False
+    slot_id: str = ""
+    revision: str = ""
+    action: str = ""
+    code: str = ""
+    raw: Dict[str, Any] = Field(default_factory=dict)

@@ -16,8 +16,8 @@ from __future__ import annotations
 import threading
 from typing import Any, Dict, List, Optional
 
-from src_py.modules.runtime import RuntimePath
-from src_py.modules.utils.file import yaml
+from ...runtime import RuntimePath
+from ...utils.file import yaml
 
 from .models import ColorScheme, TemplateSpec
 

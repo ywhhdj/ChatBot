@@ -8,15 +8,28 @@ from collections import deque
 from typing import Any, Deque, Dict, List, Optional
 from fastapi import APIRouter, Query
 
-from ..dto import LoggerLevelData, LoggerStatsData, LogRecordData
+from ..dto import LogAppendData, LoggerLevelData, LoggerStatsData, LogRecordData
+from ..requests import LogAppendRequest, LoggerLevelRequest
 from ..response import ApiError, ApiResponse, success
 from .._common import to_thread
 
 router = APIRouter(prefix="/logger", tags=["logger"])
 
 RECENT_CAPACITY = 200
+LOG_APPEND_MAX = 100
+MESSAGE_MAX = 4000
+STACK_MAX = 12000
 
 LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+# 前端 LogLevel -> 后端 logging 级别
+LEVEL_ALIASES = {
+    "log": "INFO", "trace": "DEBUG", "debug": "DEBUG", "info": "INFO",
+    "warn": "WARNING", "warning": "WARNING", "error": "ERROR",
+    "critical": "CRITICAL", "fatal": "CRITICAL",
+}
+LOG_APPEND_FIELDS = frozenset({
+    "level", "message", "source", "timestamp", "log_name", "metadata", "stack_trace",
+})
 
 
 class _RecentLogHandler(logging.Handler):
@@ -54,6 +67,11 @@ class _RecentLogHandler(logging.Handler):
             items = [i for i in items if i.get("level", "").upper() == wanted]
         return items[-limit:] if limit > 0 else items
 
+    def add_entry(self, entry: Dict[str, Any]) -> None:
+        """前端转发日志直接入环形缓冲，不再回到 console（防回环）。"""
+        with self._lock:
+            self._buf.append(entry)
+
 
 _recent_handler: Optional[_RecentLogHandler] = None
 _recent_lock = threading.Lock()
@@ -81,13 +99,60 @@ def _ensure_recent_handler() -> _RecentLogHandler:
     return handler
 
 
-# @router.post("/append", response_model=ApiResponse[None])
-# async def append_log(payload: list) -> ApiResponse[None]:
-#     """追加日志。"""
-#     log = _get_logger()
-#     for item in payload:
-#         log.log(log.get_logging_level(item.get("level", "INFO")), item.get("message", ""))
-#     return success(message="日志已追加")
+async def append_log(payload: LogAppendRequest) -> ApiResponse[LogAppendData]:
+    """接收前端 LogForwarder 批量日志（api.md §4.3 / §7 P1）。
+
+    约束：数组上限 100 条、字段白名单、正文/堆栈限长、级别归一；
+    `no_frontend_push=true` 时不向前端广播 GET_LOG 事件，避免日志回环。
+    """
+    records = payload.records if isinstance(payload, LogAppendRequest) else []
+    total = len(records)
+    if total > LOG_APPEND_MAX:
+        raise ApiError.bad_request(f"单次最多 {LOG_APPEND_MAX} 条日志，收到 {total} 条")
+
+    handler = _ensure_recent_handler()
+    log = _get_logger()
+    accepted = 0
+    dropped = 0
+    for item in records:
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        clean = {k: v for k, v in item.items() if k in LOG_APPEND_FIELDS}
+        message = str(clean.get("message", "") or "")[:MESSAGE_MAX]
+        if not message.strip():
+            dropped += 1
+            continue
+        raw_level = str(clean.get("level", "INFO") or "INFO").upper()
+        level = LEVEL_ALIASES.get(raw_level.lower(), raw_level)
+        if level not in LEVELS:
+            level = "INFO"
+        entry = {
+            "level": level,
+            "message": message,
+            "source": str(clean.get("source", "frontend") or "frontend"),
+            "ts": clean.get("timestamp") or "",
+            "log_name": str(clean.get("log_name", "web_console") or "web_console"),
+        }
+        stack = str(clean.get("stack_trace", "") or "")[:STACK_MAX]
+        if stack:
+            entry["stack_trace"] = stack
+        handler.add_entry(entry)
+        try:
+            # 只走文件/控制台，不 emit GET_LOG 事件（no_frontend_push）
+            await to_thread(log.log, log.get_logging_level(level), message)
+        except Exception:  # noqa: BLE001
+            dropped += 1
+            continue
+        accepted += 1
+
+    return success(
+        LogAppendData(
+            accepted=accepted, dropped=dropped, total=total,
+            no_frontend_push=payload.no_frontend_push if isinstance(payload, LogAppendRequest) else True,
+        ),
+        message=f"已接收 {accepted} 条日志",
+    )
 
 async def get_level() -> ApiResponse[LoggerLevelData]:
     """当前日志级别（统一返回大写，内部以小写规范值存储）。"""
@@ -95,10 +160,13 @@ async def get_level() -> ApiResponse[LoggerLevelData]:
     level = log.current_level()
     return success(LoggerLevelData(level=level, levels=LEVELS))
 
-async def set_level(payload: Dict[str, Any]) -> ApiResponse[LoggerLevelData]:
-    """设置日志级别 `{"level": "DEBUG"}`。大小写不敏感。"""
-    body = payload if isinstance(payload, dict) else {}
-    raw = str(body.get("level", "") or "").upper()
+async def set_level(payload: LoggerLevelRequest) -> ApiResponse[LoggerLevelData]:
+    """设置日志级别 `{"level": "DEBUG"}`。大小写不敏感，兼容 bridge dict。"""
+    body = payload if isinstance(payload, LoggerLevelRequest) else (
+        LoggerLevelRequest.model_validate(payload or {})
+    )
+    raw = str(body.level or "").upper()
+    raw = LEVEL_ALIASES.get(raw.lower(), raw)
     if raw not in LEVELS:
         raise ApiError.bad_request(f"级别 {raw} 无效，可选: {', '.join(LEVELS)}")
 

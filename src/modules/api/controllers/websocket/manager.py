@@ -12,6 +12,7 @@ from ....manager import base
 from ....events import types, on_event_class
 from ....logger import logger
 from .models import ConnectionInfo
+from .context import frame_request_id, frame_stream_id
 from ...response import WebSocketAPIResponse
 
 
@@ -50,6 +51,14 @@ class WebSocketClientManager(base.BaseManager):
         self.active_connections: Dict[str, WebSocket] = {}
         self.conn_info: Dict[str, ConnectionInfo] = {}
         self.client_tasks: Dict[str, Set[asyncio.Task]] = {}
+        # 订阅 allowlist：敏感事件必须显式 subscribe 后才推送
+        self.client_subscriptions: Dict[str, Set[str]] = {}
+        self.request_tasks: Dict[str, Dict[str, asyncio.Task]] = {}
+        self.subscribable_events = frozenset({
+            types.WebSocketEventType.GET_LOG,
+            types.WebSocketEventType.GET_AUDIT_LOGS,
+            types.QQBotEventType.QQ_BOT_INFO,
+        })
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -133,6 +142,8 @@ class WebSocketClientManager(base.BaseManager):
                 ws = self.active_connections.pop(client_id, None)
                 self.conn_info.pop(client_id, None)
                 tasks = self.client_tasks.pop(client_id, set())
+                self.client_subscriptions.pop(client_id, None)
+                self.request_tasks.pop(client_id, None)
 
             # 取消该连接的所有在途任务（必须在 loop 线程内做）
             loop = self._loop
@@ -237,16 +248,27 @@ class WebSocketClientManager(base.BaseManager):
         type: str,
         data: Optional[Any] = None,
         message: str = "ok",
-        ok: bool = True
+        ok: bool = True,
+        request_id: str = "",
+        stream_id: str = "",
     ) -> bool:
-        """发送 JSON。应在 Web loop 内调用"""
+        """发送 JSON 帧；带 request_id / stream_id 关联，敏感事件按订阅过滤。"""
+        request_id = request_id or frame_request_id.get()
+        stream_id = stream_id or frame_stream_id.get()
         if not self.__in_web_loop:
             # 跨线程调用：转为投递，绝不在这里 await WebSocket
-            self.submit_to_loop(lambda: self.send_json(client_id, type=type, data=data, message=message, ok=ok))
+            self.submit_to_loop(lambda: self.send_json(
+                client_id, type=type, data=data, message=message, ok=ok,
+                request_id=request_id, stream_id=stream_id,
+            ))
             return True
 
         with self.__lock:
             ws = self.active_connections.get(client_id)
+            if type in self.subscribable_events and type not in (
+                self.client_subscriptions.get(client_id) or set()
+            ):
+                return False
         if ws is None:
             return False
 
@@ -256,7 +278,9 @@ class WebSocketClientManager(base.BaseManager):
                 ok=ok,
                 message=message,
                 data=data,
-                from_id=client_id
+                from_id=client_id,
+                request_id=request_id,
+                stream_id=stream_id,
             ).model_dump())
             return True
         except Exception as e:
@@ -292,13 +316,24 @@ class WebSocketClientManager(base.BaseManager):
                 (cid, ws) for cid, ws in self.active_connections.items() if cid != exclude
             ]
 
+        event_type = message.get("type", "")
         payload = WebSocketAPIResponse(
-            type=message.get("type", ""),
+            type=event_type,
             data=message.get("data"),
             from_id=None,
-        )
+            request_id=str(message.get("request_id", "") or "") or frame_request_id.get(),
+            stream_id=str(message.get("stream_id", "") or "") or frame_stream_id.get(),
+        ).model_dump()
+        with self.__lock:
+            allowed = {
+                cid for cid, _ in targets
+                if event_type not in self.subscribable_events
+                or event_type in (self.client_subscriptions.get(cid) or set())
+            }
         disconnected = []
         for cid, ws in targets:
+            if cid not in allowed:
+                continue
             try:
                 await ws.send_json(payload)
             except Exception:
@@ -353,6 +388,60 @@ class WebSocketClientManager(base.BaseManager):
                 logger.error(f"[WebSocket] Cleanup error: {e}")
 
             await asyncio.sleep(self.cleanup_interval)
+
+    # ---------- 订阅 / 请求级取消（api.md §4.2 P1） ----------
+
+    def subscribe(self, client_id: str, events: Optional[list] = None) -> list:
+        """只接受固定 allowlist，拒绝任意敏感事件订阅。"""
+        with self.__lock:
+            if client_id not in self.active_connections:
+                return []
+            current = self.client_subscriptions.setdefault(client_id, set())
+            for item in events or []:
+                if str(item) in self.subscribable_events:
+                    current.add(str(item))
+            return sorted(current)
+
+    def unsubscribe(self, client_id: str, events: Optional[list] = None) -> list:
+        with self.__lock:
+            current = self.client_subscriptions.get(client_id)
+            if current is None:
+                return []
+            for item in events or []:
+                current.discard(str(item))
+            return sorted(current)
+
+    def subscriptions(self, client_id: str) -> list:
+        with self.__lock:
+            return sorted(self.client_subscriptions.get(client_id) or set())
+
+    def track_request(
+        self, client_id: str, request_id: str, task: asyncio.Task
+    ) -> None:
+        """绑定 request_id → task，供 cancel 精确取消自己的在途请求。"""
+        if not request_id:
+            return
+        with self.__lock:
+            self.request_tasks.setdefault(client_id, {})[request_id] = task
+        task.add_done_callback(
+            lambda t: self._forget_request(client_id, request_id, t)
+        )
+
+    def _forget_request(
+        self, client_id: str, request_id: str, task: asyncio.Task
+    ) -> None:
+        with self.__lock:
+            bucket = self.request_tasks.get(client_id)
+            if bucket is not None and bucket.get(request_id) is task:
+                bucket.pop(request_id, None)
+
+    def cancel_request(self, client_id: str, request_id: str) -> bool:
+        with self.__lock:
+            task = (self.request_tasks.get(client_id) or {}).get(request_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True
 
     # ---------- per-client 任务管理（W7） ----------
 
