@@ -1,14 +1,19 @@
 """加载 endpoints.json → 注册 gateway op + 生成 FastAPI router。"""
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import os
+import re
+import typing
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-
 from fastapi import APIRouter
 
+from ..runtime import StandardPaths
 from ..logger import logger
+from .exceptions import ApiError
 from .registry import EndpointSpec, resolve_handler
 
 
@@ -46,7 +51,7 @@ class EndpointLoader:
         logger.info(f"[API] 已加载 {len(self.specs)} 个端点配置")
 
     def _load_groups(self) -> None:
-        path = self.config_dir / "groups.json"
+        path= StandardPaths.get_configs_dir() / "api" / "groups.json"
         if path.exists():
             try:
                 self.groups = json.loads(path.read_text("utf-8"))
@@ -54,7 +59,7 @@ class EndpointLoader:
                 logger.warning(f"[API] groups.json 解析失败: {e}")
 
     def _load_endpoints(self) -> None:
-        path = self.config_dir / "endpoints.json"
+        path= StandardPaths.get_configs_dir() / "api" / "endpoints.json"
         if not path.exists():
             logger.warning(f"[API] endpoints.json 不存在: {path}，使用空清单")
             return
@@ -93,27 +98,21 @@ class EndpointLoader:
         return count
 
     def _wrap(self, fn: Callable, spec: EndpointSpec) -> Callable:
-        """按 dispatch 包装 handler，让调度器/线程池/主线程派发对业务透明。"""
-        if spec.dispatch == "thread":
-            async def _thread(payload=None):
-                import asyncio
-                return await asyncio.to_thread(_call_handler_sync, fn, payload)
-            return _thread
+        """生成 desktop bridge 的契约适配入口（api.md §2.1 / §4.3 P1）。
 
-        if spec.dispatch == "main":
-            async def _main(payload=None):
-                # dispatcher 暴露的是 run_async_on_main_thread；旧代码引用的
-                # run_in_main_thread 并不存在，任何 dispatch=main 的端点都会
-                # 在调用时 ImportError。
-                from ..ui.dispatcher import get_main_thread_dispatcher
+        HTTP 由 FastAPI 负责「path/query/body → handler 参数」的绑定；
+        bridge 只拿到一个平铺 dict（pathParams + query + body），过去直接
+        塞给期望 Pydantic DTO 的 handler，必然 AttributeError → 3001。
+        这里按 `EndpointSpec` + handler 注解做同一套绑定，两端语义一致。
+        """
 
-                dispatcher = get_main_thread_dispatcher()
-                return await dispatcher.run_async_on_main_thread(
-                    lambda: _call_handler_sync(fn, payload)
-                )
-            return _main
+        async def entry(payload: Optional[Dict[str, Any]] = None):
+            kwargs = _build_handler_kwargs(fn, spec, payload or {})
+            return await _dispatch_handler(fn, kwargs, spec.dispatch)
 
-        return fn  # loop：网关本身已在调度器 loop 里跑
+        entry.__name__ = "op_" + re.sub(r"\W", "_", spec.op)
+        entry.__doc__ = f"bridge op {spec.op}"
+        return entry
 
     # ---------- HTTP 路由 ----------
 
@@ -129,7 +128,7 @@ class EndpointLoader:
                 fn,
                 methods=[spec.http.method.upper()],
                 status_code=spec.http.status_code,
-                tags=spec.tags or ["default"], # type: list[str]
+                tags=spec.tags or ["default"], # type:ignore
                 summary=spec.http.summary or spec.meta.get("label", ""),
                 deprecated=spec.http.deprecated,
                 name=spec.op,
@@ -146,16 +145,90 @@ class EndpointLoader:
         return out
 
 
-def _call_handler_sync(fn: Callable, payload: Any) -> Any:
-    """thread/main 分支：把 handler 当同步函数调，兼容 dict / pydantic。"""
-    import inspect
-    if inspect.iscoroutinefunction(fn):
-        import asyncio
-        return asyncio.run(fn() if payload is None else fn(payload))
+_PAYLOAD_PARAM_NAMES = frozenset({
+    "payload", "body", "data", "req", "request", "params", "payload_dict",
+})
+
+
+def _unwrap_model(annotation: Any) -> Any:
+    """Optional[X] / X | None → X。"""
+    args = getattr(annotation, "__args__", None)
+    if args:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return non_none[0]
+    return annotation
+
+
+def _build_handler_kwargs(
+    fn: Callable, spec: EndpointSpec, payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """把平铺 payload 绑定成 handler 的具名参数（含 Pydantic DTO 构造）。"""
+    from pydantic import BaseModel
+
     try:
-        return fn() if payload is None else fn(payload)
-    except TypeError:
-        return fn(**payload) if isinstance(payload, dict) else fn()
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return {}
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:  # noqa: BLE001
+        hints = {}
+
+    http_path = spec.http.path if spec.http is not None else ""
+    path_names = set(re.findall(r"\{(\w+)\}", http_path))
+    kwargs: Dict[str, Any] = {}
+
+    for name, param in sig.parameters.items():
+        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+            continue
+        annotation = hints.get(name, param.annotation)
+        model = _unwrap_model(annotation)
+
+        if isinstance(model, type) and issubclass(model, BaseModel):
+            raw = payload.get(name)
+            if isinstance(raw, model):
+                kwargs[name] = raw
+                continue
+            if isinstance(raw, dict):
+                data = raw
+            else:
+                # body 字段被前端平铺进 payload：只取模型声明过的字段
+                fields = getattr(model, "model_fields", {}) or {}
+                data = {k: v for k, v in payload.items() if k in fields}
+            try:
+                kwargs[name] = model.model_validate(data)
+            except Exception as exc:  # noqa: BLE001
+                raise ApiError.bad_request(f"请求体校验失败: {exc}")
+            continue
+
+        if name in payload:
+            kwargs[name] = payload[name]
+        elif name in path_names:
+            raise ApiError.bad_request(f"缺少路径参数 {name}")
+        elif param.default is inspect.Parameter.empty:
+            raise ApiError.bad_request(f"缺少参数 {name}")
+        # 其余可选参数用 handler 自身默认值，不显式传
+    return kwargs
+
+
+async def _dispatch_handler(
+    fn: Callable, kwargs: Dict[str, Any], dispatch: str
+) -> Any:
+    """按 dispatch 执行；异步 handler 内部已用 to_thread/调度器卸载重活。"""
+    if dispatch == "main":
+        from ..ui.dispatcher import get_main_thread_dispatcher
+
+        dispatcher = get_main_thread_dispatcher()
+        return await dispatcher.run_async_on_main_thread(lambda: fn(**kwargs))
+
+    if dispatch == "thread" and not inspect.iscoroutinefunction(fn):
+        return await asyncio.to_thread(fn, **kwargs)
+
+    result = fn(**kwargs)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
 
 _loader: Optional[EndpointLoader] = None

@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     app = create_app("ChatBot", debug)
     app.init()
     if debug or ui_mode != "auto":
-        print(f"[Main] debug={debug} ui_mode={ui_mode}")
+        print(f"[App] [Main] debug={debug} ui_mode={ui_mode}")
     return app.run()
 
 

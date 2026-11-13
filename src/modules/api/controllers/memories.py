@@ -20,6 +20,7 @@ from fastapi import APIRouter, Query
 from ..dto import (
     CompressedItem,
     DetailedMemoryItem,
+    MemoryActionData,
     MemoryCompressedListData,
     MemoryDecayData,
     MemoryDeleteData,
@@ -30,8 +31,8 @@ from ..dto import (
     MemoryShortTermData,
     MemoryStatsData,
 )
-from ..requests import MemorySearchRequest
-from ..response import ApiError, ApiResponse, success
+from ..requests import MemoryActionRequest, MemorySearchRequest
+from ..response import ApiError, ApiResponse, get_request_id, success
 from .._common import run_in_scheduler
 
 DEFAULT_TIMEOUT = 60.0
@@ -309,3 +310,68 @@ async def delete_memory(memory_id: str) -> ApiResponse[MemoryDeleteData]:
     if not ok:
         raise ApiError.internal("当前存储后端不支持删除单条记忆")
     return success(MemoryDeleteData(id=memory_id, deleted=True), message="记忆已删除")
+
+
+# ─────────────────── 记忆强度动作（api.md §7 P2） ───────────────────
+async def _memory_action(
+    payload: MemoryActionRequest,
+    action: str,
+) -> ApiResponse[MemoryActionData]:
+    """retention / pin / revive 共用入口。
+
+    复用 `MemoryAPI` 已装配的 `retention_service`，不新建第二套 SQLite
+    连接或强度模型；scope 由领域服务先按 session_id 校验。
+    """
+    p = payload if isinstance(payload, MemoryActionRequest) else (
+        MemoryActionRequest.model_validate(payload or {})
+    )
+    if not str(p.memory_id).strip():
+        raise ApiError.bad_request("memory_id 不能为空")
+    try:
+        from ...memories.api import get_memory_api
+
+        api = get_memory_api()
+        kwargs = {
+            "memory_id": p.memory_id,
+            "session_id": p.session_id,
+            "dry_run": p.dry_run,
+            "request_id": get_request_id(),
+        }
+        if action == "pin":
+            kwargs["pinned"] = p.pinned
+            result = await api.pin(**kwargs)
+        elif action == "revive":
+            result = await api.revive(**kwargs)
+        else:
+            kwargs["retention_days"] = p.retention_days
+            kwargs["layer"] = p.layer
+            result = await api.retention(**kwargs)
+    except ApiError:
+        raise
+    except Exception:  # noqa: BLE001
+        raise ApiError.not_initialized(
+            "记忆强度服务", "memory_strength 表或组合根未就绪"
+        )
+    if not isinstance(result, dict):
+        raise ApiError.internal("记忆强度服务返回格式异常")
+    data = MemoryActionData(**{
+        k: v for k, v in result.items() if k in MemoryActionData.model_fields
+    })
+    # code 是稳定拒绝码（bad_scope / not_found / no_change…），不是 HTTP 错误；
+    # 按领域契约原样回传，由客户端决定如何展示。
+    return success(data, message=f"记忆动作 {action}：{data.code}")
+
+
+async def retention(payload: MemoryActionRequest) -> ApiResponse[MemoryActionData]:
+    """设置保留期 / 层级（默认 dry_run 预演）。"""
+    return await _memory_action(payload, "retention")
+
+
+async def pin(payload: MemoryActionRequest) -> ApiResponse[MemoryActionData]:
+    """固定 / 取消固定一条记忆。"""
+    return await _memory_action(payload, "pin")
+
+
+async def revive(payload: MemoryActionRequest) -> ApiResponse[MemoryActionData]:
+    """唤醒 faded / archived 记忆（不重置时间轴）。"""
+    return await _memory_action(payload, "revive")

@@ -140,21 +140,27 @@ def register_service(service_id: str, payload: Optional[Dict[str, Any]] = None):
 @router.post("/{service_id}/start", response_model=ApiResponse[ServiceActionData])
 async def start_service(
     service_id: str,
-    payload: Optional[Dict[str, Any]] = None,
+    payload: Optional[ServiceStartRequest] = None,
 ) -> ApiResponse[ServiceActionData]:
     """启动服务。
 
     服务启动可能拉起线程 / 建立连接，放在线程池执行。
+    兼容 desktop bridge 传入的 dict（契约适配层会转成 DTO）。
     """
+    kwargs = (
+        payload.kwargs
+        if isinstance(payload, ServiceStartRequest)
+        else (payload if isinstance(payload, dict) else None)
+    ) or {}
     sm = _sm()
     if not sm.is_registered(service_id):
-        register_service(service_id, payload)
+        register_service(service_id, kwargs)
     else:
         current = state_name(sm.get_service_state(service_id))
         if current == "running":
             raise ApiError.conflict(f"服务 {service_id} 已在运行")
 
-    ok = await to_thread(sm.start_service, service_id, **(payload or {}))
+    ok = await to_thread(sm.start_service, service_id, **kwargs)
     if not ok:
         raise ApiError.internal(f"服务 {service_id} 启动失败")
 
@@ -196,13 +202,18 @@ async def get_config(service_id: str) -> ApiResponse[Dict[str, Any]]:
 @router.put("/{service_id}/config", response_model=ApiResponse[Dict[str, Any]])
 async def update_config(
     service_id: str,
-    payload: Dict[str, Any],
+    payload: ServiceConfigUpdateRequest,
 ) -> ApiResponse[Dict[str, Any]]:
-    """更新服务配置。"""
+    """更新服务配置；service_id 以路径参数为准，忽略 body 里的同名字段。"""
     sm = _sm()
+    body = (
+        payload.config
+        if isinstance(payload, ServiceConfigUpdateRequest)
+        else dict(payload or {})
+    )
 
     ok = await to_thread(
-        sm.update_service_config, service_id, payload or None
+        sm.update_service_config, service_id, body or None
     )
     if not ok:
         raise ApiError.internal(f"服务 {service_id} 配置更新失败")

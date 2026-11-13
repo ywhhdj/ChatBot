@@ -185,11 +185,19 @@ class ShellConfig(BaseServiceConfig):
                description="workspace=<工作区根>；service_output=<工作区>/shell"),
     ]
 
+class MinecraftConfig(BaseServiceConfig):
+    service_id = "minecraft"
+    name = "Minecraft 服务器"
+    enabled = False
+    fields = [
+        _field("host", "RCON 地址", default="127.0.0.1", description="服务器 IP"),
+        _field("port", "RCON 端口", type_="number", default=25575),
+        _field("password", "RCON 密码", type_="password", default=""),
+        _field("timeout", "超时(秒)", type_="number", default=5),
+    ]
+
 
 class ServiceConfig(BaseServiceConfig):
-    """聚合视图。配置必须是**实例属性**：类级共享可变对象会让所有
-    ServiceConfig 实例共用同一份 QQBotConfig，改一处串到全部。"""
-
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.qqbot = QQBotConfig()
@@ -198,6 +206,7 @@ class ServiceConfig(BaseServiceConfig):
         self.obs = ObsConfig()
         self.ppt = PptConfig()
         self.shell = ShellConfig()
+        self.minecraft = MinecraftConfig()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -207,6 +216,7 @@ class ServiceConfig(BaseServiceConfig):
             "qqbot": self.qqbot.to_dict(),
             "ppt": self.ppt.to_dict(),
             "shell": self.shell.to_dict(),
+            "minecraft": self.minecraft.to_dict(),
         }
 
 

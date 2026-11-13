@@ -18,7 +18,7 @@ def _detect_dict(refresh: bool = False) :
 
 _info:Optional[DeviceInfoData]=None
 
-def device_info(refresh: bool = False):
+def device_info(refresh: bool = False) -> ApiResponse[DeviceInfoData]:
     global _info
     if _info is not None and not refresh:
         return success(_info)

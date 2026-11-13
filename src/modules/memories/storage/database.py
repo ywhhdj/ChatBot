@@ -79,9 +79,6 @@ class MemoryRepository(AsyncSqlite):
             return
         # 用项目 resource 里的 schema；它是唯一权威 DDL。
         await self.execute_sql_file(RuntimePath.get_sql_file_path())
-        # 老库补齐 v2 列 / 新表（可中断重入）。MemoryMigrator 是同步的，
-        # 必须在 transaction() 的同一个持锁执行器任务里拿到原生连接。
-        # 原代码导入的是不存在的 `MigrationRunner`，记忆库初始化必然崩。
         from ..migrations import MemoryMigrator
 
         try:

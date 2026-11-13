@@ -81,7 +81,7 @@ class JsApiBridge:
           * 同步 handler → `schedular.submit()`，走调度器的线程池
           * 异步 handler → `schedular.run_coroutine()`，走调度器 loop
         """
-        schedular = self._schedular()。
+        schedular = self._schedular()
         running = getattr(schedular, "is_running", None)
         if callable(running):
             running = running()

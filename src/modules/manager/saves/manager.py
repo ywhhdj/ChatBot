@@ -109,7 +109,7 @@ class SaveSlotManager:
             payload[slot_id] = entry
             match = re.fullmatch(r"slot_(\d+)", str(slot_id))
             if match:
-                highest = max(highest, int(match.group(1)))。
+                highest = max(highest, int(match.group(1)))
         self._next_id = highest + 1
         try:
             atomic_write_yaml(self._index_path, payload)
@@ -502,7 +502,7 @@ class SaveSlotManager:
     def create_snapshot(
         self,
         slot_id: str = "",
-        consistency_level: "memento.ConsistencyLevel" = None,
+        consistency_level: Optional["memento.ConsistencyLevel"] = None,
         *,
         branch_id: str = "main",
         label: str = "",

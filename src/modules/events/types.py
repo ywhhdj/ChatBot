@@ -76,14 +76,6 @@ class BrowserEventType:
     BROWSER_OPEN_PAGE = "browser.open_page"
 
 class ChatStreamEventType:
-    """TD6：聊天流式事件（前端工具卡片 / phase 展示）。
-
-    命名与 `PipelineEventType.*` 区分开：
-    后者是管道内部事件（text_delta / audio_chunk 这类**数据**流），
-    这里是**元信息**流（消息开始、phase 变化、工具开始/结束）。
-    前端两类都订阅，但用途不同。
-    """
-
     MESSAGE_START = "chat.message.start"
     PHASE = "chat.phase"
     TOOL_START = "chat.tool.start"
@@ -103,6 +95,9 @@ class WebSocketEventType:
     RECORD_STOP = "record.stop"
     RECORD_CHUNK = "record.audio_chunk"
     GET_AUDIT_LOGS = "get_audit_logs"
+    SUBSCRIBE = "subscribe"          # 订阅固定 allowlist 内的事件
+    UNSUBSCRIBE = "unsubscribe"
+    CANCEL = "cancel"                # 按 request_id 取消本连接的在途请求
 
 class ToolEventType:
     TOOL_CALL_START   = "tool.call.start"      # 开始调用某个工具

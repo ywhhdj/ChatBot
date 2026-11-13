@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from ..config import ShellConfig
 from ...core.pipeline.models import ToolFunction, ToolFunctionParameters
 from ...keys import ServiceKeys
 from ...logger import logger
@@ -58,6 +59,14 @@ class ShellService(BaseService):
     ) -> None:
         super().__init__()
         self.shell = str(shell or "")
+        self.config= ShellConfig(
+            timeout=max(1.0, float(timeout or 30.0)),
+            max_output_bytes=max(1024, int(max_output_bytes or 65536)),
+            allow_dangerous_commands=allow_dangerous_commands,
+            cwd_scope=(
+            cwd_scope if cwd_scope in ("workspace", "service_output") else "workspace"
+        ),
+        )
         self.timeout = max(1.0, float(timeout or 30.0))
         self.max_output_bytes = max(1024, int(max_output_bytes or 65536))
         # 保留字段：删除/破坏类命令是硬约束，不因配置放开。

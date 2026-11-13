@@ -69,28 +69,55 @@ def get_request_id() -> str:
 class Base(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-def sse(event: Any) -> str:
+def sse(event: Any, *, event_name: str = "", **meta: Any) -> str:
+    """生成 SSE 帧，支持 `event: <name>` 与统一关联字段。
+
+    `meta` 里的 `stream_id` / `request_id` / `seq` / `ts` 合入 data；
+    不传 `event_name` 时仍是纯 `data:` 帧，兼容旧调用方。
+    """
     if isinstance(event, BaseModel):
         payload = event.model_dump(exclude_none=True)
     elif isinstance(event, dict):
-        payload = event
+        payload = dict(event)
     else:
         raise TypeError(f"unsupported SSE payload: {type(event)!r}")
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    for key, value in meta.items():
+        if value is not None:
+            payload.setdefault(key, value)
+    lines: list[str] = []
+    if event_name:
+        lines.append(f"event: {event_name}")
+    lines.append(f"data: {json.dumps(payload, ensure_ascii=False)}")
+    return "\n".join(lines) + "\n\n"
 
 
 REQUEST_ID_HEADER = "X-Request-ID"
+REQUEST_ID_MAX_LEN = 64
+_REQUEST_ID_RE = __import__("re").compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def normalize_request_id(value: str) -> str:
+    """外部传入的 X-Request-ID 限制长度/字符集，非法值一律弃用。"""
+    raw = (value or "").strip()
+    if len(raw) > REQUEST_ID_MAX_LEN or not _REQUEST_ID_RE.match(raw):
+        return ""
+    return raw
 
 # --------------------------------------------------------------------------
 # 信封
 # --------------------------------------------------------------------------
 
-class WebSocketAPIResponse(Base,Generic[T]):
+class WebSocketAPIResponse(Base, Generic[T]):
+    """WebSocket 出站帧；request_id 关联单次请求，stream_id 关联流。"""
+
     type: str
     ok: bool = True
     message: str = "ok"
     data: Optional[T] = None
     from_id: Optional[str] = None
+    request_id: str = ""
+    stream_id: str = ""
+    ts: float = Field(default_factory=time.time)
 
 
 
@@ -168,15 +195,20 @@ def install_exception_handlers(app) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled_handler(request: Request, exc: Exception):  # noqa: ANN001
-        rid = getattr(request.state, "request_id", None) or request.headers.get(
-            REQUEST_ID_HEADER
-        ) or get_request_id()
+        rid = getattr(request.state, "request_id", None) or get_request_id()
+        # 详情只写脱敏本地日志，客户端拿稳定信息 + request_id（api.md §2.3 P0）
+        try:
+            from ..logger import logger
+
+            logger.error(f"[API] 未处理异常 request_id={rid}: {type(exc).__name__}")
+        except Exception:  # noqa: BLE001
+            pass
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
                 "ok": False,
                 "code": CODE_INTERNAL,
-                "message": f"{type(exc).__name__}: {exc}",
+                "message": MESSAGES[CODE_INTERNAL],
                 "data": None,
                 "request_id": rid,
                 "ts": time.time(),
@@ -200,7 +232,7 @@ def install_request_id_middleware(app) -> None:
 
     @app.middleware("http")
     async def _request_id_mw(request: Request, call_next):  # noqa: ANN001, ANN202
-        rid = request.headers.get(REQUEST_ID_HEADER) or new_request_id()
+        rid = normalize_request_id(request.headers.get(REQUEST_ID_HEADER, "")) or new_request_id()
         request.state.request_id = rid
         token = _request_id.set(rid)
         try:

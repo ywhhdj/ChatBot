@@ -1,78 +1,224 @@
 {
+  "version": 2,
   "groups": {
+    "generate": {
+      "label": "生成与推理",
+      "prefix": "/",
+      "description": "对话、语音、图像、OCR、向量、工具命令及生成任务辅助；handler 统一在 controllers/greater.py",
+      "ops": [
+        "generate.status",
+        "generate.chat",
+        "generate.chat_stream",
+        "generate.tts",
+        "generate.asr",
+        "generate.image",
+        "generate.ocr",
+        "generate.embedding",
+        "generate.command",
+        "generate.open_folder",
+        "generate.progress_stream"
+      ]
+    },
+    "system": {
+      "label": "系统",
+      "prefix": "/system",
+      "description": "健康、版本、统计、GC 与连通性探测",
+      "ops": [
+        "system.health",
+        "system.info",
+        "system.stats",
+        "system.gc",
+        "system.ping"
+      ]
+    },
+    "config": {
+      "label": "配置",
+      "prefix": "/config",
+      "description": "配置读取、局部更新、重载、持久化与 schema",
+      "ops": [
+        "config.get",
+        "config.schema",
+        "config.reload",
+        "config.save",
+        "config.patch_section"
+      ]
+    },
+    "logger": {
+      "label": "日志",
+      "prefix": "/logger",
+      "description": "日志级别、统计、记录与排空",
+      "ops": [
+        "logger.get_level",
+        "logger.set_level",
+        "logger.list_levels",
+        "logger.stats",
+        "logger.records",
+        "logger.flush",
+        "logger.append"
+      ]
+    },
+    "device": {
+      "label": "设备",
+      "prefix": "/device",
+      "description": "CPU/GPU/内存与推荐帧率",
+      "ops": [
+        "device.info"
+      ]
+    },
+    "provider": {
+      "label": "供应商",
+      "prefix": "/provider",
+      "description": "provider 目录、状态、切换、停止与模型下载",
+      "ops": [
+        "provider.list_adapters",
+        "provider.all_configs",
+        "provider.list_providers",
+        "provider.get",
+        "provider.status",
+        "provider.switch",
+        "provider.stop",
+        "provider.download"
+      ]
+    },
+    "service": {
+      "label": "服务",
+      "prefix": "/service",
+      "description": "服务注册、启停、配置、工具与 UI 描述",
+      "ops": [
+        "service.list",
+        "service.list_tools",
+        "service.get",
+        "service.tools",
+        "service.ui",
+        "service.register",
+        "service.start",
+        "service.stop",
+        "service.get_config",
+        "service.update_config",
+        "service.apply_config"
+      ]
+    },
+    "skill": {
+      "label": "技能",
+      "prefix": "/skill",
+      "description": "技能目录、启停、提示词与受控执行",
+      "ops": [
+        "skill.list",
+        "skill.prompt",
+        "skill.reload",
+        "skill.get",
+        "skill.activate",
+        "skill.deactivate",
+        "skill.execute"
+      ]
+    },
+    "workspace": {
+      "label": "工作区",
+      "prefix": "/workspace",
+      "description": "工作区选择、权限档位与敏感确认",
+      "ops": [
+        "workspace.info",
+        "workspace.select",
+        "workspace.confirm",
+        "workspace.clear"
+      ]
+    },
     "audit": {
-      "label": "audit",
+      "label": "能力审计",
+      "prefix": "/audit",
+      "description": "可调用能力树与工具清单（非安全事件日志）",
       "ops": [
         "audit.tree",
         "audit.tools"
       ]
     },
-    "character": {
-      "label": "character",
+    "session": {
+      "label": "会话",
+      "prefix": "/session",
+      "description": "会话生命周期、消息追加与落盘",
       "ops": [
+        "session.list",
+        "session.create",
+        "session.flush",
+        "session.get",
+        "session.delete",
+        "session.switch",
+        "session.messages",
+        "session.append"
+      ]
+    },
+    "save": {
+      "label": "存档",
+      "prefix": "/save",
+      "description": "存档槽、分段更新、同步与恢复",
+      "ops": [
+        "save.all",
+        "save.snapshot_status",
+        "save.snapshot_graph",
+        "save.snapshot_preview",
+        "save.snapshot",
+        "save.snapshot_restore",
+        "save.list_slots",
+        "save.create",
+        "save.sync",
+        "save.restore",
+        "save.get",
+        "save.delete",
+        "save.toggle",
+        "save.save",
+        "save.load",
+        "save.update_section"
+      ]
+    },
+    "character": {
+      "label": "角色",
+      "prefix": "/character",
+      "description": "角色 CRUD、预设、切换与状态",
+      "ops": [
+        "character.list",
         "character.presets",
         "character.current",
+        "character.create",
         "character.get",
         "character.update",
         "character.delete",
         "character.switch",
-        "character.state.get",
-        "character.state.update"
-      ]
-    },
-    "config": {
-      "label": "config",
-      "ops": [
-        "config.patch.section",
-        "config.reload",
-        "config.save",
-        "config.schema"
-      ]
-    },
-    "device": {
-      "label": "device",
-      "ops": [
-        "device.device.info"
-      ]
-    },
-    "logger": {
-      "label": "logger",
-      "ops": [
-        "logger.get.level",
-        "logger.set.level",
-        "logger.list.levels",
-        "logger.stats",
-        "logger.records",
-        "logger.flush"
+        "character.get_state",
+        "character.update_state"
       ]
     },
     "memory": {
-      "label": "memory",
+      "label": "记忆",
+      "prefix": "/memory",
+      "description": "分层记忆、检索、压缩、统计、衰减与删除",
       "ops": [
         "memory.layers",
-        "memory.short.term",
-        "memory.long.term",
+        "memory.short_term",
+        "memory.long_term",
         "memory.search",
         "memory.compressed",
         "memory.stats",
         "memory.decay",
         "memory.flush",
-        "memory.delete.memory"
+        "memory.retention",
+        "memory.pin",
+        "memory.revive",
+        "memory.delete"
       ]
     },
-    "pipeline": {
-      "label": "pipeline",
+    "task": {
+      "label": "任务",
+      "prefix": "/task",
+      "description": "后台任务查询与取消",
       "ops": [
-        "pipeline.list.adapters",
-        "pipeline.list.providers",
-        "pipeline.get.provider",
-        "pipeline.switch",
-        "pipeline.stop.adapter",
-        "pipeline.all.configs"
+        "task.get",
+        "task.cancel"
       ]
     },
     "ppt": {
-      "label": "ppt",
+      "label": "PPT",
+      "prefix": "/ppt",
+      "description": "模板、大纲、渲染任务与产物下载",
       "ops": [
         "ppt.templates",
         "ppt.outline",
@@ -82,81 +228,24 @@
         "ppt.download"
       ]
     },
-    "常规请求": {
-      "label": "常规请求",
+    "hotkeys": {
+      "label": "热键",
+      "prefix": "/hotkeys",
+      "description": "快捷键清单、校验、批量更新与重置",
       "ops": [
-        "open.folder",
-        "request.status",
-        "chat.once",
-        "chat.stream",
-        "request.tts",
-        "request.asr",
-        "progress.stream"
+        "hotkeys.list",
+        "hotkeys.validate",
+        "hotkeys.reset",
+        "hotkeys.batch_update",
+        "hotkeys.update"
       ]
     },
-    "save": {
-      "label": "save",
+    "catalog": {
+      "label": "接口目录",
+      "prefix": "/catalog",
+      "description": "端点清单 + OpenAPI schema，供前端动态表单使用",
       "ops": [
-        "save.list.slots",
-        "save.slot.create",
-        "save.slot.get",
-        "save.slot.delete",
-        "save.slot.toggle",
-        "save.slot.save",
-        "save.slot.load"
-      ]
-    },
-    "service": {
-      "label": "service",
-      "ops": [
-        "service.tools",
-        "service.get",
-        "service.service.tools",
-        "service.service.ui",
-        "service.start",
-        "service.stop",
-        "service.config.get",
-        "service.config.update",
-        "service.apply.config"
-      ]
-    },
-    "session": {
-      "label": "session",
-      "ops": [
-        "session.get.session",
-        "session.delete.session",
-        "session.switch.session",
-        "session.messages",
-        "session.append.message",
-        "session.flush"
-      ]
-    },
-    "skill": {
-      "label": "skill",
-      "ops": [
-        "skill.prompt",
-        "skill.get",
-        "skill.reload",
-        "skill.activate",
-        "skill.deactivate",
-        "skill.execute"
-      ]
-    },
-    "system": {
-      "label": "system",
-      "ops": [
-        "system.health",
-        "system.info",
-        "system.stats",
-        "system.gc",
-        "system.ping"
-      ]
-    },
-    "task": {
-      "label": "task",
-      "ops": [
-        "task.get.task",
-        "task.cancel.task"
+        "catalog.api"
       ]
     }
   }

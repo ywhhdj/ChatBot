@@ -178,10 +178,17 @@ class SkillExecuteRequest(_Base):
 
 # ───────────────────────── WebSocket ─────────────────────────
 class WebSocketRequest(_Base):
+    """入站帧。
+
+    request_id 关联一次请求；stream_id 关联一条流；两者不可与 task_id 混用。
+    client_id 仍兼容放在 data 里的旧写法（见 websocket/__init__.py）。
+    """
 
     type: str
     data: Dict[str, Any] = Field(default_factory=dict)
     client_id: str = ""
+    request_id: str = ""
+    stream_id: str = ""
 
 
 # ───────────────────────── 任务 ─────────────────────────
@@ -259,3 +266,50 @@ class HotkeyBatchUpdateRequest(_Base):
 
 class HotkeyResetRequest(_Base):
     revision: Optional[int] = None
+
+
+# ─────────────────── 生成类扩展（controllers/greater.py） ───────────────────
+class OCRRecognizeRequest(_Base):
+    """图片文字识别；image 为 base64 编码的图片字节。"""
+
+    image: str = Field(..., description="base64 编码的图片字节")
+    format: str = "png"
+    provider: Optional[str] = None
+    model_id: Optional[str] = None
+
+
+class EmbeddingRequest(_Base):
+    """批量文本向量化；单次最多 64 条。"""
+
+    texts: List[str] = Field(..., min_length=1, max_length=64)
+    model_id: Optional[str] = None
+    dim: Optional[int] = None
+
+
+# ─────────────────── 日志转发 / 记忆动作 / 存档快照 ───────────────────
+class LogAppendRequest(_Base):
+    """前端 LogForwarder 批量转发；单次最多 100 条。"""
+
+    records: List[Dict[str, Any]] = Field(default_factory=list, max_length=100)
+    no_frontend_push: bool = True
+
+
+class MemoryActionRequest(_Base):
+    """retention / pin / revive 三动作共用请求体。"""
+
+    memory_id: str
+    session_id: str = "default"
+    pinned: bool = True
+    dry_run: bool = True          # 安全默认：预演，不写库；显式 false 才落库
+    retention_days: float = 0.0
+    layer: str = ""
+
+
+class SnapshotRequest(_Base):
+    """Snapshot revision 操作请求体。"""
+
+    slot_id: str = ""
+    revision: str = ""
+    branch_id: str = "main"
+    label: str = ""
+    trigger: str = "manual"

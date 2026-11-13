@@ -76,12 +76,12 @@ class StandardPaths:
         return cls.get_app_root() / "scripts"
 
     @classmethod
-    def get_defaults_dir(cls) -> Path:
-        return cls.get_resources_dir() / "defaults"
-
+    def get_configs_dir(cls) -> Path:
+        return cls.get_resources_dir() / "configs"
+    
     @classmethod
-    def get_roles_dir(cls) -> Path:
-        return cls.get_resources_dir() / "roles"
+    def get_template_dir(cls) -> Path:
+        return cls.get_template_dir()
 
     @classmethod
     def get_user_data_dir(cls) -> Path:
@@ -92,16 +92,16 @@ class StandardPaths:
 
 class RuntimePath:
     model_dir = StandardPaths.get_models_dir()
-    roles_dir = StandardPaths.get_roles_dir()
+    # roles_dir = StandardPaths.get_roles_dir()
     memory_dir = StandardPaths.get_user_data_dir() / "memory"
 
     @staticmethod
     def update_model_dir(new_dir: Path):
         RuntimePath.model_dir = new_dir
 
-    @staticmethod
-    def update_roles_dir(new_dir: Path):
-        RuntimePath.roles_dir = new_dir
+    # @staticmethod
+    # def update_roles_dir(new_dir: Path):
+    #     RuntimePath.roles_dir = new_dir
 
     @staticmethod
     def update_memory_dir(new_dir: Path):
@@ -113,11 +113,11 @@ class RuntimePath:
 
     @staticmethod
     def get_service_config_file_path():
-        return StandardPaths.get_defaults_dir() / "services.yaml"
+        return StandardPaths.get_configs_dir() / "services.yaml"
 
     @staticmethod
-    def get_pipeline_config_file_path():
-        return StandardPaths.get_defaults_dir() / "pipeline.json"
+    def get_provider_path(relative_path: str = ""):
+        return StandardPaths.get_configs_dir() / "providers"/ relative_path
 
     @staticmethod
     def get_icon_file_path(icon_name: str = "chatbot.ico"):
@@ -133,25 +133,11 @@ class RuntimePath:
 
     @staticmethod
     def get_prompts_file_path() -> Path:
-        return StandardPaths.get_defaults_dir() / "prompts.toml"
+        return StandardPaths.get_configs_dir() / "prompts.toml"
 
     @staticmethod
-    def get_ppt_template_file_path(relative_path: str = "", is_defaults: bool = False) -> Path:
-        if is_defaults:
-            return StandardPaths.get_defaults_dir() / "ppt_templates.yaml"
-        # 旧实现对「文件路径」调用 ensure_dir()，会把 ppt_templates.yaml
-        # 当目录创建出来，之后任何读写都会 IsADirectoryError。
-        target = RuntimePath.model_dir / relative_path
-        ensure_dir(target.parent)
-        return target
-
-    @staticmethod
-    def get_roles_file_path(relative_path: str = "", is_defaults: bool = False) -> Path:
-        if is_defaults:
-            return StandardPaths.get_defaults_dir() / "roles.yaml"
-        target = RuntimePath.roles_dir / relative_path
-        ensure_dir(target.parent)
-        return target
+    def get_template_path(relative_path: str = "") -> Path:
+        return StandardPaths.get_template_dir() / relative_path
 
     @staticmethod
     def get_scripts_path(subpath: str = "") -> Path:
@@ -159,11 +145,15 @@ class RuntimePath:
 
     @staticmethod
     def get_memory_db_path() -> Path:
-        return RuntimePath.get_user_data_path("memory") / "memory.db"
+        return RuntimePath.get_user_data_path("memories") / "memories.db"
+
+    @staticmethod
+    def get_memories_path(relative_path:str) -> Path:
+        return StandardPaths.get_configs_dir()/ "memories"/ relative_path
 
     @staticmethod
     def get_sql_file_path():
-        return StandardPaths.get_defaults_dir() / "memory.sql"
+        return RuntimePath.get_memories_path("schema.sql")
 
     @staticmethod
     def get_log_dir() -> Path:
