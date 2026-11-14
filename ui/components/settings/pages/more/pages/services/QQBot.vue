@@ -4,11 +4,11 @@ import { useUserStore } from '@/stores/user';
 
 const userStore = useUserStore()
 
-function updateConfig(index: number, newValue: boolean | string) {
-  if (userStore.serviceConfig?.qqbot.fields?.[index]) {
-    userStore.serviceConfig.qqbot.fields[index].default = newValue
-  }
-}
+// function updateConfig(index: number, newValue: boolean | string) {
+//   if (userStore.serviceConfig?.qqbot.fields?.[index]) {
+//     userStore.serviceConfig.qqbot.fields[index].default = newValue
+//   }
+// }
 
 const qqBotInfo = ref<API.QQBotInfo | null>({
   'id': '8412011246056693513',
@@ -35,7 +35,6 @@ const qqBotInfo = ref<API.QQBotInfo | null>({
   >
   <ServiceConfig
     service="qqbot"
-    :updateConfig="updateConfig"
   />
   <!-- <StatusMessage>
     未查询到机器人信息

@@ -5,7 +5,7 @@
 > 契约源：`scripts/api/generate_api_contract.py::ENDPOINTS` → `resources/configs/api/endpoints.json`、`resources/configs/api/groups.json`、本文件。
 > 源码基线：`ywhhdj/ChatBot` dev 分支 `a6c38fefb98a4d82acb616bc4c9b98f405b83be9`；Python 源码目录 `src/modules/`（历史文档记作 `src_py/`）。
 > 格式口径：项目契约（ADR-002、`FrontendBackendContract.md`）+ OpenAPI 3.1 字段语义；每个端点给出 path / query / requestBody / responses / errors / example。
-> 端点总数：**121**（启用 121）；分组数：**18**；基线 commit 的 `endpoints.json` 仅注册 50 条，本次按控制器与各管理器能力补齐。
+> 端点总数：**121**（启用 121）；分组数：**19**；基线 commit 的 `endpoints.json` 仅注册 50 条，本次按控制器与各管理器能力补齐。
 
 ---
 
@@ -36,18 +36,19 @@
 
 ### 1.3 端点与 op 命名
 
-`op` 统一为 `<group>.<action>`（如 `generate.chat`、`session.create`），与 `groups.json` 的 `ops` 一一对应。`desktop=true` 的端点同时注册为 `ApiGateway` 的 op，桌面端 `call(op)` 与 REST 复用同一 handler 与 DTO。相比基线 `<module>.<func>` 形式的 op，本次为**破坏性重命名**；前端 service 已由 `scripts/api/generate_frontend_services.py` 按同一契约重新生成，每个请求显式携带 `opName` 与 `pathParams`，bridge 不再依赖路径推导（见 §4.3 / §6）。
+`op` 统一为 `<group>.<action>`（如 `generation.chat`、`session.create`），与 `groups.json` 的 `ops` 一一对应。`desktop=true` 的端点同时注册为 `ApiGateway` 的 op，桌面端 `call(op)` 与 REST 复用同一 handler 与 DTO。相比基线 `<module>.<func>` 形式的 op，本次为**破坏性重命名**；前端 service 已由 `scripts/api/generate_frontend_services.py` 按同一契约重新生成，每个请求显式携带 `opName` 与 `pathParams`，bridge 不再依赖路径推导（见 §4.3 / §6）。
 
 ### 1.4 分组总览
 
 | group / tag | 名称 | 路径前缀 | 端点数 | 说明 |
 |---|---|---|---|---|
-| `generate` | 生成与推理 | `/` | 11 | 对话、语音、图像、OCR、向量、工具命令及生成任务辅助；handler 统一在 controllers/greater.py |
+| `request` | 常规请求 | `/` | 1 | 常规请求 |
+| `generation` | 生成与推理 | `/generation` | 10 | 对话、语音、图像、OCR、向量、工具命令及生成任务辅助 |
 | `system` | 系统 | `/system` | 5 | 健康、版本、统计、GC 与连通性探测 |
 | `config` | 配置 | `/config` | 5 | 配置读取、局部更新、重载、持久化与 schema |
 | `logger` | 日志 | `/logger` | 7 | 日志级别、统计、记录与排空 |
 | `device` | 设备 | `/device` | 1 | CPU/GPU/内存与推荐帧率 |
-| `provider` | 供应商 | `/provider` | 8 | provider 目录、状态、切换、停止与模型下载 |
+| `providers` | 供应商 | `/providers` | 8 | provider 目录、状态、切换、停止与模型下载 |
 | `service` | 服务 | `/service` | 11 | 服务注册、启停、配置、工具与 UI 描述 |
 | `skill` | 技能 | `/skill` | 7 | 技能目录、启停、提示词与受控执行 |
 | `workspace` | 工作区 | `/workspace` | 4 | 工作区选择、权限档位与敏感确认 |
@@ -55,7 +56,7 @@
 | `session` | 会话 | `/session` | 8 | 会话生命周期、消息追加与落盘 |
 | `save` | 存档 | `/save` | 16 | 存档槽、分段更新、同步与恢复 |
 | `character` | 角色 | `/character` | 10 | 角色 CRUD、预设、切换与状态 |
-| `memory` | 记忆 | `/memory` | 12 | 分层记忆、检索、压缩、统计、衰减与删除 |
+| `memories` | 记忆 | `/memories` | 12 | 分层记忆、检索、压缩、统计、衰减与删除 |
 | `task` | 任务 | `/task` | 2 | 后台任务查询与取消 |
 | `ppt` | PPT | `/ppt` | 6 | 模板、大纲、渲染任务与产物下载 |
 | `hotkeys` | 热键 | `/hotkeys` | 5 | 快捷键清单、校验、批量更新与重置 |
@@ -103,8 +104,6 @@ register_all_routers(app, prefix="/api") → 最终 URL
 | `data` | object / array / string / null | 业务数据，结构见各端点 `T` |
 | `request_id` | string | 16 字符请求标识，`X-Request-ID` 由中间件注入并回写响应头 |
 | `ts` | number | Unix 秒（float） |
-
-HTTP status 保留语义（2xx / 4xx / 5xx），业务 `code` 表示应用错误种类；`/api` 下的 404 / 405 也返回同构信封。SSE 与 WebSocket 不走该信封，见 §4。
 
 ### 2.3 错误码
 
@@ -165,19 +164,74 @@ HTTP status 保留语义（2xx / 4xx / 5xx），业务 `code` 表示应用错误
 > 每小节字段顺序遵循 OpenAPI 口径：路径 → 参数 → requestBody → responses → errors → example。`data` 字段表由 `src/modules/api/requests.py` / `dto.py` 的 Pydantic 模型经 AST 提取，与源码同步。
 
 
-### 3.1 生成与推理（tag: `generate`，11 个端点）
+### 3.1 常规请求（tag: `request`，1 个端点）
 
-对话、语音、图像、OCR、向量、工具命令及生成任务辅助；handler 统一在 controllers/greater.py。路径前缀 `/`。
+常规请求。路径前缀 `/`。
 
-#### GET `/api/status`
+#### GET `/api/folder/{type}`
+
+**打开受支持的本地数据目录**
+
+| 项 | 值 |
+|---|---|
+| op | `request.open_folder` |
+| 分组 / tag | `request`（常规请求） |
+| handler | `modules.api.controllers.request:open_folder` |
+| desktop bridge | 是 |
+| dispatch | `thread` |
+| 超时 | 60 s |
+| 状态 | 新增 |
+
+**路径参数**
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `type` | string | 路径资源标识 |
+
+**响应** `application/json` · 统一信封 `ApiResponse<T>`（见 §2.2）
+
+`data` 类型：`Dict[str, Any]`（动态对象，字段由运行时决定）。
+
+**示例响应**
+
+```json
+{
+  "ok": true,
+  "code": 200,
+  "message": "ok",
+  "data": {},
+  "request_id": "a1b2c3d4e5f6a7b8",
+  "ts": 1760000000.0
+}
+```
+
+**错误码**：1001 参数校验失败 / 2001 依赖未初始化 / 2002 处理超时 / 3001 内部异常 / 1002 资源不存在（完整映射见 §2.3）。
+
+**请求示例**
+
+```bash
+curl 'http://127.0.0.1:8000/api/folder/'
+```
+
+> **备注**：type 白名单：images / roles / memory / workspace；禁止任意路径。
+
+---
+
+
+
+### 3.2 生成与推理（tag: `generation`，10 个端点）
+
+对话、语音、图像、OCR、向量、工具命令及生成任务辅助。路径前缀 `/generation`。
+
+#### GET `/api/generation/status`
 
 **查询 LLM/TTS/ASR/图像/OCR/向量能力就绪状态**
 
 | 项 | 值 |
 |---|---|
-| op | `generate.status` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:status` |
+| op | `generation.status` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:status` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 60 s |
@@ -223,22 +277,22 @@ HTTP status 保留语义（2xx / 4xx / 5xx），业务 `code` 表示应用错误
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/status'
+curl 'http://127.0.0.1:8000/api/generation/status'
 ```
 
 > **备注**：只读探测，不触发模型加载、索引重建或全盘扫描。
 
 ---
 
-#### POST `/api/chat`
+#### POST `/api/generation/chat`
 
 **非流式对话，一次返回完整回复**
 
 | 项 | 值 |
 |---|---|
-| op | `generate.chat` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:chat_once` |
+| op | `generation.chat` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:chat_once` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 600 s |
@@ -296,7 +350,7 @@ curl 'http://127.0.0.1:8000/api/status'
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/chat' \
+curl -X POST 'http://127.0.0.1:8000/api/generation/chat' \
   -H 'Content-Type: application/json' \
   -d '{"text": "你好", "session_id": "default", "source": "text"}'
 ```
@@ -305,15 +359,15 @@ curl -X POST 'http://127.0.0.1:8000/api/chat' \
 
 ---
 
-#### POST `/api/chat/stream`
+#### POST `/api/generation/chat/stream`
 
 **SSE 流式对话**
 
 | 项 | 值 |
 |---|---|
-| op | `generate.chat_stream` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:chat_stream` |
+| op | `generation.chat_stream` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:chat_stream` |
 | desktop bridge | 否（仅 HTTP） |
 | dispatch | `loop` |
 | 超时 | 600 s |
@@ -346,7 +400,7 @@ data: {"type":"done","session_id":"sess_001","elapsed_ms":1234,"result":{"route"
 **请求示例**
 
 ```bash
-curl -N -X POST 'http://127.0.0.1:8000/api/chat/stream' \
+curl -N -X POST 'http://127.0.0.1:8000/api/generation/chat/stream' \
   -H 'Content-Type: application/json' \
   -H 'Accept: text/event-stream' \
   -d '{"text": "讲个短故事"}'
@@ -356,15 +410,15 @@ curl -N -X POST 'http://127.0.0.1:8000/api/chat/stream' \
 
 ---
 
-#### POST `/api/tts`
+#### POST `/api/generation/tts`
 
 **文本转语音，返回 base64 音频**
 
 | 项 | 值 |
 |---|---|
-| op | `generate.tts` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:tts` |
+| op | `generation.tts` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:tts` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 120 s |
@@ -409,7 +463,7 @@ curl -N -X POST 'http://127.0.0.1:8000/api/chat/stream' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/tts' \
+curl -X POST 'http://127.0.0.1:8000/api/generation/tts' \
   -H 'Content-Type: application/json' \
   -d '{"text": "你好呀", "format": "mp3"}'
 ```
@@ -424,9 +478,9 @@ curl -X POST 'http://127.0.0.1:8000/api/tts' \
 
 | 项 | 值 |
 |---|---|
-| op | `generate.asr` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:asr` |
+| op | `generation.asr` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:asr` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 120 s |
@@ -477,15 +531,15 @@ curl -X POST 'http://127.0.0.1:8000/api/asr' \
 
 ---
 
-#### POST `/api/image/generations`
+#### POST `/api/generation/image`
 
 **图像生成（OpenAI / Stability / ComfyUI 协议）**
 
 | 项 | 值 |
 |---|---|
-| op | `generate.image` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:image_generate` |
+| op | `generation.image` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:image` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 600 s |
@@ -535,7 +589,7 @@ curl -X POST 'http://127.0.0.1:8000/api/asr' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/image/generations' \
+curl -X POST 'http://127.0.0.1:8000/api/generation/image' \
   -H 'Content-Type: application/json' \
   -d '{"prompt": "一只在窗台晒太阳的猫", "size": "1024x1024", "n": 1, "response_format": "url"}'
 ```
@@ -544,15 +598,15 @@ curl -X POST 'http://127.0.0.1:8000/api/image/generations' \
 
 ---
 
-#### POST `/api/ocr`
+#### POST `/api/generation/ocr`
 
 **图片文字识别**
 
 | 项 | 值 |
 |---|---|
-| op | `generate.ocr` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:ocr` |
+| op | `generation.ocr` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:ocr` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 120 s |
@@ -601,22 +655,22 @@ curl -X POST 'http://127.0.0.1:8000/api/image/generations' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/ocr' \
+curl -X POST 'http://127.0.0.1:8000/api/generation/ocr' \
   -H 'Content-Type: application/json' \
   -d '{"image": "<base64-png>", "format": "png"}'
 ```
 
 ---
 
-#### POST `/api/embedding`
+#### POST `/api/generation/embedding`
 
 **批量文本向量化**
 
 | 项 | 值 |
 |---|---|
-| op | `generate.embedding` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:embedding` |
+| op | `generation.embedding` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:embedding` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 120 s |
@@ -664,7 +718,7 @@ curl -X POST 'http://127.0.0.1:8000/api/ocr' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/embedding' \
+curl -X POST 'http://127.0.0.1:8000/api/generation/embedding' \
   -H 'Content-Type: application/json' \
   -d '{"texts": ["你好", "世界"]}'
 ```
@@ -679,9 +733,9 @@ curl -X POST 'http://127.0.0.1:8000/api/embedding' \
 
 | 项 | 值 |
 |---|---|
-| op | `generate.command` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:command` |
+| op | `generation.command` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:command` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 120 s |
@@ -735,56 +789,7 @@ curl -X POST 'http://127.0.0.1:8000/api/command' \
   -d '{"text": "skill --id weather --city 深圳", "wait": true}'
 ```
 
-> **备注**：命令文本只认 `--id`；shell 与未隔离语言默认拒绝，见 §4.4。
-
----
-
-#### GET `/api/folder/{type}`
-
-**打开受支持的本地数据目录**
-
-| 项 | 值 |
-|---|---|
-| op | `generate.open_folder` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:open_folder` |
-| desktop bridge | 是 |
-| dispatch | `thread` |
-| 超时 | 60 s |
-| 状态 | 新增 |
-
-**路径参数**
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `type` | string | 路径资源标识 |
-
-**响应** `application/json` · 统一信封 `ApiResponse<T>`（见 §2.2）
-
-`data` 类型：`Dict[str, Any]`（动态对象，字段由运行时决定）。
-
-**示例响应**
-
-```json
-{
-  "ok": true,
-  "code": 200,
-  "message": "ok",
-  "data": {},
-  "request_id": "a1b2c3d4e5f6a7b8",
-  "ts": 1760000000.0
-}
-```
-
-**错误码**：1001 参数校验失败 / 2001 依赖未初始化 / 2002 处理超时 / 3001 内部异常 / 1002 资源不存在（完整映射见 §2.3）。
-
-**请求示例**
-
-```bash
-curl 'http://127.0.0.1:8000/api/folder/'
-```
-
-> **备注**：type 白名单：images / roles / memory / workspace；禁止任意路径。
+> **备注**：命令文本只认 `--id`；shell 与未隔离语言默认拒绝
 
 ---
 
@@ -794,9 +799,9 @@ curl 'http://127.0.0.1:8000/api/folder/'
 
 | 项 | 值 |
 |---|---|
-| op | `generate.progress_stream` |
-| 分组 / tag | `generate`（生成与推理） |
-| handler | `modules.api.controllers.greater:progress_stream` |
+| op | `generation.progress_stream` |
+| 分组 / tag | `generation`（生成与推理） |
+| handler | `modules.api.controllers.generation:progress_stream` |
 | desktop bridge | 否（仅 HTTP） |
 | dispatch | `loop` |
 | 超时 | 600 s |
@@ -831,13 +836,13 @@ curl -N -X POST 'http://127.0.0.1:8000/api/progress-stream/task_001' \
   -d '{}'
 ```
 
-> **备注**：生产者调用 greater.set_progress(task_id, data) 写入；0.3s 轮询、终态清理、有 deadline；事件名随 status，帧带 stream_id / request_id / seq / ts。
+> **备注**：生产者调用 generation.set_progress(task_id, data) 写入；0.3s 轮询、终态清理、有 deadline；事件名随 status，帧带 stream_id / request_id / seq / ts。
 
 ---
 
 
 
-### 3.2 系统（tag: `system`，5 个端点）
+### 3.3 系统（tag: `system`，5 个端点）
 
 健康、版本、统计、GC 与连通性探测。路径前缀 `/system`。
 
@@ -1116,7 +1121,7 @@ curl 'http://127.0.0.1:8000/api/system/ping'
 
 
 
-### 3.3 配置（tag: `config`，5 个端点）
+### 3.4 配置（tag: `config`，5 个端点）
 
 配置读取、局部更新、重载、持久化与 schema。路径前缀 `/config`。
 
@@ -1374,7 +1379,7 @@ curl -X PATCH 'http://127.0.0.1:8000/api/config/' \
 
 
 
-### 3.4 日志（tag: `logger`，7 个端点）
+### 3.5 日志（tag: `logger`，7 个端点）
 
 日志级别、统计、记录与排空。路径前缀 `/logger`。
 
@@ -1748,7 +1753,7 @@ curl -X POST 'http://127.0.0.1:8000/api/logger/append' \
 
 
 
-### 3.5 设备（tag: `device`，1 个端点）
+### 3.6 设备（tag: `device`，1 个端点）
 
 CPU/GPU/内存与推荐帧率。路径前缀 `/device`。
 
@@ -1815,19 +1820,19 @@ curl 'http://127.0.0.1:8000/api/device/info'
 
 
 
-### 3.6 供应商（tag: `provider`，8 个端点）
+### 3.7 供应商（tag: `providers`，8 个端点）
 
-provider 目录、状态、切换、停止与模型下载。路径前缀 `/provider`。
+provider 目录、状态、切换、停止与模型下载。路径前缀 `/providers`。
 
-#### GET `/api/provider/adapters`
+#### GET `/api/providers/adapters`
 
 **能力、可选 provider、当前选中与用量**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.list_adapters` |
-| 分组 / tag | `provider`（供应商） |
-| handler | `modules.api.controllers.providers:list_adapters` |
+| op | `providers.list_describe` |
+| 分组 / tag | `providers`（供应商） |
+| handler | `modules.api.controllers.providers:list_describe` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
 | 超时 | 60 s |
@@ -1855,19 +1860,19 @@ provider 目录、状态、切换、停止与模型下载。路径前缀 `/provi
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/provider/adapters'
+curl 'http://127.0.0.1:8000/api/providers/adapters'
 ```
 
 ---
 
-#### GET `/api/provider/configs`
+#### GET `/api/providers/configs`
 
 **各能力供应商配置（敏感字段已掩码）**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.all_configs` |
-| 分组 / tag | `provider`（供应商） |
+| op | `providers.all_configs` |
+| 分组 / tag | `providers`（供应商） |
 | handler | `modules.api.controllers.providers:all_configs` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -1896,19 +1901,19 @@ curl 'http://127.0.0.1:8000/api/provider/adapters'
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/provider/configs'
+curl 'http://127.0.0.1:8000/api/providers/configs'
 ```
 
 ---
 
-#### GET `/api/provider/adapters/{adapter}/providers`
+#### GET `/api/providers/{adapter}`
 
 **某能力下的 provider 清单**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.list_providers` |
-| 分组 / tag | `provider`（供应商） |
+| op | `providers.list_providers` |
+| 分组 / tag | `providers`（供应商） |
 | handler | `modules.api.controllers.providers:list_providers` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -1943,19 +1948,19 @@ curl 'http://127.0.0.1:8000/api/provider/configs'
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/provider/adapters//providers'
+curl 'http://127.0.0.1:8000/api/providers/'
 ```
 
 ---
 
-#### GET `/api/provider/adapters/{adapter}/providers/{provider}`
+#### GET `/api/providers/{adapter}/{provider}`
 
 **读取 provider 配置（已掩码）**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.get` |
-| 分组 / tag | `provider`（供应商） |
+| op | `providers.get_provider` |
+| 分组 / tag | `providers`（供应商） |
 | handler | `modules.api.controllers.providers:get_provider` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -1997,19 +2002,19 @@ curl 'http://127.0.0.1:8000/api/provider/adapters//providers'
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/provider/adapters//providers/'
+curl 'http://127.0.0.1:8000/api/providers//'
 ```
 
 ---
 
-#### GET `/api/provider/adapters/{adapter}/providers/{provider}/status`
+#### GET `/api/providers/{adapter}/{provider}/status`
 
 **provider 完整状态与本地模型文件状态**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.status` |
-| 分组 / tag | `provider`（供应商） |
+| op | `providers.status` |
+| 分组 / tag | `providers`（供应商） |
 | handler | `modules.api.controllers.providers:status` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -2079,19 +2084,19 @@ curl 'http://127.0.0.1:8000/api/provider/adapters//providers/'
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/provider/adapters//providers//status'
+curl 'http://127.0.0.1:8000/api/providers///status'
 ```
 
 ---
 
-#### POST `/api/provider/adapters/{adapter}/switch`
+#### POST `/api/providers/adapters/{adapter}/switch`
 
 **切换 provider / 模型**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.switch` |
-| 分组 / tag | `provider`（供应商） |
+| op | `providers.switch` |
+| 分组 / tag | `providers`（供应商） |
 | handler | `modules.api.controllers.providers:switch` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -2150,7 +2155,7 @@ curl 'http://127.0.0.1:8000/api/provider/adapters//providers//status'
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/provider/adapters//switch' \
+curl -X POST 'http://127.0.0.1:8000/api/providers/adapters//switch' \
   -H 'Content-Type: application/json' \
   -d '{"provider": ""}'
 ```
@@ -2159,14 +2164,14 @@ curl -X POST 'http://127.0.0.1:8000/api/provider/adapters//switch' \
 
 ---
 
-#### POST `/api/provider/adapters/{adapter}/stop`
+#### POST `/api/providers/{adapter}/stop`
 
 **停止当前 provider，保留能力门面**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.stop` |
-| 分组 / tag | `provider`（供应商） |
+| op | `providers.stop` |
+| 分组 / tag | `providers`（供应商） |
 | handler | `modules.api.controllers.providers:stop_adapter` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -2203,21 +2208,21 @@ curl -X POST 'http://127.0.0.1:8000/api/provider/adapters//switch' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/provider/adapters//stop' \
+curl -X POST 'http://127.0.0.1:8000/api/providers//stop' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### POST `/api/provider/adapters/{adapter}/providers/{provider}/download`
+#### POST `/api/providers/{adapter}/{provider}/download`
 
 **触发本地模型下载（进度走 WebSocket）**
 
 | 项 | 值 |
 |---|---|
-| op | `provider.download` |
-| 分组 / tag | `provider`（供应商） |
+| op | `providers.download` |
+| 分组 / tag | `providers`（供应商） |
 | handler | `modules.api.controllers.providers:download_model` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -2274,7 +2279,7 @@ curl -X POST 'http://127.0.0.1:8000/api/provider/adapters//stop' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/provider/adapters//providers//download' \
+curl -X POST 'http://127.0.0.1:8000/api/providers///download' \
   -H 'Content-Type: application/json' \
   -d '{"model_id": "", "force": false}'
 ```
@@ -2285,7 +2290,7 @@ curl -X POST 'http://127.0.0.1:8000/api/provider/adapters//providers//download' 
 
 
 
-### 3.7 服务（tag: `service`，11 个端点）
+### 3.8 服务（tag: `service`，11 个端点）
 
 服务注册、启停、配置、工具与 UI 描述。路径前缀 `/service`。
 
@@ -2897,7 +2902,7 @@ curl -X PUT 'http://127.0.0.1:8000/api/service/browser/config/apply' \
 
 
 
-### 3.8 技能（tag: `skill`，7 个端点）
+### 3.9 技能（tag: `skill`，7 个端点）
 
 技能目录、启停、提示词与受控执行。路径前缀 `/skill`。
 
@@ -3330,7 +3335,7 @@ curl -X POST 'http://127.0.0.1:8000/api/skill/weather/execute' \
 
 
 
-### 3.9 工作区（tag: `workspace`，4 个端点）
+### 3.10 工作区（tag: `workspace`，4 个端点）
 
 工作区选择、权限档位与敏感确认。路径前缀 `/workspace`。
 
@@ -3510,7 +3515,7 @@ curl -X DELETE 'http://127.0.0.1:8000/api/workspace' \
 
 
 
-### 3.10 能力审计（tag: `audit`，2 个端点）
+### 3.11 能力审计（tag: `audit`，2 个端点）
 
 可调用能力树与工具清单（非安全事件日志）。路径前缀 `/audit`。
 
@@ -3606,7 +3611,7 @@ curl 'http://127.0.0.1:8000/api/audit/tools'
 
 
 
-### 3.11 会话（tag: `session`，8 个端点）
+### 3.12 会话（tag: `session`，8 个端点）
 
 会话生命周期、消息追加与落盘。路径前缀 `/session`。
 
@@ -4083,7 +4088,7 @@ curl -X POST 'http://127.0.0.1:8000/api/session/sess_001/messages' \
 
 
 
-### 3.12 存档（tag: `save`，16 个端点）
+### 3.13 存档（tag: `save`，16 个端点）
 
 存档槽、分段更新、同步与恢复。路径前缀 `/save`。
 
@@ -4474,7 +4479,7 @@ curl -X POST 'http://127.0.0.1:8000/api/save/snapshot/restore' \
 
 ---
 
-#### GET `/api/save/slots`
+#### GET `/api/save/list`
 
 **存档槽列表**
 
@@ -4520,14 +4525,14 @@ curl -X POST 'http://127.0.0.1:8000/api/save/snapshot/restore' \
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/save/slots'
+curl 'http://127.0.0.1:8000/api/save/list'
 ```
 
 > **备注**：修正旧端点 path 自带 /api 造成的 /api/api/... 重复前缀。
 
 ---
 
-#### POST `/api/save/slots`
+#### POST `/api/save/create`
 
 **创建存档槽**
 
@@ -4580,14 +4585,14 @@ curl 'http://127.0.0.1:8000/api/save/slots'
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/save/slots' \
+curl -X POST 'http://127.0.0.1:8000/api/save/create' \
   -H 'Content-Type: application/json' \
   -d '{"name": "示例"}'
 ```
 
 ---
 
-#### POST `/api/save/slots/sync`
+#### POST `/api/save/sync`
 
 **从会话同步到存档槽**
 
@@ -4629,14 +4634,14 @@ curl -X POST 'http://127.0.0.1:8000/api/save/slots' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/save/slots/sync' \
+curl -X POST 'http://127.0.0.1:8000/api/save/sync' \
   -H 'Content-Type: application/json' \
   -d '{"session_id": "sess_001"}'
 ```
 
 ---
 
-#### POST `/api/save/slots/restore`
+#### POST `/api/save/restore`
 
 **从存档槽恢复到会话**
 
@@ -4674,14 +4679,14 @@ curl -X POST 'http://127.0.0.1:8000/api/save/slots/sync' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/save/slots/restore' \
+curl -X POST 'http://127.0.0.1:8000/api/save/restore' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### GET `/api/save/slots/{slot_id}`
+#### GET `/api/save/{slot_id}`
 
 **存档槽详情**
 
@@ -4733,12 +4738,12 @@ curl -X POST 'http://127.0.0.1:8000/api/save/slots/restore' \
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/save/slots/slot_001'
+curl 'http://127.0.0.1:8000/api/save/slot_001'
 ```
 
 ---
 
-#### DELETE `/api/save/slots/{slot_id}`
+#### DELETE `/api/save/{slot_id}`
 
 **删除存档槽**
 
@@ -4788,14 +4793,14 @@ curl 'http://127.0.0.1:8000/api/save/slots/slot_001'
 **请求示例**
 
 ```bash
-curl -X DELETE 'http://127.0.0.1:8000/api/save/slots/slot_001' \
+curl -X DELETE 'http://127.0.0.1:8000/api/save/slot_001' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### POST `/api/save/slots/{slot_id}/toggle`
+#### POST `/api/save/{slot_id}/toggle`
 
 **切换激活存档槽**
 
@@ -4847,14 +4852,14 @@ curl -X DELETE 'http://127.0.0.1:8000/api/save/slots/slot_001' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/save/slots/slot_001/toggle' \
+curl -X POST 'http://127.0.0.1:8000/api/save/slot_001/toggle' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### POST `/api/save/slots/{slot_id}/save`
+#### POST `/api/save/{slot_id}/save`
 
 **写入存档**
 
@@ -4906,14 +4911,14 @@ curl -X POST 'http://127.0.0.1:8000/api/save/slots/slot_001/toggle' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/save/slots/slot_001/save' \
+curl -X POST 'http://127.0.0.1:8000/api/save/slot_001/save' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### POST `/api/save/slots/{slot_id}/load`
+#### POST `/api/save/{slot_id}/load`
 
 **加载存档**
 
@@ -4965,14 +4970,14 @@ curl -X POST 'http://127.0.0.1:8000/api/save/slots/slot_001/save' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/save/slots/slot_001/load' \
+curl -X POST 'http://127.0.0.1:8000/api/save/slot_001/load' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### PUT `/api/save/slots/{slot_id}/section`
+#### PUT `/api/save/{slot_id}/section`
 
 **更新存档分段**
 
@@ -5021,7 +5026,7 @@ curl -X POST 'http://127.0.0.1:8000/api/save/slots/slot_001/load' \
 **请求示例**
 
 ```bash
-curl -X PUT 'http://127.0.0.1:8000/api/save/slots/slot_001/section' \
+curl -X PUT 'http://127.0.0.1:8000/api/save/slot_001/section' \
   -H 'Content-Type: application/json' \
   -d '{"data": {}, "slot_id": ""}'
 ```
@@ -5030,7 +5035,7 @@ curl -X PUT 'http://127.0.0.1:8000/api/save/slots/slot_001/section' \
 
 
 
-### 3.13 角色（tag: `character`，10 个端点）
+### 3.14 角色（tag: `character`，10 个端点）
 
 角色 CRUD、预设、切换与状态。路径前缀 `/character`。
 
@@ -5183,7 +5188,7 @@ curl 'http://127.0.0.1:8000/api/character/current'
 
 ---
 
-#### POST `/api/character`
+#### POST `/api/character/create`
 
 **创建角色**
 
@@ -5255,7 +5260,7 @@ curl 'http://127.0.0.1:8000/api/character/current'
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/character' \
+curl -X POST 'http://127.0.0.1:8000/api/character/create' \
   -H 'Content-Type: application/json' \
   -d '{"id": "", "name": "示例"}'
 ```
@@ -5657,18 +5662,18 @@ curl -X PUT 'http://127.0.0.1:8000/api/character/qingmei/state' \
 
 
 
-### 3.14 记忆（tag: `memory`，12 个端点）
+### 3.15 记忆（tag: `memories`，12 个端点）
 
-分层记忆、检索、压缩、统计、衰减与删除。路径前缀 `/memory`。
+分层记忆、检索、压缩、统计、衰减与删除。路径前缀 `/memories`。
 
-#### GET `/api/memory/layers`
+#### GET `/api/memories/layers`
 
 **分层记忆（short_term / long_term / detailed）**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.layers` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.layers` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:layers` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -5716,19 +5721,19 @@ curl -X PUT 'http://127.0.0.1:8000/api/character/qingmei/state' \
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/memory/layers'
+curl 'http://127.0.0.1:8000/api/memories/layers'
 ```
 
 ---
 
-#### GET `/api/memory/short`
+#### GET `/api/memories/short`
 
 **短期记忆摘要**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.short_term` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.short_term` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:short_term` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -5772,19 +5777,19 @@ curl 'http://127.0.0.1:8000/api/memory/layers'
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/memory/short'
+curl 'http://127.0.0.1:8000/api/memories/short'
 ```
 
 ---
 
-#### GET `/api/memory/long`
+#### GET `/api/memories/long`
 
 **长期记忆**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.long_term` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.long_term` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:long_term` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -5831,19 +5836,19 @@ curl 'http://127.0.0.1:8000/api/memory/short'
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/memory/long'
+curl 'http://127.0.0.1:8000/api/memories/long'
 ```
 
 ---
 
-#### POST `/api/memory/search`
+#### POST `/api/memories/search`
 
 **语义 / 相关记忆检索**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.search` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.search` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:search` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -5890,7 +5895,7 @@ curl 'http://127.0.0.1:8000/api/memory/long'
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/memory/search' \
+curl -X POST 'http://127.0.0.1:8000/api/memories/search' \
   -H 'Content-Type: application/json' \
   -d '{"query": "最近聊了什么"}'
 ```
@@ -5899,14 +5904,14 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/search' \
 
 ---
 
-#### GET `/api/memory/compressed`
+#### GET `/api/memories/compressed`
 
 **压缩记忆列表**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.compressed` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.compressed` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:compressed` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -5950,19 +5955,19 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/search' \
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/memory/compressed'
+curl 'http://127.0.0.1:8000/api/memories/compressed'
 ```
 
 ---
 
-#### GET `/api/memory/stats`
+#### GET `/api/memories/stats`
 
 **记忆容量统计**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.stats` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.stats` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:stats` |
 | desktop bridge | 是 |
 | dispatch | `loop` |
@@ -6011,19 +6016,19 @@ curl 'http://127.0.0.1:8000/api/memory/compressed'
 **请求示例**
 
 ```bash
-curl 'http://127.0.0.1:8000/api/memory/stats'
+curl 'http://127.0.0.1:8000/api/memories/stats'
 ```
 
 ---
 
-#### POST `/api/memory/decay`
+#### POST `/api/memories/decay`
 
 **手动触发记忆衰减**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.decay` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.decay` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:decay` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -6060,21 +6065,21 @@ curl 'http://127.0.0.1:8000/api/memory/stats'
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/memory/decay' \
+curl -X POST 'http://127.0.0.1:8000/api/memories/decay' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### POST `/api/memory/flush`
+#### POST `/api/memories/flush`
 
 **等待后台写入完成**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.flush` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.flush` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:flush` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -6117,21 +6122,21 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/decay' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/memory/flush' \
+curl -X POST 'http://127.0.0.1:8000/api/memories/flush' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
 
 ---
 
-#### POST `/api/memory/retention`
+#### POST `/api/memories/retention`
 
 **设置记忆保留期 / 层级（默认预演）**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.retention` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.retention` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:retention` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -6191,23 +6196,23 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/flush' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/memory/retention' \
+curl -X POST 'http://127.0.0.1:8000/api/memories/retention' \
   -H 'Content-Type: application/json' \
   -d '{"memory_id": "42", "session_id": "default", "retention_days": 30, "dry_run": true}'
 ```
 
-> **备注**：静态路径必须先于 /memory/{memory_id} 注册；dry_run 默认 true，code 为稳定拒绝码（bad_scope / not_found / no_change…），不是 HTTP 错误。
+> **备注**：静态路径必须先于 /memories/{memory_id} 注册；dry_run 默认 true，code 为稳定拒绝码（bad_scope / not_found / no_change…），不是 HTTP 错误。
 
 ---
 
-#### POST `/api/memory/pin`
+#### POST `/api/memories/pin`
 
 **固定 / 取消固定一条记忆**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.pin` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.pin` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:pin` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -6267,21 +6272,21 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/retention' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/memory/pin' \
+curl -X POST 'http://127.0.0.1:8000/api/memories/pin' \
   -H 'Content-Type: application/json' \
   -d '{"memory_id": "42", "pinned": true, "dry_run": false}'
 ```
 
 ---
 
-#### POST `/api/memory/revive`
+#### POST `/api/memories/revive`
 
 **唤醒 faded / archived 记忆**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.revive` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.revive` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:revive` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -6341,7 +6346,7 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/pin' \
 **请求示例**
 
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/memory/revive' \
+curl -X POST 'http://127.0.0.1:8000/api/memories/revive' \
   -H 'Content-Type: application/json' \
   -d '{"memory_id": "42", "dry_run": false}'
 ```
@@ -6350,14 +6355,14 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/revive' \
 
 ---
 
-#### DELETE `/api/memory/{memory_id}`
+#### DELETE `/api/memories/{memory_id}`
 
 **删除单条记忆（墓碑协议）**
 
 | 项 | 值 |
 |---|---|
-| op | `memory.delete` |
-| 分组 / tag | `memory`（记忆） |
+| op | `memories.delete_memory` |
+| 分组 / tag | `memories`（记忆） |
 | handler | `modules.api.controllers.memories:delete_memory` |
 | desktop bridge | 是 |
 | dispatch | `thread` |
@@ -6400,7 +6405,7 @@ curl -X POST 'http://127.0.0.1:8000/api/memory/revive' \
 **请求示例**
 
 ```bash
-curl -X DELETE 'http://127.0.0.1:8000/api/memory/' \
+curl -X DELETE 'http://127.0.0.1:8000/api/memories/' \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
@@ -6409,7 +6414,7 @@ curl -X DELETE 'http://127.0.0.1:8000/api/memory/' \
 
 
 
-### 3.15 任务（tag: `task`，2 个端点）
+### 3.16 任务（tag: `task`，2 个端点）
 
 后台任务查询与取消。路径前缀 `/task`。
 
@@ -6554,7 +6559,7 @@ curl -X POST 'http://127.0.0.1:8000/api/task/task_001/cancel' \
 
 
 
-### 3.16 PPT（tag: `ppt`，6 个端点）
+### 3.17 PPT（tag: `ppt`，6 个端点）
 
 模板、大纲、渲染任务与产物下载。路径前缀 `/ppt`。
 
@@ -6946,7 +6951,7 @@ curl 'http://127.0.0.1:8000/api/ppt/download/deck.pptx'
 
 
 
-### 3.17 热键（tag: `hotkeys`，5 个端点）
+### 3.18 热键（tag: `hotkeys`，5 个端点）
 
 快捷键清单、校验、批量更新与重置。路径前缀 `/hotkeys`。
 
@@ -7288,7 +7293,7 @@ curl -X PUT 'http://127.0.0.1:8000/api/hotkeys/record' \
 
 
 
-### 3.18 接口目录（tag: `catalog`，1 个端点）
+### 3.19 接口目录（tag: `catalog`，1 个端点）
 
 端点清单 + OpenAPI schema，供前端动态表单使用。路径前缀 `/catalog`。
 
@@ -7362,7 +7367,7 @@ data: {"type":"error","code":2002,"error":{"code":2002,"kind":"timeout","message
 | `cancelled` | chat | 客户端断连终态，同时 `ref.cancel()` 向上传播取消 |
 | `timeout` | progress | 超过 `STREAM_TIMEOUT` 的终态 |
 
-进度流帧 data 为 `{task_id, status, percent, sent, total, files_done, files_total, error, type, stream_id, request_id, seq, ts}`；`status` 取 `pending` / `running` / `done` / `error` / `cancelled` / `timeout` / `finished`；生产者调用 `greater.set_progress(task_id, data)` 写入，终态到达后 `clear_progress(task_id)`。
+进度流帧 data 为 `{task_id, status, percent, sent, total, files_done, files_total, error, type, stream_id, request_id, seq, ts}`；`status` 取 `pending` / `running` / `done` / `error` / `cancelled` / `timeout` / `finished`；生产者调用 `generation.set_progress(task_id, data)` 写入，终态到达后 `clear_progress(task_id)`。
 
 约束：每流**恰好一个终态**（done / error / cancelled / timeout）；旧客户端忽略 `event:` 行仍可解析 `data:`；服务端有 max lifetime（600s）；断连传播取消；不伪装支持 replay。
 
@@ -7419,6 +7424,8 @@ data: {"type":"error","code":2002,"error":{"code":2002,"kind":"timeout","message
 | `ChatRequest` | 请求模型 | requests.py | 7 |
 | `ChatStreamRequest` | 请求模型 | requests.py | 7 |
 | `CommandRunRequest` | 请求模型 | requests.py | 2 |
+| `CompatChatRequest` | 请求模型 | requests.py | 11 |
+| `CompatResponsesRequest` | 请求模型 | requests.py | 13 |
 | `ConfigPatchRequest` | 请求模型 | requests.py | 1 |
 | `ConfigSaveRequest` | 请求模型 | requests.py | 1 |
 | `EmbeddingRequest` | 请求模型 | requests.py | 3 |
@@ -7543,17 +7550,17 @@ data: {"type":"error","code":2002,"error":{"code":2002,"kind":"timeout","message
 
 | 分组 | 方法 | 最终 URL | op | 状态 |
 |---|---|---|---|---|
-| `generate` | GET | `/api/status` | `generate.status` | 新增 |
-| `generate` | POST | `/api/chat` | `generate.chat` | 新增 |
-| `generate` | POST | `/api/chat/stream` | `generate.chat_stream` | 新增 |
-| `generate` | POST | `/api/tts` | `generate.tts` | 新增 |
-| `generate` | POST | `/api/asr` | `generate.asr` | 新增 |
-| `generate` | POST | `/api/image/generations` | `generate.image` | 新增 |
-| `generate` | POST | `/api/ocr` | `generate.ocr` | 新增 |
-| `generate` | POST | `/api/embedding` | `generate.embedding` | 新增 |
-| `generate` | POST | `/api/command` | `generate.command` | 新增 |
-| `generate` | GET | `/api/folder/{type}` | `generate.open_folder` | 新增 |
-| `generate` | POST | `/api/progress-stream/{task_id}` | `generate.progress_stream` | 修正 |
+| `generation` | GET | `/api/generation/status` | `generation.status` | 新增 |
+| `generation` | POST | `/api/generation/chat` | `generation.chat` | 新增 |
+| `generation` | POST | `/api/generation/chat/stream` | `generation.chat_stream` | 新增 |
+| `generation` | POST | `/api/generation/tts` | `generation.tts` | 新增 |
+| `generation` | POST | `/api/asr` | `generation.asr` | 新增 |
+| `generation` | POST | `/api/generation/image` | `generation.image` | 新增 |
+| `generation` | POST | `/api/generation/ocr` | `generation.ocr` | 新增 |
+| `generation` | POST | `/api/generation/embedding` | `generation.embedding` | 新增 |
+| `generation` | POST | `/api/command` | `generation.command` | 新增 |
+| `request` | GET | `/api/folder/{type}` | `request.open_folder` | 新增 |
+| `generation` | POST | `/api/progress-stream/{task_id}` | `generation.progress_stream` | 修正 |
 | `system` | GET | `/api/system/health` | `system.health` | 现行 |
 | `system` | GET | `/api/system/info` | `system.info` | 现行 |
 | `system` | GET | `/api/system/stats` | `system.stats` | 现行 |
@@ -7572,14 +7579,14 @@ data: {"type":"error","code":2002,"error":{"code":2002,"kind":"timeout","message
 | `logger` | POST | `/api/logger/flush` | `logger.flush` | 新增 |
 | `logger` | POST | `/api/logger/append` | `logger.append` | 新增 |
 | `device` | GET | `/api/device/info` | `device.info` | 新增 |
-| `provider` | GET | `/api/provider/adapters` | `provider.list_adapters` | 新增 |
-| `provider` | GET | `/api/provider/configs` | `provider.all_configs` | 新增 |
-| `provider` | GET | `/api/provider/adapters/{adapter}/providers` | `provider.list_providers` | 新增 |
-| `provider` | GET | `/api/provider/adapters/{adapter}/providers/{provider}` | `provider.get` | 新增 |
-| `provider` | GET | `/api/provider/adapters/{adapter}/providers/{provider}/status` | `provider.status` | 新增 |
-| `provider` | POST | `/api/provider/adapters/{adapter}/switch` | `provider.switch` | 新增 |
-| `provider` | POST | `/api/provider/adapters/{adapter}/stop` | `provider.stop` | 新增 |
-| `provider` | POST | `/api/provider/adapters/{adapter}/providers/{provider}/download` | `provider.download` | 新增 |
+| `providers` | GET | `/api/providers/adapters` | `providers.list_describe` | 新增 |
+| `providers` | GET | `/api/providers/configs` | `providers.all_configs` | 新增 |
+| `providers` | GET | `/api/providers/{adapter}` | `providers.list_providers` | 新增 |
+| `providers` | GET | `/api/providers/{adapter}/{provider}` | `providers.get_provider` | 新增 |
+| `providers` | GET | `/api/providers/{adapter}/{provider}/status` | `providers.status` | 新增 |
+| `providers` | POST | `/api/providers/adapters/{adapter}/switch` | `providers.switch` | 新增 |
+| `providers` | POST | `/api/providers/{adapter}/stop` | `providers.stop` | 新增 |
+| `providers` | POST | `/api/providers/{adapter}/{provider}/download` | `providers.download` | 新增 |
 | `service` | GET | `/api/service` | `service.list` | 现行 |
 | `service` | GET | `/api/service/tools` | `service.list_tools` | 现行 |
 | `service` | GET | `/api/service/{service_id}` | `service.get` | 现行 |
@@ -7618,38 +7625,38 @@ data: {"type":"error","code":2002,"error":{"code":2002,"kind":"timeout","message
 | `save` | POST | `/api/save/snapshot/preview` | `save.snapshot_preview` | 新增 |
 | `save` | POST | `/api/save/snapshot` | `save.snapshot` | 新增 |
 | `save` | POST | `/api/save/snapshot/restore` | `save.snapshot_restore` | 新增 |
-| `save` | GET | `/api/save/slots` | `save.list_slots` | 修正 |
-| `save` | POST | `/api/save/slots` | `save.create` | 修正 |
-| `save` | POST | `/api/save/slots/sync` | `save.sync` | 修正 |
-| `save` | POST | `/api/save/slots/restore` | `save.restore` | 修正 |
-| `save` | GET | `/api/save/slots/{slot_id}` | `save.get` | 修正 |
-| `save` | DELETE | `/api/save/slots/{slot_id}` | `save.delete` | 修正 |
-| `save` | POST | `/api/save/slots/{slot_id}/toggle` | `save.toggle` | 修正 |
-| `save` | POST | `/api/save/slots/{slot_id}/save` | `save.save` | 修正 |
-| `save` | POST | `/api/save/slots/{slot_id}/load` | `save.load` | 修正 |
-| `save` | PUT | `/api/save/slots/{slot_id}/section` | `save.update_section` | 修正 |
+| `save` | GET | `/api/save/list` | `save.list_slots` | 修正 |
+| `save` | POST | `/api/save/create` | `save.create` | 修正 |
+| `save` | POST | `/api/save/sync` | `save.sync` | 修正 |
+| `save` | POST | `/api/save/restore` | `save.restore` | 修正 |
+| `save` | GET | `/api/save/{slot_id}` | `save.get` | 修正 |
+| `save` | DELETE | `/api/save/{slot_id}` | `save.delete` | 修正 |
+| `save` | POST | `/api/save/{slot_id}/toggle` | `save.toggle` | 修正 |
+| `save` | POST | `/api/save/{slot_id}/save` | `save.save` | 修正 |
+| `save` | POST | `/api/save/{slot_id}/load` | `save.load` | 修正 |
+| `save` | PUT | `/api/save/{slot_id}/section` | `save.update_section` | 修正 |
 | `character` | GET | `/api/character` | `character.list` | 新增 |
 | `character` | GET | `/api/character/presets` | `character.presets` | 新增 |
 | `character` | GET | `/api/character/current` | `character.current` | 新增 |
-| `character` | POST | `/api/character` | `character.create` | 新增 |
+| `character` | POST | `/api/character/create` | `character.create` | 新增 |
 | `character` | GET | `/api/character/{character_id}` | `character.get` | 新增 |
 | `character` | PUT | `/api/character/{character_id}` | `character.update` | 新增 |
 | `character` | DELETE | `/api/character/{character_id}` | `character.delete` | 现行 |
 | `character` | POST | `/api/character/{character_id}/switch` | `character.switch` | 现行 |
 | `character` | GET | `/api/character/{character_id}/state` | `character.get_state` | 现行 |
 | `character` | PUT | `/api/character/{character_id}/state` | `character.update_state` | 现行 |
-| `memory` | GET | `/api/memory/layers` | `memory.layers` | 新增 |
-| `memory` | GET | `/api/memory/short` | `memory.short_term` | 新增 |
-| `memory` | GET | `/api/memory/long` | `memory.long_term` | 新增 |
-| `memory` | POST | `/api/memory/search` | `memory.search` | 新增 |
-| `memory` | GET | `/api/memory/compressed` | `memory.compressed` | 新增 |
-| `memory` | GET | `/api/memory/stats` | `memory.stats` | 新增 |
-| `memory` | POST | `/api/memory/decay` | `memory.decay` | 新增 |
-| `memory` | POST | `/api/memory/flush` | `memory.flush` | 新增 |
-| `memory` | POST | `/api/memory/retention` | `memory.retention` | 新增 |
-| `memory` | POST | `/api/memory/pin` | `memory.pin` | 新增 |
-| `memory` | POST | `/api/memory/revive` | `memory.revive` | 新增 |
-| `memory` | DELETE | `/api/memory/{memory_id}` | `memory.delete` | 新增 |
+| `memories` | GET | `/api/memories/layers` | `memories.layers` | 新增 |
+| `memories` | GET | `/api/memories/short` | `memories.short_term` | 新增 |
+| `memories` | GET | `/api/memories/long` | `memories.long_term` | 新增 |
+| `memories` | POST | `/api/memories/search` | `memories.search` | 新增 |
+| `memories` | GET | `/api/memories/compressed` | `memories.compressed` | 新增 |
+| `memories` | GET | `/api/memories/stats` | `memories.stats` | 新增 |
+| `memories` | POST | `/api/memories/decay` | `memories.decay` | 新增 |
+| `memories` | POST | `/api/memories/flush` | `memories.flush` | 新增 |
+| `memories` | POST | `/api/memories/retention` | `memories.retention` | 新增 |
+| `memories` | POST | `/api/memories/pin` | `memories.pin` | 新增 |
+| `memories` | POST | `/api/memories/revive` | `memories.revive` | 新增 |
+| `memories` | DELETE | `/api/memories/{memory_id}` | `memories.delete_memory` | 新增 |
 | `task` | GET | `/api/task/{task_id}` | `task.get` | 新增 |
 | `task` | POST | `/api/task/{task_id}/cancel` | `task.cancel` | 新增 |
 | `ppt` | GET | `/api/ppt/templates` | `ppt.templates` | 新增 |

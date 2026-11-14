@@ -1,20 +1,10 @@
 """供应商适配器工厂：Registry 快照 → Shim 实例。
 
-调用链（唯一入口）：:
-
 entity.LLM.initialize_provider(provider, **flat)
     └─ factory.create_adapter("llm", provider, **flat)
             ├─ Registry.spec()       一次解析、缓存
             ├─ 拆分 secrets / endpoint 覆盖 / 请求参数
             └─ LLMShim(spec=..., secrets=..., **init_params)
-
-设计要点
-────────
-* 不再在 shim 里二次读 Registry：spec 只解析一次，切换 provider 时旧配置的
-  deepcopy 与环境变量展开不会重复发生。
-* 凭据只在 ``create_adapter`` 内部流转，绝不写回 Registry / 配置快照。
-* ``PIPELINE_CONFIG_DIR`` 可覆盖目录；默认由 ``runtime.StandardPaths`` 定位到
-  ``<app_root>/resources/config/providers``，不再依赖进程 CWD。
 """
 from __future__ import annotations
 

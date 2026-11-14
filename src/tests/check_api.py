@@ -28,7 +28,6 @@ def test_imports():
         "modules.api.controllers",
         "modules.api.controllers.system",
         "modules.api.controllers.config",
-        "modules.api.controllers.pipline",
         "modules.api.controllers.service",
         "modules.api.controllers.logger",
         "modules.api.controllers.request",

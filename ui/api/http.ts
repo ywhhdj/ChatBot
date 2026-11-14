@@ -150,18 +150,6 @@ class Http {
     };
   }
 
-  private injectPathParams(payload: any, path: string): void {
-    const paramRegex = /\/(\w+)\/(\{(\w+)\})?/g;
-    let match;
-    while ((match = paramRegex.exec(path)) !== null) {
-      const paramName = match[3] || match[1];
-      if (paramName && !payload[paramName]) {
-        // 从路径中提取实际值（需要在 URL 中保留，这里简化为空）
-        // 实际场景中，Axios 会将路径参数替换为实际值，此处无需额外处理
-      }
-    }
-  }
-
   async desktopRequest<T = any, D = any, H = {}>(
     config: AxiosRequestConfig<D>
   ): Promise<AxiosResponse<T, D, H>> {

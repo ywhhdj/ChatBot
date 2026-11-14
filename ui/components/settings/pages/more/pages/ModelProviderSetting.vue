@@ -3,11 +3,6 @@ import { defaultUIStore } from '@/stores/ui';
 import { useUserStore } from '@/stores/user';
 const uiStore = defaultUIStore();
 const userStore = useUserStore();
-const componentMap: Record<UI.ModelProviderTab, Component> = {
-  llm: defineAsyncComponent(() => import("@/components/settings/pages/more/pages/models/LLM.vue")),
-  // tts: defineAsyncComponent(() => import("@/components/settings/pages/more/pages/models/TTS.vue")),
-  asr: defineAsyncComponent(() => import("@/components/settings/pages/more/pages/models/ASR.vue"))
-}
 const activeIndex = ref(0);
 const menus: UI.MenuItem[] = [
   {
@@ -17,7 +12,7 @@ const menus: UI.MenuItem[] = [
     },
   },
   {
-    name: "语言模型",
+    name: "语音合成",
     clickAction: () => {
       uiStore.setCurrentModelProvider("tts");
     },
@@ -27,6 +22,24 @@ const menus: UI.MenuItem[] = [
     clickAction: () => {
       uiStore.setCurrentModelProvider("asr");
     },
+  },
+  {
+    name: "文字识别",
+    clickAction: () => {
+      uiStore.setCurrentModelProvider("ocr");
+    },
+  },
+  {
+    name: "向量模型",
+    clickAction: () => {
+      uiStore.setCurrentModelProvider("embedding");
+    },
+  },
+  {
+    name: "图像模型",
+    clickAction: () => {
+      uiStore.setCurrentModelProvider("image");
+    },
   }
 ]
 
@@ -34,8 +47,9 @@ const currentComponent = computed(() => {
   return componentMap[uiStore.currentTab.modelProvider] || null;
 })
 
+// KeepAlive 按组件名匹配；六个入口页均为具名 SFC
 const keepAliveInclude = computed(() => {
-  return Object.keys(componentMap).join(',')
+  return ['LLM', 'TTS', 'ASR', 'OCR', 'Embedding', 'Image'].join(',')
 })
 </script>
 
@@ -48,8 +62,11 @@ const keepAliveInclude = computed(() => {
     />
   </header>
   <MenuPage width="100%">
-    <KeepAlive :include="keepAliveInclude">
-      <component :is="currentComponent" />
+    <KeepAlive :include="keepAliveInclude" :max="6">
+      <ModelPage
+        :key="capability"
+        :capability="capability"
+      />
     </KeepAlive>
   </MenuPage>
 </template>
