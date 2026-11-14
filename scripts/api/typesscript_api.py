@@ -30,8 +30,8 @@ from typing import Any, Dict, List, Optional
 ROOT = Path(__file__).resolve().parents[2]
 EPS_JSON = ROOT / "resources" / "configs" / "api" / "endpoints.json"
 CONTRACT_PY = ROOT / "scripts" / "api" / "generate_api_contract.py"
-SERVICES_DIR = ROOT / "web" / "api" / "services"
-TYPES_FILE = ROOT / "web" / "types" / "api.d.ts"
+SERVICES_DIR = ROOT / "ui" / "api" / "services"
+TYPES_FILE = ROOT / "ui" / "types" / "api.d.ts"
 
 MARK_BEGIN = "  // ── 契约模型补充（generate_frontend_services.py 生成，请勿手工编辑） ──"
 MARK_END = "  // ── 契约模型补充结束 ──"

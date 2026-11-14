@@ -9,6 +9,8 @@ from ..runtime import RuntimePath
 from ..logger import logger
 from ..ui.dispatcher import join_with_pump
 
+LOCAL_ORIGIN_RE = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+
 def port_available(host: str, port: int) -> bool:
     """探测端口。必须带 SO_REUSEADDR，否则探测用的 socket 进入 TIME_WAIT 后，
     紧跟其后的 uvicorn bind 反而会失败——探测本身制造了问题。"""
@@ -191,6 +193,7 @@ class Web:
         self.app.add_middleware(
             CORSMiddleware,
             allow_origins=allow_origins or config.allow_origins,
+            allow_origin_regex=LOCAL_ORIGIN_RE,
             allow_credentials=config.allow_credentials,
             allow_methods=allow_methods or config.allow_methods,
             allow_headers=allow_headers or config.allow_headers,

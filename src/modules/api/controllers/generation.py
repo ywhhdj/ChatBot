@@ -1,17 +1,15 @@
-"""greater.py —— 生成类（generation）API 聚合控制器。
+"""generate.py —— 生成类（generation）API 聚合控制器。
 
 设计意图
 ────────
 把「一次调用产出内容」的接口集中到同一模块，避免生成能力散落在
-pipline / request / providers 多个历史模块里：
 
-    chat / chat.stream / tts / asr / image / ocr / embedding
-    + command（工具命令生成与执行）
-    + status（生成能力就绪状态）
-    + folder / progress-stream（生成任务辅助）
+chat / chat.stream / tts / asr / image / ocr / embedding
++ command（工具命令生成与执行）
++ status（生成能力就绪状态）
++ folder / progress-stream（生成任务辅助）
 
 `endpoints.json` 中本组端点的 handler 一律指向本模块，op 前缀统一为
-`generate.*`；其余能力域仍由各自控制器承载，见 docs/api.md。
 
 硬约束（沿用 api/_common.py 与 FrontendBackendContract.md）
 ──────────────────────────────────────────────────────────
@@ -416,7 +414,7 @@ async def asr(payload: ASRRequest) -> ApiResponse[ASRResultData]:
 # --------------------------------------------------------------------------
 
 
-async def image_generate(payload: ImageGenerateRequest) -> ApiResponse[ImageGenerateData]:
+async def image(payload: ImageGenerateRequest) -> ApiResponse[ImageGenerateData]:
     """按当前或指定 provider 生成图像；返回 url 或 b64_json。"""
     if not payload.prompt.strip():
         raise ApiError.bad_request("prompt 不能为空")
@@ -530,28 +528,6 @@ async def command(payload: CommandRunRequest) -> ApiResponse[CommandResultData]:
 # 6. 辅助：目录与进度流
 # --------------------------------------------------------------------------
 
-_FOLDERS = ("images", "roles", "memory", "workspace")
-
-
-async def open_folder(type: str) -> ApiResponse[Dict[str, Any]]:
-    """打开受支持的本地数据目录；type 必须命中白名单。"""
-    if type not in _FOLDERS:
-        raise ApiError.bad_request(f"不支持的目录类型 {type}，可选: {', '.join(_FOLDERS)}")
-    from ...runtime import RuntimePath
-
-    path = str(RuntimePath.get_user_data_path(type))
-    system = platform.system().lower()
-    try:
-        if system == "windows":
-            os.startfile(path)  # type: ignore[attr-defined]
-        elif system == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-    except Exception:
-        raise ApiError.internal("打开目录失败（系统文件管理器不可用）")
-    return success({"type": type, "path": path, "opened": True})
-
 
 async def progress_stream(task_id: str) -> StreamingResponse:
     """SSE 任务进度流；生产者用 set_progress(task_id, ...) 写入。"""
@@ -612,7 +588,6 @@ __all__ = [
     "ocr",
     "embedding",
     "command",
-    "open_folder",
     "progress_stream",
     "set_progress",
     "clear_progress",

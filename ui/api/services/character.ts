@@ -21,7 +21,7 @@ export const characterService = {
 
   /** 创建角色 */
   async createCharacter(body: API.CharacterCreateRequest): Promise<API.CharacterInfoData> {
-    return request<API.CharacterInfoData>("post", `/character`, body, { opName: "character.create" });
+    return request<API.CharacterInfoData>("post", `/character/create`, body, { opName: "character.create" });
   },
 
   /** 角色详情 */

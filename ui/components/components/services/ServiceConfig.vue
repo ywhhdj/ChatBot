@@ -1,118 +1,123 @@
 <script setup lang="ts">
-import { useUserStore } from '@/stores/user';
+import { useUserStore } from "@/stores/user";
+
 const userStore = useUserStore();
 
 const props = defineProps<{
   service: API.ServiceId;
 }>();
 
-const emit = defineEmits(['updateConfig', 'saveConfig', 'applyConfig'])
+const emit = defineEmits(["applyConfig"]);
 
-function updateConfig(index: number, newValue: boolean | string | number | null) {
-  emit('updateConfig', index, newValue)
+const fields = computed(() => userStore.serviceConfig[props.service]?.fields ?? []);
+
+/** options 兼容 [{value,label}] / [{id,label}] / 原始值 */
+function selectOptions(item: any) {
+  return (item.options ?? []).map((o: any) =>
+    typeof o === "object" && o !== null
+      ? { id: o.value ?? o.id, label: o.label ?? String(o.value ?? o.id) }
+      : { id: o, label: String(o) },
+  );
 }
 
+/** 统一回写 store；number 做一次安全转换 */
+function setField(index: number, value: unknown) {
+  const item = userStore.serviceConfig[props.service]?.fields?.[index];
+  if (!item) return;
+  if (item.type === "number") {
+    const n = Number(value);
+    item.default = Number.isFinite(n) ? n : item.default;
+    return;
+  }
+  item.default = value;
+}
 
 onMounted(async () => {
+  ui=await serviceService.serviceUi(props.service);
   if (!userStore.serviceConfig[props.service]) {
     await userStore.getServiceConfig(props.service);
   }
 });
 
-const notFoundText = computed(() => {
-  return `未查询到 ${props.service.toUpperCase()} 服务配置信息`
-});
+const notFoundText = computed(
+  () => `未查询到 ${props.service.toUpperCase()} 服务配置信息`,
+);
 
 const saveConfig = async () => {
-  //@ts-ignore
-  const config = userStore.serviceConfig[props.service]?.fields.map((field) => ({
-    [field.key]: field.default
-  }))
-  await userStore.saveServiceConfig(props.service, config);
-}
+  let config={}
+  userStore.serviceConfig[props.service]?.fields.map((field: any) => (config[field.key]=field.default));
+  await userStore.saveServiceConfig(props.service, config:{config});
+};
 
+
+const applyConfig = async () => {
+  await serviceService.applyServiceConfig(props.service);
+};
 </script>
 
 <template>
-  <div
-    class="w-full h-full"
-    v-if="userStore.serviceConfig[props.service]?.fields"
-  >
+  <div v-if="userStore.serviceConfig[props.service]?.fields" class="w-full h-full">
     <div class="service-config">
-      <RowItem
-        v-for="(configItem, index) in userStore.serviceConfig[props.service]?.fields"
-        :key="configItem.key"
-        class="config-row"
+      <FormRow
+        v-for="(item, index) in fields"
+        :key="item.key"
+        :label="item.label"
+        :description="item.description || ''"
+        :model-value="item.default"
+        @update:model-value="(v) => setField(index, v)"
       >
-        <!-- 左侧：标签 + 描述 -->
-        <template #left>
-          <div class="config-label">
-            <span class="config-title">{{ configItem.label }}</span>
-
-          </div>
-          <span
-            v-if="configItem.description"
-            class="config-desc"
-          >{{ configItem.description }}</span>
-        </template>
-
-        <!-- 右侧：根据类型渲染控件 -->
-        <template
-          #right
-          class="config-control"
-        >
+        <template #default="{ update }">
+          <!-- 布尔：Checkbox 用 checked 事件，不要用 click -->
           <Checkbox
-            v-if="configItem.type === 'boolean'"
-            @checked="(val: boolean) => updateConfig(index, val)"
-            :checked="configItem.default as boolean"
+            v-if="item.type === 'boolean'"
+            :checked="Boolean(item.default)"
+            @checked="(v: boolean) => update(v)"
           />
+
+          <!-- 枚举 -->
           <Select
-            v-model="configItem.default as string"
-            class="config-select"
-            :options="configItem.options!"
-            v-else-if="configItem.type === 'select'"
-            @change="(val: string) => updateConfig(index, val)"
+            v-else-if="item.type === 'select'"
+            :model-value="String(item.default ?? '')"
+            :options="selectOptions(item)"
+            @change="(v: string) => update(v)"
           />
+
+          <!-- 数字：只在这里用 numeric 键盘 -->
           <Input
-            v-else-if="configItem.type === 'string'"
-            class="config-input"
-            @input="(val: string) => updateConfig(index, val)"
-            v-model="configItem.default as string"
+            v-else-if="item.type === 'number'"
+            :model-value="String(item.default ?? '')"
+            inputmode="decimal"
+            @change="(v: string) => update(v)"
+            @enter="(v: string) => update(v)"
           />
+
+          <!-- 密码 -->
           <Input
-            v-else-if="configItem.type === 'number'"
-            class="config-input"
-            @input="(val: number) => updateConfig(index, val)"
-            v-model.number="configItem.default as number"
-          />
-          <Input
-            v-else-if="configItem.type === 'password'"
-            class="config-input"
-            @input="(val: string) => updateConfig(index, val)"
-            v-model="configItem.default as string"
+            v-else-if="item.type === 'password'"
             type="password"
+            :model-value="String(item.default ?? '')"
+            @change="(v: string) => update(v)"
+            @enter="(v: string) => update(v)"
+          />
+
+          <!-- 字符串（路径、尺寸等），不要 inputmode="numeric" -->
+          <Input
+            v-else
+            :model-value="String(item.default ?? '')"
+            @change="(v: string) => update(v)"
+            @enter="(v: string) => update(v)"
           />
         </template>
-      </RowItem>
+      </FormRow>
     </div>
 
     <div class="config-btn">
-      <Button
-        type="big"
-        style="width: 79%;"
-        @click="saveConfig"
-      >保存</Button>
-      <Button
-        type="big"
-        style="width: 20%;"
-        @click="$emit('applyConfig')"
-      >应用</Button>
+      <Button type="big" style="width: 79%;" @click="saveConfig">保存</Button>
+      <Button type="big" style="width: 20%;" @click="emit('applyConfig')">应用</Button>
     </div>
   </div>
-  <StatusMessage
-    v-else
-    message="请先保存服务配置"
-  >
+
+  <StatusMessage v-else message="请先保存服务配置">
     {{ notFoundText }}
   </StatusMessage>
 </template>
@@ -123,11 +128,6 @@ const saveConfig = async () => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.config-desc {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
 }
 
 .config-btn {

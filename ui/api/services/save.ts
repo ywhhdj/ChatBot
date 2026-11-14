@@ -36,51 +36,51 @@ export const saveService = {
 
   /** 存档槽列表 */
   async listSlots(query?: Record<string, any>): Promise<API.SlotListData> {
-    return request<API.SlotListData>("get", `/save/slots`, query, { opName: "save.list_slots" });
+    return request<API.SlotListData>("get", `/save/list`, query, { opName: "save.list_slots" });
   },
 
   /** 创建存档槽 */
   async createSlot(body: API.SlotCreateRequest): Promise<API.SlotInfoData> {
-    return request<API.SlotInfoData>("post", `/save/slots`, body, { opName: "save.create" });
+    return request<API.SlotInfoData>("post", `/save/create`, body, { opName: "save.create" });
   },
 
   /** 从会话同步到存档槽 */
   async syncFromSessions(body: API.SlotSyncRequest): Promise<Record<string, any>> {
-    return request<Record<string, any>>("post", `/save/slots/sync`, body, { opName: "save.sync" });
+    return request<Record<string, any>>("post", `/save/sync`, body, { opName: "save.sync" });
   },
 
   /** 从存档槽恢复到会话 */
   async restoreToSessions(body?: Record<string, any> | null): Promise<Record<string, any>> {
-    return request<Record<string, any>>("post", `/save/slots/restore`, body, { opName: "save.restore" });
+    return request<Record<string, any>>("post", `/save/restore`, body, { opName: "save.restore" });
   },
 
   /** 存档槽详情 */
   async getSlot(slot_id: string, query?: Record<string, any>): Promise<API.SlotInfoData> {
-    return request<API.SlotInfoData>("get", `/save/slots/${slot_id}`, query, { opName: "save.get", pathParams: { slot_id } });
+    return request<API.SlotInfoData>("get", `/save/${slot_id}`, query, { opName: "save.get", pathParams: { slot_id } });
   },
 
   /** 删除存档槽 */
   async deleteSlot(slot_id: string, body?: Record<string, any> | null): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("delete", `/save/slots/${slot_id}`, body, { opName: "save.delete", pathParams: { slot_id } });
+    return request<API.SlotActionData>("delete", `/save/${slot_id}`, body, { opName: "save.delete", pathParams: { slot_id } });
   },
 
   /** 切换激活存档槽 */
   async toggleSlot(slot_id: string, body?: Record<string, any> | null): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("post", `/save/slots/${slot_id}/toggle`, body, { opName: "save.toggle", pathParams: { slot_id } });
+    return request<API.SlotActionData>("post", `/save/${slot_id}/toggle`, body, { opName: "save.toggle", pathParams: { slot_id } });
   },
 
   /** 写入存档 */
   async saveSlot(slot_id: string, body?: Record<string, any> | null): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("post", `/save/slots/${slot_id}/save`, body, { opName: "save.save", pathParams: { slot_id } });
+    return request<API.SlotActionData>("post", `/save/${slot_id}/save`, body, { opName: "save.save", pathParams: { slot_id } });
   },
 
   /** 加载存档 */
   async loadSlot(slot_id: string, body?: Record<string, any> | null): Promise<API.SlotActionData> {
-    return request<API.SlotActionData>("post", `/save/slots/${slot_id}/load`, body, { opName: "save.load", pathParams: { slot_id } });
+    return request<API.SlotActionData>("post", `/save/${slot_id}/load`, body, { opName: "save.load", pathParams: { slot_id } });
   },
 
   /** 更新存档分段 */
   async updateSection(slot_id: string, body: API.SlotSectionUpdateRequest): Promise<Record<string, any>> {
-    return request<Record<string, any>>("put", `/save/slots/${slot_id}/section`, body, { opName: "save.update_section", pathParams: { slot_id } });
+    return request<Record<string, any>>("put", `/save/${slot_id}/section`, body, { opName: "save.update_section", pathParams: { slot_id } });
   },
 };

@@ -1,22 +1,29 @@
 {
   "version": 2,
   "groups": {
-    "generate": {
-      "label": "生成与推理",
+    "request": {
+      "label": "常规请求",
       "prefix": "/",
-      "description": "对话、语音、图像、OCR、向量、工具命令及生成任务辅助；handler 统一在 controllers/greater.py",
+      "description": "常规请求",
       "ops": [
-        "generate.status",
-        "generate.chat",
-        "generate.chat_stream",
-        "generate.tts",
-        "generate.asr",
-        "generate.image",
-        "generate.ocr",
-        "generate.embedding",
-        "generate.command",
-        "generate.open_folder",
-        "generate.progress_stream"
+        "request.open_folder"
+      ]
+    },
+    "generation": {
+      "label": "生成与推理",
+      "prefix": "/generation",
+      "description": "对话、语音、图像、OCR、向量、工具命令及生成任务辅助",
+      "ops": [
+        "generation.status",
+        "generation.chat",
+        "generation.chat_stream",
+        "generation.tts",
+        "generation.asr",
+        "generation.image",
+        "generation.ocr",
+        "generation.embedding",
+        "generation.command",
+        "generation.progress_stream"
       ]
     },
     "system": {
@@ -65,19 +72,19 @@
         "device.info"
       ]
     },
-    "provider": {
+    "providers": {
       "label": "供应商",
-      "prefix": "/provider",
+      "prefix": "/providers",
       "description": "provider 目录、状态、切换、停止与模型下载",
       "ops": [
-        "provider.list_adapters",
-        "provider.all_configs",
-        "provider.list_providers",
-        "provider.get",
-        "provider.status",
-        "provider.switch",
-        "provider.stop",
-        "provider.download"
+        "providers.list_describe",
+        "providers.all_configs",
+        "providers.list_providers",
+        "providers.get_provider",
+        "providers.status",
+        "providers.switch",
+        "providers.stop",
+        "providers.download"
       ]
     },
     "service": {
@@ -187,23 +194,23 @@
         "character.update_state"
       ]
     },
-    "memory": {
+    "memories": {
       "label": "记忆",
-      "prefix": "/memory",
+      "prefix": "/memories",
       "description": "分层记忆、检索、压缩、统计、衰减与删除",
       "ops": [
-        "memory.layers",
-        "memory.short_term",
-        "memory.long_term",
-        "memory.search",
-        "memory.compressed",
-        "memory.stats",
-        "memory.decay",
-        "memory.flush",
-        "memory.retention",
-        "memory.pin",
-        "memory.revive",
-        "memory.delete"
+        "memories.layers",
+        "memories.short_term",
+        "memories.long_term",
+        "memories.search",
+        "memories.compressed",
+        "memories.stats",
+        "memories.decay",
+        "memories.flush",
+        "memories.retention",
+        "memories.pin",
+        "memories.revive",
+        "memories.delete_memory"
       ]
     },
     "task": {

@@ -43,12 +43,13 @@ BASE_URL = "http://127.0.0.1:8000"
 # ==========================================================================
 
 GROUPS: Dict[str, Dict[str, str]] = {
-    "generate": {"label": "生成与推理", "prefix": "/", "description": "对话、语音、图像、OCR、向量、工具命令及生成任务辅助；handler 统一在 controllers/greater.py"},
+    "request":{"label": "常规请求", "prefix": "/", "description": "常规请求"},
+    "generation": {"label": "生成与推理", "prefix": "/generation", "description": "对话、语音、图像、OCR、向量、工具命令及生成任务辅助"},
     "system": {"label": "系统", "prefix": "/system", "description": "健康、版本、统计、GC 与连通性探测"},
     "config": {"label": "配置", "prefix": "/config", "description": "配置读取、局部更新、重载、持久化与 schema"},
     "logger": {"label": "日志", "prefix": "/logger", "description": "日志级别、统计、记录与排空"},
     "device": {"label": "设备", "prefix": "/device", "description": "CPU/GPU/内存与推荐帧率"},
-    "provider": {"label": "供应商", "prefix": "/provider", "description": "provider 目录、状态、切换、停止与模型下载"},
+    "providers": {"label": "供应商", "prefix": "/providers", "description": "provider 目录、状态、切换、停止与模型下载"},
     "service": {"label": "服务", "prefix": "/service", "description": "服务注册、启停、配置、工具与 UI 描述"},
     "skill": {"label": "技能", "prefix": "/skill", "description": "技能目录、启停、提示词与受控执行"},
     "workspace": {"label": "工作区", "prefix": "/workspace", "description": "工作区选择、权限档位与敏感确认"},
@@ -56,7 +57,7 @@ GROUPS: Dict[str, Dict[str, str]] = {
     "session": {"label": "会话", "prefix": "/session", "description": "会话生命周期、消息追加与落盘"},
     "save": {"label": "存档", "prefix": "/save", "description": "存档槽、分段更新、同步与恢复"},
     "character": {"label": "角色", "prefix": "/character", "description": "角色 CRUD、预设、切换与状态"},
-    "memory": {"label": "记忆", "prefix": "/memory", "description": "分层记忆、检索、压缩、统计、衰减与删除"},
+    "memories": {"label": "记忆", "prefix": "/memories", "description": "分层记忆、检索、压缩、统计、衰减与删除"},
     "task": {"label": "任务", "prefix": "/task", "description": "后台任务查询与取消"},
     "ppt": {"label": "PPT", "prefix": "/ppt", "description": "模板、大纲、渲染任务与产物下载"},
     "hotkeys": {"label": "热键", "prefix": "/hotkeys", "description": "快捷键清单、校验、批量更新与重置"},
@@ -97,18 +98,18 @@ def E(
 # ==========================================================================
 
 ENDPOINTS: List[Dict[str, Any]] = [
-    # ---------------- 生成与推理（greater.py） ----------------
-    E("generate", "GET", "/status", "generate.status", "greater", "status", "查询 LLM/TTS/ASR/图像/OCR/向量能力就绪状态", data="GenerationStatusData", status="新增", note="只读探测，不触发模型加载、索引重建或全盘扫描。"),
-    E("generate", "POST", "/chat", "generate.chat", "greater", "chat_once", "非流式对话，一次返回完整回复", body="ChatRequest", data="ChatResultData", timeout=600.0, example={"text": "你好", "session_id": "default", "source": "text"}, note="route 为空时由意图路由自动判定 pure_chat / tool_call / mixed。"),
-    E("generate", "POST", "/chat/stream", "generate.chat_stream", "greater", "chat_stream", "SSE 流式对话", body="ChatStreamRequest", timeout=600.0, sse=True, desktop=False, example={"text": "讲个短故事"}, note="每帧 `event:` + `data:`（含 stream_id / request_id / seq / ts）；终态恰为 done / error / cancelled 之一，见 §4.1。"),
-    E("generate", "POST", "/tts", "generate.tts", "greater", "tts", "文本转语音，返回 base64 音频", body="TTSRequest", data="TTSResultData", timeout=120.0, example={"text": "你好呀", "format": "mp3"}, note="二进制一律 base64；日志不记录音频内容。"),
-    E("generate", "POST", "/asr", "generate.asr", "greater", "asr", "语音转文本，audio 为 base64 音频", body="ASRRequest", data="ASRResultData", timeout=120.0, example={"audio": "<base64-wav>", "format": "wav", "is_final": True}, note="需限制请求体大小、音频时长与解码资源。"),
-    E("generate", "POST", "/image/generations", "generate.image", "greater", "image_generate", "图像生成（OpenAI / Stability / ComfyUI 协议）", body="ImageGenerateRequest", data="ImageGenerateData", timeout=600.0, example={"prompt": "一只在窗台晒太阳的猫", "size": "1024x1024", "n": 1, "response_format": "url"}, note="provider/model_id 必须落在 Registry 白名单；extra 展开为供应商原生参数。"),
-    E("generate", "POST", "/ocr", "generate.ocr", "greater", "ocr", "图片文字识别", body="OCRRecognizeRequest", data="OCRResultData", timeout=120.0, example={"image": "<base64-png>", "format": "png"}),
-    E("generate", "POST", "/embedding", "generate.embedding", "greater", "embedding", "批量文本向量化", body="EmbeddingRequest", data="EmbeddingData", timeout=120.0, example={"texts": ["你好", "世界"]}, note="开发态无模型时走 hash 兜底，fingerprint 明确标记，禁止与真实向量混用。"),
-    E("generate", "POST", "/command", "generate.command", "greater", "command", "执行工具命令文本（策略/沙箱/工作区约束）", body="CommandRunRequest", data="CommandResultData", timeout=120.0, example={"text": "skill --id weather --city 深圳", "wait": True}, note="命令文本只认 `--id`；shell 与未隔离语言默认拒绝，见 §4.4。"),
-    E("generate", "GET", "/folder/{type}", "generate.open_folder", "greater", "open_folder", "打开受支持的本地数据目录", dispatch="thread", status="新增", note="type 白名单：images / roles / memory / workspace；禁止任意路径。"),
-    E("generate", "POST", "/progress-stream/{task_id}", "generate.progress_stream", "greater", "progress_stream", "SSE 任务进度流", timeout=600.0, sse=True, desktop=False, status="修正", note="生产者调用 greater.set_progress(task_id, data) 写入；0.3s 轮询、终态清理、有 deadline；事件名随 status，帧带 stream_id / request_id / seq / ts。"),
+    # ---------------- 生成与推理（generation.py） ----------------
+    E("generation", "GET", "/generation/status", "generation.status", "generation", "status", "查询 LLM/TTS/ASR/图像/OCR/向量能力就绪状态", data="GenerationStatusData", status="新增", note="只读探测，不触发模型加载、索引重建或全盘扫描。"),
+    E("generation", "POST", "/generation/chat", "generation.chat", "generation", "chat_once", "非流式对话，一次返回完整回复", body="ChatRequest", data="ChatResultData", timeout=600.0, example={"text": "你好", "session_id": "default", "source": "text"}, note="route 为空时由意图路由自动判定 pure_chat / tool_call / mixed。"),
+    E("generation", "POST", "/generation/chat/stream", "generation.chat_stream", "generation", "chat_stream", "SSE 流式对话", body="ChatStreamRequest", timeout=600.0, sse=True, desktop=False, example={"text": "讲个短故事"}, note="每帧 `event:` + `data:`（含 stream_id / request_id / seq / ts）；终态恰为 done / error / cancelled 之一，见 §4.1。"),
+    E("generation", "POST", "/generation/tts", "generation.tts", "generation", "tts", "文本转语音，返回 base64 音频", body="TTSRequest", data="TTSResultData", timeout=120.0, example={"text": "你好呀", "format": "mp3"}, note="二进制一律 base64；日志不记录音频内容。"),
+    E("generation", "POST", "/asr", "generation.asr", "generation", "asr", "语音转文本，audio 为 base64 音频", body="ASRRequest", data="ASRResultData", timeout=120.0, example={"audio": "<base64-wav>", "format": "wav", "is_final": True}, note="需限制请求体大小、音频时长与解码资源。"),
+    E("generation", "POST", "/generation/image", "generation.image", "generation", "image", "图像生成（OpenAI / Stability / ComfyUI 协议）", body="ImageGenerateRequest", data="ImageGenerateData", timeout=600.0, example={"prompt": "一只在窗台晒太阳的猫", "size": "1024x1024", "n": 1, "response_format": "url"}, note="provider/model_id 必须落在 Registry 白名单；extra 展开为供应商原生参数。"),
+    E("generation", "POST", "/generation/ocr", "generation.ocr", "generation", "ocr", "图片文字识别", body="OCRRecognizeRequest", data="OCRResultData", timeout=120.0, example={"image": "<base64-png>", "format": "png"}),
+    E("generation", "POST", "/generation/embedding", "generation.embedding", "generation", "embedding", "批量文本向量化", body="EmbeddingRequest", data="EmbeddingData", timeout=120.0, example={"texts": ["你好", "世界"]}, note="开发态无模型时走 hash 兜底，fingerprint 明确标记，禁止与真实向量混用。"),
+    E("generation", "POST", "/command", "generation.command", "generation", "command", "执行工具命令文本（策略/沙箱/工作区约束）", body="CommandRunRequest", data="CommandResultData", timeout=120.0, example={"text": "skill --id weather --city 深圳", "wait": True}, note="命令文本只认 `--id`；shell 与未隔离语言默认拒绝"),
+    E("request", "GET", "/folder/{type}", "request.open_folder", "request", "open_folder", "打开受支持的本地数据目录", dispatch="thread", status="新增", note="type 白名单：images / roles / memory / workspace；禁止任意路径。"),
+    E("generation", "POST", "/progress-stream/{task_id}", "generation.progress_stream", "generation", "progress_stream", "SSE 任务进度流", timeout=600.0, sse=True, desktop=False, status="修正", note="生产者调用 generation.set_progress(task_id, data) 写入；0.3s 轮询、终态清理、有 deadline；事件名随 status，帧带 stream_id / request_id / seq / ts。"),
 
     # ---------------- 系统 ----------------
     E("system", "GET", "/system/health", "system.health", "system", "health", "Web、调度器、主线程、记忆与服务健康状态", data="HealthData", status="现行"),
@@ -137,14 +138,14 @@ ENDPOINTS: List[Dict[str, Any]] = [
     E("device", "GET", "/device/info", "device.info", "device", "device_info", "设备与平台信息（CPU/GPU/内存/推荐帧率）", data="DeviceInfoData", dispatch="thread", status="新增"),
 
     # ---------------- 供应商 ----------------
-    E("provider", "GET", "/provider/adapters", "provider.list_adapters", "providers", "list_adapters", "能力、可选 provider、当前选中与用量", status="新增"),
-    E("provider", "GET", "/provider/configs", "provider.all_configs", "providers", "all_configs", "各能力供应商配置（敏感字段已掩码）", status="新增"),
-    E("provider", "GET", "/provider/adapters/{adapter}/providers", "provider.list_providers", "providers", "list_providers", "某能力下的 provider 清单", status="新增"),
-    E("provider", "GET", "/provider/adapters/{adapter}/providers/{provider}", "provider.get", "providers", "get_provider", "读取 provider 配置（已掩码）", status="新增"),
-    E("provider", "GET", "/provider/adapters/{adapter}/providers/{provider}/status", "provider.status", "providers", "status", "provider 完整状态与本地模型文件状态", data="ProviderStatusData", status="新增"),
-    E("provider", "POST", "/provider/adapters/{adapter}/switch", "provider.switch", "providers", "switch", "切换 provider / 模型", body="ProviderSwitchRequest", data="SwitchResultData", dispatch="thread", timeout=120.0, status="新增", note="先初始化新实例并健康检查，成功后才切流量；配置覆盖走白名单。"),
-    E("provider", "POST", "/provider/adapters/{adapter}/stop", "provider.stop", "providers", "stop_adapter", "停止当前 provider，保留能力门面", dispatch="thread", status="新增"),
-    E("provider", "POST", "/provider/adapters/{adapter}/providers/{provider}/download", "provider.download", "providers", "download_model", "触发本地模型下载（进度走 WebSocket）", body="ProviderDownloadRequest", data="DownloadStartData", timeout=30.0, status="新增", note="返回 task_id；已安装且未 force 时返回 1001「模型已存在」。"),
+    E("providers", "GET", "/providers/adapters", "providers.list_describe", "providers", "list_describe", "能力、可选 provider、当前选中与用量", status="新增"),
+    E("providers", "GET", "/providers/configs", "providers.all_configs", "providers", "all_configs", "各能力供应商配置（敏感字段已掩码）", status="新增"),
+    E("providers", "GET", "/providers/{adapter}", "providers.list_providers", "providers", "list_providers", "某能力下的 provider 清单", status="新增"),
+    E("providers", "GET", "/providers/{adapter}/{provider}", "providers.get_provider", "providers", "get_provider", "读取 provider 配置（已掩码）", status="新增"),
+    E("providers", "GET", "/providers/{adapter}/{provider}/status", "providers.status", "providers", "status", "provider 完整状态与本地模型文件状态", data="ProviderStatusData", status="新增"),
+    E("providers", "POST", "/providers/{adapter}/switch", "providers.switch", "providers", "switch", "切换 provider / 模型", body="ProviderSwitchRequest", data="SwitchResultData", dispatch="thread", timeout=120.0, status="新增", note="先初始化新实例并健康检查，成功后才切流量；配置覆盖走白名单。"),
+    E("providers", "POST", "/providers/{adapter}/stop", "providers.stop", "providers", "stop_adapter", "停止当前 provider，保留能力门面", dispatch="thread", status="新增"),
+    E("providers", "POST", "/providers/{adapter}/{provider}/download", "providers.download", "providers", "download_model", "触发本地模型下载（进度走 WebSocket）", body="ProviderDownloadRequest", data="DownloadStartData", timeout=30.0, status="新增", note="返回 task_id；已安装且未 force 时返回 1001「模型已存在」。"),
 
     # ---------------- 服务 ----------------
     E("service", "GET", "/service", "service.list", "service", "list_services", "服务列表（支持 running_only）", data="ServiceListData", status="现行"),
@@ -195,22 +196,22 @@ ENDPOINTS: List[Dict[str, Any]] = [
     E("save", "POST", "/save/snapshot/preview", "save.snapshot_preview", "save", "snapshot_preview", "恢复预演（只读、无副作用）", data="SnapshotActionData", status="新增", dispatch="thread", note="slot_id / revision 为 query 参数；Preview → Prepare → Commit → Verify 中不改动运行态。"),
     E("save", "POST", "/save/snapshot", "save.snapshot", "save", "snapshot", "创建不可变 Snapshot revision", body="SnapshotRequest", data="SnapshotActionData", timeout=300.0, status="新增", dispatch="thread", example={"slot_id": "slot_001", "label": "章节通关", "trigger": "manual"}, note="stage → validate → publish；parent 默认取最近成功恢复的 revision。"),
     E("save", "POST", "/save/snapshot/restore", "save.snapshot_restore", "save", "snapshot_restore", "执行恢复事务（失败自动回滚）", body="SnapshotRequest", data="SnapshotActionData", timeout=300.0, status="新增", dispatch="thread", example={"slot_id": "slot_001", "revision": "rev_0007"}, note="墓碑优先于旧快照；事务结束后恢复调度并启动 pre-restore 缓冲期计时。"),
-    E("save", "GET", "/save/slots", "save.list_slots", "save", "list_slots", "存档槽列表", data="SlotListData", status="修正", note="修正旧端点 path 自带 /api 造成的 /api/api/... 重复前缀。"),
-    E("save", "POST", "/save/slots", "save.create", "save", "create_slot", "创建存档槽", body="SlotCreateRequest", data="SlotInfoData", status="修正"),
-    E("save", "POST", "/save/slots/sync", "save.sync", "save", "sync_from_sessions", "从会话同步到存档槽", body="SlotSyncRequest", dispatch="thread", status="修正"),
-    E("save", "POST", "/save/slots/restore", "save.restore", "save", "restore_to_sessions", "从存档槽恢复到会话", dispatch="thread", status="修正"),
-    E("save", "GET", "/save/slots/{slot_id}", "save.get", "save", "get_slot", "存档槽详情", data="SlotInfoData", status="修正"),
-    E("save", "DELETE", "/save/slots/{slot_id}", "save.delete", "save", "delete_slot", "删除存档槽", data="SlotActionData", status="修正"),
-    E("save", "POST", "/save/slots/{slot_id}/toggle", "save.toggle", "save", "toggle_slot", "切换激活存档槽", data="SlotActionData", status="修正"),
-    E("save", "POST", "/save/slots/{slot_id}/save", "save.save", "save", "save_slot", "写入存档", data="SlotActionData", dispatch="thread", status="修正"),
-    E("save", "POST", "/save/slots/{slot_id}/load", "save.load", "save", "load_slot", "加载存档", data="SlotActionData", dispatch="thread", status="修正"),
-    E("save", "PUT", "/save/slots/{slot_id}/section", "save.update_section", "save", "update_section", "更新存档分段", body="SlotSectionUpdateRequest", dispatch="thread", status="修正"),
+    E("save", "GET", "/save/list", "save.list_slots", "save", "list_slots", "存档槽列表", data="SlotListData", status="修正", note="修正旧端点 path 自带 /api 造成的 /api/api/... 重复前缀。"),
+    E("save", "POST", "/save/create", "save.create", "save", "create_slot", "创建存档槽", body="SlotCreateRequest", data="SlotInfoData", status="修正"),
+    E("save", "POST", "/save/sync", "save.sync", "save", "sync_from_sessions", "从会话同步到存档槽", body="SlotSyncRequest", dispatch="thread", status="修正"),
+    E("save", "POST", "/save/restore", "save.restore", "save", "restore_to_sessions", "从存档槽恢复到会话", dispatch="thread", status="修正"),
+    E("save", "GET", "/save/{slot_id}", "save.get", "save", "get_slot", "存档槽详情", data="SlotInfoData", status="修正"),
+    E("save", "DELETE", "/save/{slot_id}", "save.delete", "save", "delete_slot", "删除存档槽", data="SlotActionData", status="修正"),
+    E("save", "POST", "/save/{slot_id}/toggle", "save.toggle", "save", "toggle_slot", "切换激活存档槽", data="SlotActionData", status="修正"),
+    E("save", "POST", "/save/{slot_id}/save", "save.save", "save", "save_slot", "写入存档", data="SlotActionData", dispatch="thread", status="修正"),
+    E("save", "POST", "/save/{slot_id}/load", "save.load", "save", "load_slot", "加载存档", data="SlotActionData", dispatch="thread", status="修正"),
+    E("save", "PUT", "/save/{slot_id}/section", "save.update_section", "save", "update_section", "更新存档分段", body="SlotSectionUpdateRequest", dispatch="thread", status="修正"),
 
     # ---------------- 角色 ----------------
     E("character", "GET", "/character", "character.list", "character", "list_characters", "角色列表", data="CharacterListData", status="新增"),
     E("character", "GET", "/character/presets", "character.presets", "character", "presets", "角色预设（情绪映射等）", status="新增", note="静态路径必须先于 /character/{character_id} 注册。"),
     E("character", "GET", "/character/current", "character.current", "character", "current", "当前角色", data="CharacterInfoData", status="新增"),
-    E("character", "POST", "/character", "character.create", "character", "create_character", "创建角色", body="CharacterCreateRequest", data="CharacterInfoData", status="新增"),
+    E("character", "POST", "/character/create", "character.create", "character", "create_character", "创建角色", body="CharacterCreateRequest", data="CharacterInfoData", status="新增"),
     E("character", "GET", "/character/{character_id}", "character.get", "character", "get_character", "角色详情", data="CharacterInfoData", status="新增"),
     E("character", "PUT", "/character/{character_id}", "character.update", "character", "update_character", "更新角色", body="CharacterUpdateRequest", data="CharacterInfoData", status="新增"),
     E("character", "DELETE", "/character/{character_id}", "character.delete", "character", "delete_character", "删除角色", status="现行"),
@@ -219,18 +220,18 @@ ENDPOINTS: List[Dict[str, Any]] = [
     E("character", "PUT", "/character/{character_id}/state", "character.update_state", "character", "update_state", "更新角色状态", body="CharacterStateUpdateRequest", data="CharacterStateData", status="现行"),
 
     # ---------------- 记忆 ----------------
-    E("memory", "GET", "/memory/layers", "memory.layers", "memories", "layers", "分层记忆（short_term / long_term / detailed）", data="MemoryLayersData", status="新增"),
-    E("memory", "GET", "/memory/short", "memory.short_term", "memories", "short_term", "短期记忆摘要", data="MemoryShortTermData", status="新增"),
-    E("memory", "GET", "/memory/long", "memory.long_term", "memories", "long_term", "长期记忆", data="MemoryLongTermData", status="新增"),
-    E("memory", "POST", "/memory/search", "memory.search", "memories", "search", "语义 / 相关记忆检索", body="MemorySearchRequest", data="MemorySearchData", status="新增", note="必须先按 session_id 过滤再查询存储。"),
-    E("memory", "GET", "/memory/compressed", "memory.compressed", "memories", "compressed", "压缩记忆列表", data="MemoryCompressedListData", status="新增"),
-    E("memory", "GET", "/memory/stats", "memory.stats", "memories", "stats", "记忆容量统计", data="MemoryStatsData", status="新增"),
-    E("memory", "POST", "/memory/decay", "memory.decay", "memories", "decay", "手动触发记忆衰减", data="MemoryDecayData", dispatch="thread", status="新增"),
-    E("memory", "POST", "/memory/flush", "memory.flush", "memories", "flush", "等待后台写入完成", data="MemoryFlushData", dispatch="thread", status="新增"),
-    E("memory", "POST", "/memory/retention", "memory.retention", "memories", "retention", "设置记忆保留期 / 层级（默认预演）", body="MemoryActionRequest", data="MemoryActionData", dispatch="thread", status="新增", example={"memory_id": "42", "session_id": "default", "retention_days": 30, "dry_run": True}, note="静态路径必须先于 /memory/{memory_id} 注册；dry_run 默认 true，code 为稳定拒绝码（bad_scope / not_found / no_change…），不是 HTTP 错误。"),
-    E("memory", "POST", "/memory/pin", "memory.pin", "memories", "pin", "固定 / 取消固定一条记忆", body="MemoryActionRequest", data="MemoryActionData", dispatch="thread", status="新增", example={"memory_id": "42", "pinned": True, "dry_run": False}),
-    E("memory", "POST", "/memory/revive", "memory.revive", "memories", "revive", "唤醒 faded / archived 记忆", body="MemoryActionRequest", data="MemoryActionData", dispatch="thread", status="新增", example={"memory_id": "42", "dry_run": False}, note="复用 MemoryAPI.retention_service，提升稳定度但不重置时间轴；scope 先按 session_id 校验。"),
-    E("memory", "DELETE", "/memory/{memory_id}", "memory.delete", "memories", "delete_memory", "删除单条记忆（墓碑协议）", data="MemoryDeleteData", dispatch="thread", status="新增"),
+    E("memories", "GET", "/memories/layers", "memories.layers", "memories", "layers", "分层记忆（short_term / long_term / detailed）", data="MemoryLayersData", status="新增"),
+    E("memories", "GET", "/memories/short", "memories.short_term", "memories", "short_term", "短期记忆摘要", data="MemoryShortTermData", status="新增"),
+    E("memories", "GET", "/memories/long", "memories.long_term", "memories", "long_term", "长期记忆", data="MemoryLongTermData", status="新增"),
+    E("memories", "POST", "/memories/search", "memories.search", "memories", "search", "语义 / 相关记忆检索", body="MemorySearchRequest", data="MemorySearchData", status="新增", note="必须先按 session_id 过滤再查询存储。"),
+    E("memories", "GET", "/memories/compressed", "memories.compressed", "memories", "compressed", "压缩记忆列表", data="MemoryCompressedListData", status="新增"),
+    E("memories", "GET", "/memories/stats", "memories.stats", "memories", "stats", "记忆容量统计", data="MemoryStatsData", status="新增"),
+    E("memories", "POST", "/memories/decay", "memories.decay", "memories", "decay", "手动触发记忆衰减", data="MemoryDecayData", dispatch="thread", status="新增"),
+    E("memories", "POST", "/memories/flush", "memories.flush", "memories", "flush", "等待后台写入完成", data="MemoryFlushData", dispatch="thread", status="新增"),
+    E("memories", "POST", "/memories/retention", "memories.retention", "memories", "retention", "设置记忆保留期 / 层级（默认预演）", body="MemoryActionRequest", data="MemoryActionData", dispatch="thread", status="新增", example={"memory_id": "42", "session_id": "default", "retention_days": 30, "dry_run": True}, note="静态路径必须先于 /memories/{memory_id} 注册；dry_run 默认 true，code 为稳定拒绝码（bad_scope / not_found / no_change…），不是 HTTP 错误。"),
+    E("memories", "POST", "/memories/pin", "memories.pin", "memories", "pin", "固定 / 取消固定一条记忆", body="MemoryActionRequest", data="MemoryActionData", dispatch="thread", status="新增", example={"memory_id": "42", "pinned": True, "dry_run": False}),
+    E("memories", "POST", "/memories/revive", "memories.revive", "memories", "revive", "唤醒 faded / archived 记忆", body="MemoryActionRequest", data="MemoryActionData", dispatch="thread", status="新增", example={"memory_id": "42", "dry_run": False}, note="复用 MemoryAPI.retention_service，提升稳定度但不重置时间轴；scope 先按 session_id 校验。"),
+    E("memories", "DELETE", "/memories/{memory_id}", "memories.delete_memory", "memories", "delete_memory", "删除单条记忆（墓碑协议）", data="MemoryDeleteData", dispatch="thread", status="新增"),
 
     # ---------------- 任务 ----------------
     E("task", "GET", "/task/{task_id}", "task.get", "task", "get_task", "查询后台任务状态与结果", data="TaskStatusData", status="新增"),
@@ -741,7 +742,7 @@ DOC_HEAD = """# ChatBot API 参考（dev 分支 · 官方契约基线）
 
 ### 1.3 端点与 op 命名
 
-`op` 统一为 `<group>.<action>`（如 `generate.chat`、`session.create`），与 `groups.json` 的 `ops` 一一对应。`desktop=true` 的端点同时注册为 `ApiGateway` 的 op，桌面端 `call(op)` 与 REST 复用同一 handler 与 DTO。相比基线 `<module>.<func>` 形式的 op，本次为**破坏性重命名**；前端 service 已由 `scripts/api/generate_frontend_services.py` 按同一契约重新生成，每个请求显式携带 `opName` 与 `pathParams`，bridge 不再依赖路径推导（见 §4.3 / §6）。
+`op` 统一为 `<group>.<action>`（如 `generation.chat`、`session.create`），与 `groups.json` 的 `ops` 一一对应。`desktop=true` 的端点同时注册为 `ApiGateway` 的 op，桌面端 `call(op)` 与 REST 复用同一 handler 与 DTO。相比基线 `<module>.<func>` 形式的 op，本次为**破坏性重命名**；前端 service 已由 `scripts/api/generate_frontend_services.py` 按同一契约重新生成，每个请求显式携带 `opName` 与 `pathParams`，bridge 不再依赖路径推导（见 §4.3 / §6）。
 
 ### 1.4 分组总览
 
@@ -879,7 +880,7 @@ data: {"type":"error","code":2002,"error":{"code":2002,"kind":"timeout","message
 | `cancelled` | chat | 客户端断连终态，同时 `ref.cancel()` 向上传播取消 |
 | `timeout` | progress | 超过 `STREAM_TIMEOUT` 的终态 |
 
-进度流帧 data 为 `{task_id, status, percent, sent, total, files_done, files_total, error, type, stream_id, request_id, seq, ts}`；`status` 取 `pending` / `running` / `done` / `error` / `cancelled` / `timeout` / `finished`；生产者调用 `greater.set_progress(task_id, data)` 写入，终态到达后 `clear_progress(task_id)`。
+进度流帧 data 为 `{task_id, status, percent, sent, total, files_done, files_total, error, type, stream_id, request_id, seq, ts}`；`status` 取 `pending` / `running` / `done` / `error` / `cancelled` / `timeout` / `finished`；生产者调用 `generation.set_progress(task_id, data)` 写入，终态到达后 `clear_progress(task_id)`。
 
 约束：每流**恰好一个终态**（done / error / cancelled / timeout）；旧客户端忽略 `event:` 行仍可解析 `data:`；服务端有 max lifetime（600s）；断连传播取消；不伪装支持 replay。
 

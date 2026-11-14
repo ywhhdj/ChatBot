@@ -313,3 +313,47 @@ class SnapshotRequest(_Base):
     branch_id: str = "main"
     label: str = ""
     trigger: str = "manual"
+
+# ─────────────────── OpenAI 协议兼容层（Codex CLI / DeepSeek Harness） ───────────────────
+class _CompatBase(_Base):
+    """外部 Agent 客户端会带大量协议字段（store / include / reasoning / …）。
+
+    这些字段 ChatBot 不实现，但**不能**因此 422 或丢掉整次请求；统一用
+    ``extra="allow"`` 接住，翻译层只取自己认识的字段，其余忽略。
+    """
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+
+class CompatChatRequest(_CompatBase):
+    """`POST /api/v1/chat/completions` — OpenAI Chat Completions 格式。"""
+
+    model: str = ""
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    stream: bool = False
+    temperature: float = 0.7
+    max_tokens: int = 1024
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Any = None
+    top_p: Optional[float] = None
+    stop: Any = None
+    n: int = 1
+    user: str = ""
+
+
+class CompatResponsesRequest(_CompatBase):
+    """`POST /api/v1/responses` — OpenAI Responses API 格式（Codex CLI 0.94+）。"""
+
+    model: str = ""
+    input: Any = None                       # str 或 item 数组
+    instructions: str = ""
+    stream: bool = False
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Any = None
+    temperature: float = 0.7
+    max_output_tokens: int = 1024
+    previous_response_id: str = ""         # 无状态兼容层，忽略
+    store: bool = False                    # 无状态兼容层，忽略
+    parallel_tool_calls: bool = True
+    reasoning: Any = None
+    include: Any = None

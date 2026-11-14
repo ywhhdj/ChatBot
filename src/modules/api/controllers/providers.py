@@ -32,8 +32,8 @@ def _manager():
         pm.load_config()
     return pm
 
-async def list_adapters() -> ApiResponse[Dict[str, Any]]:
-    """列出所有能力、可选 provider、当前 provider / 模型与累计用量。"""
+async def list_describe() -> ApiResponse[Dict[str, Any]]:
+    """列出所有能力、可选 providers、当前 providers / 模型与累计用量。"""
     described = _manager().describe()
     out: Dict[str, Any] = {}
     for key, info in (described.get("adapters") or {}).items():

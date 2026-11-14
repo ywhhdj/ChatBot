@@ -1,16 +1,4 @@
-"""记忆接口：三层记忆、摘要、语义检索、压缩记忆、衰减、统计。
-
-所有端点返回 `ApiResponse[T]`，`T` 为 `api/dto.py` 中已声明的记忆 DTO；
-不再返回裸 `Dict`，便于前端/桌面 bridge 共用类型。
-
-**关键：记忆系统必须在同一个事件循环里调用。**
-
-`storage` 内部持有 `asyncio.Lock`（MarkdownStorage 惰性创建）与
-`asyncio.Queue`（SQLiteFAISSStorage 的 worker 队列），它们会绑定首次
-使用的 loop。初始化发生在调度器 loop（`chat.ensure_initialized` 走
-`async_task_scheduler`），因此这里的所有调用也统一提交到调度器 loop ——
-既避免 `attached to a different loop`，也不会占住 Web loop。
-"""
+"""记忆接口：三层记忆、摘要、语义检索、压缩记忆、衰减、统计"""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -44,7 +32,8 @@ def _memory():
     sysm = HybridMemorySystem.instance()
     if not sysm or not getattr(sysm, "_initialized", False):
         raise ApiError.not_initialized(
-            "记忆系统", "尚未初始化，请等待应用启动完成或先发起一次对话"
+            "记忆系统", 
+            "尚未初始化，请等待应用启动完成或先发起一次对话"
         )
     return sysm
 

@@ -1,12 +1,4 @@
-"""服务接口：列表、详情、工具定义、启停、配置读写、UI 描述。
-
-本次修复
-────────
-* `start_service` 原先把"已注册"当作可启动条件、并在注册前读取服务状态，
-  必然在首次启动时抛错；现改为未注册才注册、已运行才拒绝。
-* 服务管理器导入改为正式路径 `modules.services.manager`。
-* 补齐 `ppt` / `shell` 服务的注册分支。
-"""
+"""服务接口：列表、详情、工具定义、启停、配置读写、UI 描述"""
 from __future__ import annotations
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Query
@@ -26,8 +18,6 @@ from ..dto import (
 )
 from ..response import ApiError, ApiResponse, success
 from .._common import state_name, to_thread
-
-router = APIRouter(prefix="/service", tags=["service"])
 
 
 def _sm():
@@ -50,8 +40,6 @@ def _info_with_id(service_id: str) -> ServiceInfoData:
         config=info.get("config"),
     )
 
-
-@router.get("", response_model=ApiResponse[ServiceListData])
 async def list_services(
     running_only: bool = Query(False, description="只返回运行中的服务"),
 ) -> ApiResponse[ServiceListData]:
@@ -63,7 +51,6 @@ async def list_services(
     return success(ServiceListData(services=services, total=len(services)))
 
 
-@router.get("/tools", response_model=ApiResponse[ToolData])
 async def list_tools() -> ApiResponse[ToolData]:
     """所有服务暴露的工具定义（OpenAI function 格式）。"""
     sm = _sm()
@@ -76,14 +63,11 @@ async def list_tools() -> ApiResponse[ToolData]:
         total=len(tools)
     ))
 
-
-@router.get("/{service_id}", response_model=ApiResponse[ServiceInfoData])
 async def get_service(service_id: str) -> ApiResponse[ServiceInfoData]:
     """单个服务详情。"""
     return success(_info_with_id(service_id))
 
 
-@router.get("/{service_id}/tools", response_model=ApiResponse[ToolData])
 async def service_tools(service_id: str) -> ApiResponse[ToolData]:
     """某个服务的工具定义。"""
     sm = _sm()
@@ -99,8 +83,6 @@ async def service_tools(service_id: str) -> ApiResponse[ToolData]:
         items = [tools] if tools else []
     return success(ToolData(services={"tools": items}, total=len(items)))
 
-
-@router.get("/{service_id}/ui", response_model=ApiResponse[ServiceUIDescription])
 async def service_ui(service_id: str) -> ApiResponse[ServiceUIDescription]:
     """UI 描述，供前端生成控制面板。"""
     sm = _sm()
@@ -136,8 +118,6 @@ def register_service(service_id: str, payload: Optional[Dict[str, Any]] = None):
     else:
         raise ApiError.not_found(f"服务 {service_id}")
 
-
-@router.post("/{service_id}/start", response_model=ApiResponse[ServiceActionData])
 async def start_service(
     service_id: str,
     payload: Optional[ServiceStartRequest] = None,
@@ -169,8 +149,6 @@ async def start_service(
         message=f"服务 {service_id} 已启动",
     )
 
-
-@router.post("/{service_id}/stop", response_model=ApiResponse[ServiceActionData])
 async def stop_service(service_id: str) -> ApiResponse[ServiceActionData]:
     """停止服务。"""
     sm = _sm()
@@ -183,8 +161,6 @@ async def stop_service(service_id: str) -> ApiResponse[ServiceActionData]:
         message=f"服务 {service_id} 已停止",
     )
 
-
-@router.get("/{service_id}/config", response_model=ApiResponse[Dict[str, Any]])
 async def get_config(service_id: str) -> ApiResponse[Dict[str, Any]]:
     """读取服务配置。"""
     sm = _sm()
@@ -198,8 +174,6 @@ async def get_config(service_id: str) -> ApiResponse[Dict[str, Any]]:
         cfg = cfg.to_dict()
     return success({"id": service_id, "config": cfg})
 
-
-@router.put("/{service_id}/config", response_model=ApiResponse[Dict[str, Any]])
 async def update_config(
     service_id: str,
     payload: ServiceConfigUpdateRequest,
@@ -228,7 +202,6 @@ async def update_config(
 
 
 # 应用服务配置需先保存配置，再停止服务，再启动服务
-@router.put("/{service_id}/config/apply", response_model=ApiResponse[Dict[str, Any]])
 async def apply_config(
     service_id: str,
     payload: Optional[Dict[str, Any]] = None,

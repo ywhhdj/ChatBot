@@ -19,11 +19,7 @@ export const useUserStore = defineStore("user", {
         liquid: true,
       },
     },
-    dialogHistory: {
-      default: [],
-    },
-    clientId: "",
-    serviceConfig: {},
+    clientId: ""
   }),
   actions: {
     saveConfig() {
@@ -35,18 +31,6 @@ export const useUserStore = defineStore("user", {
       if (config) {
         this.$patch(config);
       }
-    },
-  
-    async getServiceConfig(service: API.ServiceId) {
-      const res = await serviceService.serviceUi(service);
-      if (res) {
-        console.log("getServiceConfig", res);
-        this.serviceConfig[service] = res;
-      }
-    },
-  
-    async saveServiceConfig(service: API.ServiceId,config: any) {
-      await serviceService.updateConfig(service,config)
     }
   },
 });
