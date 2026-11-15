@@ -31,7 +31,7 @@ export const providersService = {
 
   /** 切换 provider / 模型 */
   async switch(adapter: string, body: API.ProviderSwitchRequest): Promise<API.SwitchResultData> {
-    return request<API.SwitchResultData>("post", `/providers/adapters/${adapter}/switch`, body, { opName: "providers.switch", pathParams: { adapter } });
+    return request<API.SwitchResultData>("post", `/providers/${adapter}/switch`, body, { opName: "providers.switch", pathParams: { adapter } });
   },
 
   /** 停止当前 provider，保留能力门面 */

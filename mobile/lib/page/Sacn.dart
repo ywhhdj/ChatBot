@@ -96,9 +96,11 @@ class _ScanPageState extends State<ScanPage> {
           MobileScanner(
             controller: _scanner,
             onDetect: _onDetect,
-            errorBuilder: (ctx, error) => Center(
-              child: Text('相机错误: ${error.errorCode}',
-                  style: const TextStyle(color: Colors.white)),
+            errorBuilder: (ctx, error,_) => Center(
+              child: Text(
+                '相机错误: ${error.errorCode}',
+                style: const TextStyle(color: Colors.white),
+              ),
             ),
           ),
 

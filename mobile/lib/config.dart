@@ -12,7 +12,7 @@ class AppConfig {
   static const Duration triggerCooldown = Duration(seconds: 3);
 
   /// Live2D 模型资源路径（相对 assets）
-  static const String live2dModelPath = 'assets/live2d/Hiyori/Hiyori.model3.json';
+  static const String live2dModelPath = 'assets/live2d/deepssek/大肥鱼.model3.json';
 
   /// 触发“跳出”动画的 motion group 名称（需与模型定义一致）
   static const String jumpOutGroup = 'JumpOut';

@@ -1,5 +1,5 @@
 """供应商配置 Registry（单一配置权威源）。
-resources/config/providers/
+resources/configs/providers/
 ├── models/<capability>.json     provider 定义：{provider_id: {...}}
 ├── schemas/<capability>.json   能力级参数默认值：{schema_version, capability, params}
 └── tags.json                   标签字典（允许为空 / 未就绪）
@@ -461,11 +461,8 @@ def _default_config_dir() -> Path:
     env = os.environ.get("PIPELINE_CONFIG_DIR")
     if env:
         return Path(env)
-    try:
-        from ...runtime import StandardPaths  # modules.runtime
-        return Path(StandardPaths.get_resources_dir()) / "config" / "providers"
-    except Exception:  # noqa: BLE001 - 允许单独 import registry 做离线校验
-        return Path("resources/config/providers")
+    from ...runtime import StandardPaths  # modules.runtime
+    return Path(StandardPaths.get_resources_dir()) / "configs" / "providers"
 
 
 __all__ = [

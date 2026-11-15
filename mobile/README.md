@@ -1,5 +1,15 @@
 # ar_live2d_agent
 
+# build
+```bash
+flutter build apk --analyze-size \
+  --target-platform android-arm64 \
+  --split-per-abi \
+  --release \
+  --obfuscate \
+  --split-debug-info=build/app/outputs/symbols/
+```
+
 A new Flutter project.
 
 ## Getting Started

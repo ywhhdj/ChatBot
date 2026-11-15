@@ -1,10 +1,4 @@
-"""PPT 接口：模板 / 大纲 / 渲染 / 下载。
-
-修复对应清单：K24 / K25 / K26
-
-所有处理函数都注册成网关 op，桌面端（JS Bridge）与 Web 端（HTTP）
-走的是同一份代码、返回同一个信封。
-"""
+"""PPT 接口：模板 / 大纲 / 渲染 / 下载"""
 
 from __future__ import annotations
 

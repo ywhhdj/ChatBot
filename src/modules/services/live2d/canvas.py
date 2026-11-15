@@ -433,7 +433,7 @@ class Live2DCanvas(QLabel):
         )
 
     def __release_live2d_resources(self):
-        """B28：在渲染线程内释放 live2d（GL 上下文仍 current）。"""
+        """在渲染线程内释放 live2d（GL 上下文仍 current）。"""
         try:
             self.model = None
             self.wavehand = None
@@ -480,7 +480,7 @@ class Live2DCanvas(QLabel):
         self.running = True
         if self.__renderer is not None and not self.__renderer.is_running:
             self.__renderer.start()
-        # B31：Thread 只能 start 一次
+        # Thread 只能 start 一次
         if self._audio_thread is not None and not self._audio_thread_started:
             self._audio_thread.start()
             self._audio_thread_started = True

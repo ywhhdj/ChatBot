@@ -20,6 +20,8 @@ T = TypeVar("T")
 @dataclass
 class ConnectionInfo:
     client_id: str
+    uid: str = ""
+    device: str = "unknown"
     connected_at: datetime = field(default_factory=datetime.now)
     last_heartbeat: datetime = field(default_factory=datetime.now)
     metadata: dict = field(default_factory=dict)

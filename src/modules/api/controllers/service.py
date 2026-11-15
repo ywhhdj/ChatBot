@@ -172,7 +172,10 @@ async def get_config(service_id: str) -> ApiResponse[Dict[str, Any]]:
         raise ApiError.internal(f"读取配置失败: {e}")
     if hasattr(cfg, "to_dict"):
         cfg = cfg.to_dict()
-    return success({"id": service_id, "config": cfg})
+    return success({
+        "id": service_id,
+        "config": cfg
+    })
 
 async def update_config(
     service_id: str,
@@ -187,7 +190,9 @@ async def update_config(
     )
 
     ok = await to_thread(
-        sm.update_service_config, service_id, body or None
+        sm.update_service_config,
+        service_id,
+        body or None
     )
     if not ok:
         raise ApiError.internal(f"服务 {service_id} 配置更新失败")
@@ -211,7 +216,7 @@ async def apply_config(
     if not sm.is_registered(service_id):
         raise ApiError.not_found(f"服务 {service_id}")
     try:
-        cfg = sm.set_service_config(service_id, payload or {})
+        cfg = sm.apply_service_config(service_id, payload or {})
         await to_thread(sm.stop_service, service_id)
         await to_thread(sm.start_service, service_id)
     except Exception as e:

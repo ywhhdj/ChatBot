@@ -37,7 +37,7 @@ export const CONFIG: AppOptions = {
     MIN_SLOTS: 2,
   },
   env: {
-    API_BASE_URL: "http://localhost:8000",
+    API_BASE_URL: "",
     WS_API_BASE_URL: "ws://localhost:8000/",
     TIMEOUT: 100000,
   },

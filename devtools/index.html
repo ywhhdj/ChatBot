@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatBot DevTools · 接口 / 性能 / 功能测试</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <div>
+        <h1>ChatBot DevTools</h1>
+        <p>仅开发态 · 不随包分发 · 不注册任何业务路由</p>
+      </div>
+    </div>
+    <div class="conn">
+      <label>API Base <input id="apiBase" value="/api" spellcheck="false" /></label>
+      <label>WS Base <input id="wsBase" spellcheck="false" /></label>
+      <button id="btnPing" class="btn">检测连接</button>
+      <span id="connBadge" class="badge badge-idle">未检测</span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">概览</button>
+    <button class="tab" data-tab="endpoints">端点浏览器</button>
+    <button class="tab" data-tab="request">请求调试</button>
+    <button class="tab" data-tab="perf">性能压测</button>
+    <button class="tab" data-tab="smoke">功能冒烟</button>
+    <button class="tab" data-tab="config">服务配置三态</button>
+    <button class="tab" data-tab="stream">SSE / WS</button>
+  </nav>
+
+  <main>
+    <!-- 概览 -->
+    <section class="panel active" id="panel-overview">
+      <div class="grid4" id="ovCards"></div>
+      <h2>契约端点分布</h2>
+      <div id="ovGroups" class="chips"></div>
+      <h2>最近请求</h2>
+      <div class="table-wrap"><table id="ovRecent"></table></div>
+      <p class="hint">数据来自 <code>GET /api/catalog</code>；本页不写入任何业务数据。</p>
+    </section>
+
+    <!-- 端点浏览器 -->
+    <section class="panel" id="panel-endpoints">
+      <div class="row">
+        <input id="epFilter" placeholder="按 op / 路径 / 说明过滤…" />
+        <select id="epGroup"><option value="">全部分组</option></select>
+        <select id="epMethod">
+          <option value="">全部方法</option>
+          <option>GET</option><option>POST</option><option>PUT</option>
+          <option>PATCH</option><option>DELETE</option>
+        </select>
+        <span id="epCount" class="muted"></span>
+      </div>
+      <div class="table-wrap tall"><table id="epTable"></table></div>
+      <p class="hint">点击一行会把 method / path 填入「请求调试」。<code>compat.*</code> 为原生 OpenAI 协议端点，不带统一信封。</p>
+    </section>
+
+    <!-- 请求调试 -->
+    <section class="panel" id="panel-request">
+      <div class="row">
+        <select id="rqMethod">
+          <option>GET</option><option>POST</option><option>PUT</option>
+          <option>PATCH</option><option>DELETE</option>
+        </select>
+        <input id="rqPath" value="/system/health" spellcheck="false" />
+        <button id="rqSend" class="btn primary">发送</button>
+      </div>
+      <div class="two-col">
+        <div>
+          <h3>Query（JSON）</h3>
+          <textarea id="rqQuery" rows="4">{}</textarea>
+          <h3>Body（JSON，GET 忽略）</h3>
+          <textarea id="rqBody" rows="10">{}</textarea>
+        </div>
+        <div>
+          <h3>响应 <span id="rqMeta" class="muted"></span></h3>
+          <pre id="rqOut" class="out">等待请求…</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 性能压测 -->
+    <section class="panel" id="panel-perf">
+      <div class="row wrap">
+        <label>路径 <input id="pfPath" value="/system/ping" spellcheck="false" /></label>
+        <label>并发 <input id="pfConc" type="number" min="1" max="64" value="8" /></label>
+        <label>总数 <input id="pfTotal" type="number" min="1" max="2000" value="100" /></label>
+        <label>方法 <select id="pfMethod"><option>GET</option><option>POST</option></select></label>
+        <label>Body <input id="pfBody" value="{}" spellcheck="false" /></label>
+        <button id="pfRun" class="btn primary">开始压测</button>
+        <button id="pfStop" class="btn" disabled>停止</button>
+      </div>
+      <div class="grid4" id="pfCards"></div>
+      <div class="bar-wrap"><div id="pfBar" class="bar"></div></div>
+      <h3>延迟分位数</h3>
+      <div class="table-wrap"><table id="pfTable"></table></div>
+      <h3>错误分布</h3>
+      <pre id="pfErrors" class="out">—</pre>
+      <p class="hint">只压测只读端点；写操作请在「请求调试」里手动执行。</p>
+    </section>
+
+    <!-- 功能冒烟 -->
+    <section class="panel" id="panel-smoke">
+      <div class="row">
+        <button id="smRun" class="btn primary">运行只读冒烟</button>
+        <label class="chk"><input type="checkbox" id="smIncludeWrites" /> 同时执行写操作（谨慎）</label>
+        <span id="smProgress" class="muted"></span>
+      </div>
+      <div class="grid4" id="smCards"></div>
+      <div class="table-wrap tall"><table id="smTable"></table></div>
+      <p class="hint">默认只跑 <code>GET</code> 且无路径参数的端点；带 <code>{}</code> 的端点需要具体 id，留给手动测试。</p>
+    </section>
+
+    <!-- 服务配置三态 -->
+    <section class="panel" id="panel-config">
+      <div class="row">
+        <label>服务 ID
+          <select id="cfService">
+            <option>obs</option><option>browser</option><option>qqbot</option>
+            <option>live2d</option><option>ppt</option><option>shell</option>
+          </select>
+        </label>
+        <button id="cfGet" class="btn">① get_config</button>
+        <button id="cfSave" class="btn">② update_config（只保存）</button>
+        <button id="cfApply" class="btn primary">③ apply_config</button>
+        <button id="cfReset" class="btn">清空日志</button>
+      </div>
+      <div class="two-col">
+        <div>
+          <h3>编辑配置（保存用）</h3>
+          <textarea id="cfBody" rows="14">{
+  "enabled": true,
+  "ip": "127.0.0.1",
+  "port": 4455,
+  "timeout": 10
+}</textarea>
+        </div>
+        <div>
+          <h3>状态</h3>
+          <div id="cfState" class="state-box">未读取</div>
+          <h3>动作日志</h3>
+          <pre id="cfLog" class="out">—</pre>
+        </div>
+      </div>
+      <p class="hint">验收口径：② 之后 <code>pending=true</code> 且 <code>active_config</code> 不变；③ 之后 <code>pending=false</code>、<code>applied=true</code>。</p>
+    </section>
+
+    <!-- SSE / WS -->
+    <section class="panel" id="panel-stream">
+      <div class="two-col">
+        <div>
+          <h3>SSE</h3>
+          <div class="row wrap">
+            <input id="ssPath" value="/chat/stream" spellcheck="false" />
+            <button id="ssRun" class="btn primary">发起流</button>
+          </div>
+          <label class="blk">Body <textarea id="ssBody" rows="4">{"text":"讲个短故事"}</textarea></label>
+          <div id="ssMeta" class="muted"></div>
+          <pre id="ssOut" class="out tall-out">—</pre>
+        </div>
+        <div>
+          <h3>WebSocket</h3>
+          <div class="row wrap">
+            <button id="wsConnect" class="btn primary">连接</button>
+            <button id="wsPing" class="btn">发心跳</button>
+            <button id="wsClose" class="btn">断开</button>
+          </div>
+          <label class="blk">发送帧 <textarea id="wsBody" rows="4">{"type":"heartbeat"}</textarea></label>
+          <div id="wsMeta" class="muted"></div>
+          <pre id="wsOut" class="out tall-out">—</pre>
+        </div>
+      </div>
+      <p class="hint">SSE 使用 <code>fetch + ReadableStream</code> 计算首帧延迟；WS 路由为 <code>/</code>，不受 CORS 约束。</p>
+    </section>
+  </main>
+
+  <footer>ChatBot DevTools · 目录 <code>devtools/</code> · 构建产物中不应存在本页</footer>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

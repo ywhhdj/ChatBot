@@ -1,10 +1,5 @@
 /**
- * SSE transport —— FrontendPlan F1-01 / F1-02 / F1-03 / F2-07
- *
- * 对应 POST /api/chat/stream（docs/api.md §4.1）。
- * 与 Axios transport 平行：只负责编码、请求 ID、取消、超时与帧解析，
- * 不写 store、不弹通知、不猜测业务语义。
- *
+ * SSE transport
  * 约束：
  * - 每条流按 request_id / stream_id 归属，seq 单调递增；不伪装支持 replay。
  * - 每条流恰好一个终态（done / finished / error / cancelled / timeout）。
@@ -220,12 +215,17 @@ export function openChatStream(
       );
     }, timeoutMs);
 
+    // ChatStreamRequest 未声明 character_id：仅保留后端认识的字段，
+    // 前端仍用 character_id 做迟到帧归属校验（F0-06 / F1-07）。
+    const requestBody: Record<string, any> = { ...body, stream: true };
+    delete requestBody.character_id;
+
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     try {
-      const response = await fetch(`${CONFIG.env.API_BASE_URL}/api/chat/stream`, {
+      const response = await fetch(`${CONFIG.env.API_BASE_URL}/api/generation/chat/stream`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ ...body, stream: true }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
         credentials: 'include',
       });

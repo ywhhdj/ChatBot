@@ -84,7 +84,9 @@ class Live2DConfig(BaseServiceConfig):
     name = "Live2D"
     enabled = True
     fields = [
-        _field("model_path", "模型路径",
+        _field(
+            "model_path", 
+            "模型路径",
                default=lambda: str(runtime.RuntimePath.get_models_path(
                    "resources/models/live2d/肥牛/hiyori_pro_mic.model3.json")),
                description="模型目录或 .model3.json 路径"),

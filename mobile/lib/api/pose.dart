@@ -7,7 +7,7 @@ class PoseService {
   final void Function(double alpha, double beta, double gamma, int timestampMs) onPose;
   final int sendHz;
 
-  StreamSubscription<Orientation>? _sub;
+  StreamSubscription<OrientationEvent>? _sub;
   int _lastSentMs = 0;
   final int _intervalMs;
 
@@ -16,11 +16,9 @@ class PoseService {
 
   Future<void> start() async {
     // 请求传感器刷新频率
-    await FlutterRotationSensor.setSamplingPeriod(
-      SamplingPeriod.ui,
-    );
+    RotationSensor.samplingPeriod = SensorInterval.uiInterval;
 
-    _sub = FlutterRotationSensor.orientationStream.listen((orientation) {
+    _sub = RotationSensor.orientationStream.listen((orientation) {
       final now = DateTime.now().millisecondsSinceEpoch;
       if (now - _lastSentMs < _intervalMs) return;
       _lastSentMs = now;

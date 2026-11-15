@@ -3,7 +3,7 @@ import { createApp } from "vue";
 
 import App from "./App.vue";
 import router from "./router";
-import appMountInit from "./composables";
+import appMountInit from "./plugins";
 import pinia from "./stores";
 
 const app = createApp(App);

@@ -1,7 +1,4 @@
 """存档快照（Memento）的 manifest、revision 发布与恢复预演。
-
-对应 B1-01 / B1-02 / B1-03。
-
 职责边界
 ────────
 本模块只管快照的文件层：manifest schema、revision 目录布局、
@@ -200,10 +197,7 @@ class SnapshotManifest:
     sections: Tuple[SectionEntry, ...] = ()
     artifacts: Tuple[str, ...] = ()
     redactions: Tuple[str, ...] = ()
-    # ── S2-02：时间线与分支（MementoMemoryIntegration §5）──
-    # 三者都是**向后兼容的可选字段**：旧 manifest 没有它们，
-    # validate_manifest 会补上缺省值（main / "" / manual）。
-    #: 分支 id。缺省 main 表示主线
+    # 时间线与分支
     branch_id: str = "main"
     #: 用户命名（可选）
     label: str = ""

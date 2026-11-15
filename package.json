@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
+    "devtools": "vite --open /devtools/index.html",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "gen:api": "node scripts/gen_api_types.mjs src/typings/types/api.d.ts"

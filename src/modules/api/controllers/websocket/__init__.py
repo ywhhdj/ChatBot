@@ -6,14 +6,14 @@ from uuid import uuid4
 
 from ...requests import WebSocketRequest
 from .models import ClientEventBridge,logger
-from .events import dispatch,events,get_websocket_manager
+from .dispatch import dispatch,events,get_websocket_manager
 
 MAX_INFLIGHT_PER_CLIENT = 8
 # 控制帧即时处理，不进业务 inflight 任务，也不强制要求 data.client_id
 CONTROL_EVENTS = frozenset({
-    events.types.WebSocketEventType.SUBSCRIBE,
-    events.types.WebSocketEventType.UNSUBSCRIBE,
-    events.types.WebSocketEventType.CANCEL,
+    dispatch.types.WebSocketEventType.SUBSCRIBE,
+    dispatch.types.WebSocketEventType.UNSUBSCRIBE,
+    dispatch.types.WebSocketEventType.CANCEL,
 })
 
 def generate_client_id() -> str:
@@ -41,7 +41,7 @@ async def __safe_handle(
         get_websocket_manager().submit_to_loop(
             lambda: get_websocket_manager().send_json(
                 client_id,
-                type=events.types.WebSocketEventType.RESULT,
+                type=dispatch.types.WebSocketEventType.RESULT,
                 ok=False,
                 message="请求处理失败",
                 request_id=request_id,
@@ -88,17 +88,17 @@ async def __handle_connection(websocket: WebSocket) -> None:
             if not request.type:
                 await manager.send_json(
                     client_id,
-                    type=events.types.WebSocketEventType.ERROR,
+                    type=dispatch.types.WebSocketEventType.ERROR,
                     ok=False,
                     message="缺少 type",
                     request_id=rid,
                 )
                 continue
 
-            if request.type == events.types.WebSocketEventType.HEARTBEAT:
+            if request.type == dispatch.types.WebSocketEventType.HEARTBEAT:
                 await manager.send_json(
                     client_id,
-                    type=events.types.WebSocketEventType.HEARTBEAT,
+                    type=dispatch.types.WebSocketEventType.HEARTBEAT,
                     data={"client_id": client_id, "ts": datetime.now().isoformat()},
                     ok=True,
                     message="心跳成功",
@@ -116,7 +116,7 @@ async def __handle_connection(websocket: WebSocket) -> None:
                 except Exception:  # noqa: BLE001
                     await manager.send_json(
                         client_id,
-                        type=events.types.WebSocketEventType.ERROR,
+                        type=dispatch.types.WebSocketEventType.ERROR,
                         ok=False,
                         message="控制帧处理失败",
                         request_id=rid,
@@ -128,7 +128,7 @@ async def __handle_connection(websocket: WebSocket) -> None:
                 # 原来是 disconnect + return，太激进；回错误并保持连接
                 await manager.send_json(
                     client_id,
-                    type=events.types.WebSocketEventType.RESULT,
+                    type=dispatch.types.WebSocketEventType.RESULT,
                     ok=False,
                     message="缺少 client_id",
                     request_id=rid,
@@ -137,7 +137,7 @@ async def __handle_connection(websocket: WebSocket) -> None:
             if request_client_id != client_id:
                 await manager.send_json(
                     client_id,
-                    type=events.types.WebSocketEventType.RESULT,
+                    type=dispatch.types.WebSocketEventType.RESULT,
                     ok=False,
                     message="client_id 不匹配",
                     request_id=rid,
@@ -150,7 +150,7 @@ async def __handle_connection(websocket: WebSocket) -> None:
             if len(inflight) >= MAX_INFLIGHT_PER_CLIENT:
                 await manager.send_json(
                     client_id,
-                    type=events.types.WebSocketEventType.RESULT,
+                    type=dispatch.types.WebSocketEventType.RESULT,
                     ok=False,
                     message="请求过于频繁，请稍后再试",
                     request_id=rid,

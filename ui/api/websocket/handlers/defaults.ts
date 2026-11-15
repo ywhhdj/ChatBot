@@ -1,5 +1,5 @@
 import websocket from "@/api/websocket/index";
-import logger from "@/composables/LogForwarder";
+import logger from "@/plugins/logForwarder";
 import { WebSocketEvent } from "@/typings/enums";
 import notification from "@/utils/notification";
 import { useUserStore } from "@/stores/user";

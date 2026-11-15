@@ -67,7 +67,7 @@ class StandardPaths:
 
     @classmethod
     def get_models_dir(cls) -> Path:
-        return cls.get_resources_dir() / "models"
+        return cls.get_app_root() / "models"
 
     @classmethod
     def get_scripts_dir(cls) -> Path:

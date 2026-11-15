@@ -10,8 +10,11 @@ declare module "*.vue" {
   export default component;
 }
 
-interface Env {
-  readonly API_BASE_URL: string;
-  readonly WS_API_BASE_URL: string;
-  readonly TIMEOUT: number;
+//扩展ImportMeta
+declare interface ImportMeta {
+  env: {
+    DEV: boolean;
+    PROD: boolean;
+    SSR: boolean;
+  };
 }

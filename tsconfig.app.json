@@ -2,8 +2,8 @@
   "extends": "@vue/tsconfig/tsconfig.dom.json",
   "include": [
     "env.d.ts",
-    "ui/**/*",
-    "ui/**/*.vue"
+    "**/*.vue",
+    "**/*.ts"
   ],
   "exclude": [
     "node_modules",

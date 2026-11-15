@@ -136,11 +136,20 @@ export function toApiClientError(
 ): ApiClientError {
   if (err instanceof ApiClientError) return err;
 
-  const e = err as { name?: string; message?: string; code?: number; status?: number } | null;
+  const e = err as { name?: string; message?: string; code?: number | string; status?: number } | null;
   const name = e?.name || '';
   const message = e?.message || '请求失败';
+  // Axios 的 code 是字符串（ERR_CANCELED / ECONNABORTED / ERR_NETWORK …），
+  // 只有数字 code 才是稳定业务码，不能混用。
+  const rawCode = e?.code;
+  const code = typeof rawCode === 'number' ? rawCode : 0;
 
-  if (name === 'AbortError' || name === 'CanceledError' || message.includes('user cancelled')) {
+  if (
+    name === 'AbortError' ||
+    name === 'CanceledError' ||
+    rawCode === 'ERR_CANCELED' ||
+    message.includes('user cancelled')
+  ) {
     return new ApiClientError({
       kind: 'cancelled',
       status: ctx.status,
@@ -150,7 +159,12 @@ export function toApiClientError(
       cause: err,
     });
   }
-  if (name === 'TimeoutError' || message.includes('timeout')) {
+  if (
+    name === 'TimeoutError' ||
+    rawCode === 'ECONNABORTED' ||
+    rawCode === 'ETIMEDOUT' ||
+    message.includes('timeout')
+  ) {
     return new ApiClientError({
       kind: 'timeout',
       status: 504,
@@ -159,7 +173,12 @@ export function toApiClientError(
       cause: err,
     });
   }
-  if (err instanceof TypeError || name === 'NetworkError' || message.includes('Failed to fetch')) {
+  if (
+    err instanceof TypeError ||
+    name === 'NetworkError' ||
+    rawCode === 'ERR_NETWORK' ||
+    message.includes('Failed to fetch')
+  ) {
     return new ApiClientError({
       kind: 'network',
       status: ctx.status,
@@ -169,8 +188,8 @@ export function toApiClientError(
     });
   }
   return new ApiClientError({
-    kind: kindFromCode(e?.code ?? 0, e?.status ?? ctx.status),
-    code: e?.code ?? 0,
+    kind: kindFromCode(code, e?.status ?? ctx.status),
+    code,
     status: e?.status ?? ctx.status,
     requestId: ctx.requestId,
     message,

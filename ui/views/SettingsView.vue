@@ -7,13 +7,13 @@ const overlayOpacity = ref(0);
 
 // 组件映射表
 const componentMap: Record<UI.SettingsTab, Component> = {
-  general: defineAsyncComponent(() => import('@/components/settings/pages/GeneralSetting.vue')),
-  history: defineAsyncComponent(() => import('@/components/settings/pages/HistorySetting.vue')),
-  character: defineAsyncComponent(() => import('@/components/settings/pages/CharacterSetting.vue')),
-  background: defineAsyncComponent(() => import('@/components/settings/pages/BackgroundSetting.vue')),
-  sound: defineAsyncComponent(() => import('@/components/settings/pages/SoundSetting.vue')),
-  save: defineAsyncComponent(() => import('@/components/settings/pages/SaveSetting.vue')),
-  more: defineAsyncComponent(() => import('@/components/settings/pages/MoreSetting.vue')),
+  general: defineAsyncComponent(() => import('@/components/views/settings/pages/GeneralSetting.vue')),
+  history: defineAsyncComponent(() => import('@/components/views/settings/pages/HistorySetting.vue')),
+  character: defineAsyncComponent(() => import('@/components/views/settings/pages/CharacterSetting.vue')),
+  background: defineAsyncComponent(() => import('@/components/views/settings/pages/BackgroundSetting.vue')),
+  sound: defineAsyncComponent(() => import('@/components/views/settings/pages/SoundSetting.vue')),
+  save: defineAsyncComponent(() => import('@/components/views/settings/pages/SaveSetting.vue')),
+  more: defineAsyncComponent(() => import('@/components/views/settings/pages/MoreSetting.vue')),
 }
 
 const currentComponent = computed(() => {

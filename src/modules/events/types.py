@@ -83,6 +83,7 @@ class ChatStreamEventType:
     MESSAGE_END = "chat.message.end"
 
 class WebSocketEventType:
+    
     CONNECT = "websocket.connect"
     ERROR = "websocket.error"
     PRIVATE = "websocket.private"
@@ -91,9 +92,10 @@ class WebSocketEventType:
     CHAT = "chat"
     DOWNLOAD_MODEL = "download_model"
     GET_LOG = "get_log"
-    RECORD_START = "record.start"
-    RECORD_STOP = "record.stop"
-    RECORD_CHUNK = "record.audio_chunk"
+    class RecordEventType:
+        RECORD_START = "record.start"
+        RECORD_STOP = "record.stop"
+        RECORD_CHUNK = "record.audio_chunk"
     GET_AUDIT_LOGS = "get_audit_logs"
     SUBSCRIBE = "subscribe"          # 订阅固定 allowlist 内的事件
     UNSUBSCRIBE = "unsubscribe"

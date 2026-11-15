@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * loading / empty / error / confirm 四态容器 —— FrontendPlan F2-04
- * 高影响操作（删除、恢复、重试）必须先看见状态与明确影响说明。
- * 通知不是异常处理的替代：错误在这里展示，底层 service 不弹窗。
- */
-import { nextTick, ref, watch, withDefaults } from 'vue';
-
 type ViewState = 'ready' | 'loading' | 'empty' | 'error' | 'confirm';
 
 const props = withDefaults(

@@ -12,3 +12,6 @@ def generate_ui_config_file():
         RuntimePath.get_service_config_file_path(),
         service_config
     )
+
+if __name__ == "__main__":
+    generate_ui_config_file()

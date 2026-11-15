@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, ref, shallowRef } from "vue";
-import { pipelineService } from "@/api/services/pipeline";
+import { providersService } from "@/api/services/providers";
 import { registerEventListeners, unregisterAllEventListeners } from "@/api/websocket";
 import notification from "@/utils/notification";
 import {
@@ -162,9 +162,9 @@ function normalizeProviders(
       : [];
     const models: Model.ModelItem[] = ids.length
       ? ids.map((id) => {
-          const hit = fb?.models.find((m) => m.id === id);
-          return { id, label: hit?.label ?? id, tags: hit?.tags };
-        })
+        const hit = fb?.models.find((m) => m.id === id);
+        return { id, label: hit?.label ?? id, tags: hit?.tags };
+      })
       : (fb?.models ?? []).map((m) => ({ ...m }));
 
     out.push({
@@ -321,8 +321,8 @@ export function useModelProvider(capability: Model.Capability) {
     const task = (async () => {
       const query = modelId ? { model_id: modelId } : undefined;
       const [detailResult, statusResult] = await Promise.allSettled([
-        pipelineService.getProvider(adapterName.value, name, query),
-        pipelineService.status(adapterName.value, name, query),
+        providersService.getProvider(adapterName.value, name, query),
+        providersService.status(adapterName.value, name, query),
       ]);
       if (!guard(at)) return;
 
@@ -361,8 +361,8 @@ export function useModelProvider(capability: Model.Capability) {
     notice.value = null;
 
     const [listResult, adapterResult] = await Promise.allSettled([
-      pipelineService.listProviders(adapterName.value),
-      pipelineService.listAdapters(),
+      providersService.listProviders(adapterName.value),
+      providersService.listDescribe(),
     ]);
     if (!guard(at)) return;
 
@@ -374,7 +374,7 @@ export function useModelProvider(capability: Model.Capability) {
       adapterName.value === "image"
     ) {
       try {
-        const alt = await pipelineService.listProviders("images");
+        const alt = await providersService.listProviders("images");
         if (Array.isArray(alt?.providers) && alt.providers.length) {
           adapterName.value = "images";
           list = alt as Record<string, any>;
@@ -489,7 +489,7 @@ export function useModelProvider(capability: Model.Capability) {
     pending.value = "apply";
     notice.value = null;
     try {
-      await pipelineService.switch(adapterName.value, {
+      await providersService.switch(adapterName.value, {
         provider: activeProvider.value,
         model_id: activeModel.value || undefined,
         config: buildConfig(),
@@ -513,7 +513,7 @@ export function useModelProvider(capability: Model.Capability) {
     pending.value = "stop";
     notice.value = null;
     try {
-      await pipelineService.stopAdapter(adapterName.value);
+      await providersService.stopAdapter(adapterName.value);
       detailCache.clear();
       setNotice("success", "已释放当前模型，能力门面保留");
       await refresh();
@@ -531,7 +531,7 @@ export function useModelProvider(capability: Model.Capability) {
     downloadPhase.value = "准备中";
     downloadProgress.value = 0;
     try {
-      const result = await pipelineService.downloadModel(adapterName.value, activeProvider.value, {
+      const result = await providersService.downloadModel(adapterName.value, activeProvider.value, {
         model_id: activeModel.value || undefined,
         force,
       });

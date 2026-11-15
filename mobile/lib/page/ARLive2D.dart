@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_live2d/flutter_live2d.dart';
@@ -9,7 +10,8 @@ import '../api/pose.dart';
 import '../api/ws.dart';
 
 class ArLive2DPage extends StatefulWidget {
-  const ArLive2DPage({super.key});
+  final String wsUrl;
+  const ArLive2DPage({super.key, required this.wsUrl});
 
   @override
   State<ArLive2DPage> createState() => _ArLive2DPageState();
@@ -18,7 +20,7 @@ class ArLive2DPage extends StatefulWidget {
 class _ArLive2DPageState extends State<ArLive2DPage>
     with WidgetsBindingObserver {
   CameraController? _camera;
-  Live2dController? _live2d;
+  Live2DViewController? _live2d;
 
   late PoseService _poseService;
   late WsService _wsService;
@@ -32,9 +34,8 @@ class _ArLive2DPageState extends State<ArLive2DPage>
     WidgetsBinding.instance.addObserver(this);
 
     _wsService = WsService(
-      url: AppConfig.wsUrl,
+      url: widget.wsUrl,
       onRemoteEvent: (event) {
-        // PC 端可能反过来通知手机播动画（可选）
         if (event == 'jump_out') _playJumpOutLocal();
       },
     )..connect();
@@ -79,14 +80,20 @@ class _ArLive2DPageState extends State<ArLive2DPage>
   }
 
   void _initLive2D() {
-    _live2d = Live2dController();
-    _live2d!.setModel(AppConfig.live2dModelPath).then((_) {
-      // 可选：初始化完成后播放默认待机动画
+    _live2d = Live2DViewController();
+    _live2d!.whenAttached.then((_) {
+      final String modelDir = AppConfig.live2dModelPath.contains('/')
+          ? AppConfig.live2dModelPath.substring(0, AppConfig.live2dModelPath.lastIndexOf('/'))
+          : '';
+      _live2d!.loadModel(
+        modelDir: modelDir,
+        modelFileName: AppConfig.live2dModelPath,
+      );
     });
   }
 
   void _playJumpOutLocal() {
-    _live2d?.startMotion(AppConfig.jumpOutGroup);
+    _live2d?.startMotion(group: AppConfig.jumpOutGroup);
   }
 
   /// 手势：手指向右快速滑动 → 触发跳出
@@ -142,7 +149,7 @@ class _ArLive2DPageState extends State<ArLive2DPage>
               child: Center(
                 child: _live2d == null
                     ? const SizedBox.shrink()
-                    : Live2dView(controller: _live2d!),
+                    : Live2DView(controller: _live2d!),
               ),
             ),
 
@@ -192,12 +199,13 @@ class _StatusChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.circle,
-              size: 10,
-              color: connected ? Colors.greenAccent : Colors.redAccent),
+          Icon(
+            Icons.circle,
+            size: 10,
+            color: connected ? Colors.greenAccent : Colors.redAccent,
+          ),
           const SizedBox(width: 6),
-          Text(hint,
-              style: const TextStyle(color: Colors.white, fontSize: 12)),
+          Text(hint, style: const TextStyle(color: Colors.white, fontSize: 12)),
         ],
       ),
     );

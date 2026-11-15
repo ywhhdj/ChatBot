@@ -10,8 +10,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..models import Role
-
 class _Base(BaseModel):
     model_config = ConfigDict(extra="ignore", protected_namespaces=())
 

@@ -1,4 +1,4 @@
-"""审计接口（TD9–TD13）。
+"""审计接口
 
 界面初始化时一次性拿到"能调什么"，用于构建 UI 树：
 
@@ -7,13 +7,6 @@
 
 数据来源是各服务的 `get_tools()`（已是 `ToolFunction`），
 不再需要前端一个个试。
-
-本次修复
-────────
-* 服务管理器导入改为正式路径 `modules.services.manager`。
-* `_collect()` 结尾多余的 `total += len(tools)` 引用了 try 内的局部变量，
-  可能 NameError 且会重复计数。
-* `tools()` 里的 `data["skills"]` 键根本不存在，必然 KeyError。
 """
 
 from __future__ import annotations

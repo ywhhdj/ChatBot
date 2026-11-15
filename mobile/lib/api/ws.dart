@@ -5,6 +5,7 @@ import 'package:web_socket_channel/status.dart' as ws_status;
 
 /// 与 PC 端通信：发送 pose / trigger 消息，接收 play_animation 指令。
 class WsService {
+  String _url;
   WsService({required String url, this.onRemoteEvent}) : _url = url;
 
   /// 运行时可切换 URL（扫码后调用）
@@ -26,14 +27,12 @@ class WsService {
   int _seq = 0;
   bool _disposed = false;
 
-  WsService({required this.url, this.onRemoteEvent});
-
   bool get isConnected => _channel != null;
 
   void connect() {
     if (_disposed) return;
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(url));
+      _channel = WebSocketChannel.connect(Uri.parse(_url));
       _sub = _channel!.stream.listen(
         _handleMessage,
         onDone: _scheduleReconnect,

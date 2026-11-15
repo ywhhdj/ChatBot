@@ -4,11 +4,9 @@
  * 只根据服务端 operation/task 状态更新 UI；partial_failure 必须显式警告，
  * 不能当作普通失败 toast 隐藏。
  */
-import { computed } from 'vue';
-import type { OperationFetcher } from '@/composables/useOperation';
-import { useOperation } from '@/composables/useOperation';
+import type { OperationFetcher } from '@/api/processing/useOperation';
+import { useOperation } from '@/api/processing/useOperation';
 import { errorView } from '@/api/decoder';
-import AsyncState from '@/components/common/AsyncState.vue';
 
 const props = withDefaults(
   defineProps<{

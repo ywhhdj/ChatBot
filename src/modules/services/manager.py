@@ -138,13 +138,18 @@ class ServiceManager(Generic[T], BaseManager):
 
     # ---------- 配置 ----------
 
-    def set_service_config(self, service_id: str, config: Dict[str, Any]) -> Any:
+    def apply_service_config(
+        self, 
+        service_id: str,
+        config: Dict[str, Any],
+        apply_config: bool = True,
+    ) -> Any:
         """预存配置；若服务已注册则立即注入。返回配置对象。"""
         obj = _coerce_config(service_id, config)
         with self._state_lock:
             self.services_config[service_id] = obj
             service = self.services.get(service_id)
-        if service is not None and obj is not None:
+        if apply_config and service is not None and obj is not None:
             self._apply_config(service, obj)
         return obj
 
@@ -164,7 +169,7 @@ class ServiceManager(Generic[T], BaseManager):
     def update_service_config(self, service_id: str, new_config: Optional[Any] = None) -> bool:
         if new_config is None:
             return False
-        self.set_service_config(service_id, new_config)
+        self.apply_service_config(service_id, new_config,apply_config=False)
         return True
 
     def get_service_config(self, service_id: str) -> Any:
@@ -240,9 +245,6 @@ class ServiceManager(Generic[T], BaseManager):
             if inspect.iscoroutinefunction(start_fn):
                 holder = _ServiceLoop(str(getattr(service, "name", service_id) or service_id))
                 fut = holder.submit(start_fn(*args, **kwargs))
-                # 启动必须"等到真的起来"再回成功：否则 controller 返回
-                # "已启动"时 Playwright / websockets 可能还没建好，稍后失败
-                # 只能靠回调偷偷把状态改成 ERROR。
                 try:
                     fut.result(timeout=_START_TIMEOUT)
                 except concurrent.futures.TimeoutError:

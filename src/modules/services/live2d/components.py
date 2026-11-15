@@ -372,15 +372,7 @@ from ...utils.util import create_daemon_thread
 #         self.__update_typing_interval()
 
 class FaceTrackerComponent:
-    """人脸追踪组件。
-
-    修复对应清单：B38 / B39
-
-    B38 原来每次 start() 都无条件新建采集线程，set_enabled(True) 反复调用会
-        多路打开摄像头/采集源。加了运行态守卫。
-    B39 QTimer 没有 parent，改为由本组件长期持有（组件 -> controller -> view
-        的引用链足够长），并在 stop()/close() 里显式停表，避免静默失效。
-    """
+    """人脸追踪组件"""
     from ...core.pipeline.adapters.landmarker.face import ResultFaceData
 
     def __init__(self,
@@ -442,7 +434,7 @@ class FaceTrackerComponent:
         if self.__face_tracker is None:
             raise ValueError("FaceTrackerTask is not initialized")
 
-        # B38：已在运行就不要再开一条采集线程
+        # 已在运行就不要再开一条采集线程
         if self.is_running:
             if self.__timer is not None and not self.__timer.isActive():
                 self.__timer.start(int(1000 / max(1, self.__fps)))

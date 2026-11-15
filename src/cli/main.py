@@ -2,7 +2,7 @@
 import argparse
 
 def build_api_json_args(parser: argparse.ArgumentParser):
-    INPUT_MODULES_PATH="src_py/modules"
+    INPUT_MODULES_PATH="src/modules"
     OUTPUT_PATH="resources/defaults/pipeline.json"
     #归属子命令generate:pipepline
     subparsers = parser.add_subparsers(dest="subcommand", help="子命令")
@@ -25,7 +25,7 @@ def build_api_json_args(parser: argparse.ArgumentParser):
 
 def build_service_config_args(parser: argparse.ArgumentParser):
     #归属子命令generate:service
-    output_path="resources/defaults/services.yaml"
+    output_path="resources/configs/services.yaml"
     subparsers = parser.add_subparsers(dest="subcommand", help="子命令")
     parser = subparsers.add_parser("generate:service", 
         help="生成 services.yaml 配置模板",
@@ -45,9 +45,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    parser = build_api_json_args(parser)
+    # parser = build_api_json_args(parser)
     parser = build_service_config_args(parser)
     args = parser.parse_args()
-    print(args)
+    #如果子命令
+    if args.subcommand == "generate:service":
+        from src.cli.generates.config import generate_ui_config_file
+        generate_ui_config_file()
+
 if __name__ == "__main__":
     main()

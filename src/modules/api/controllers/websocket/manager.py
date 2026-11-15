@@ -65,6 +65,9 @@ class WebSocketClientManager(base.BaseManager):
         self.is_runing = False
         self.__pending = 0
         self.__closing: Set[str] = set()
+        self.uid_index: Dict[str, Set[str]] = {}
+        # uid -> {device: {client_id}}
+        self.uid_device_index: Dict[str, Dict[str, Set[str]]] = {}
 
         self._initialized = True
 
