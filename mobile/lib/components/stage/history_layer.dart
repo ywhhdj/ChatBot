@@ -122,8 +122,7 @@ class _HistoryLayerState extends State<HistoryLayer> {
           children: <Widget>[
             TextButton.icon(
               onPressed: () {
-                session.history.clear();
-                session.hint.value = '历史已清空 · 请重试';
+                session.clearHistory();
                 setState(() {});
               },
               icon: const Icon(Icons.delete_outline, size: 14),

@@ -7,6 +7,7 @@ import '../../core/config/model_config.dart';
 import '../../services/live2d/model_catalog.dart';
 import '../../services/platform/directory_picker_channel.dart';
 import '../../services/storage/prefs.dart';
+import '../common/model_avatar.dart';
 import '../common/retry_hint.dart';
 import '../common/section_card.dart';
 
@@ -65,6 +66,14 @@ class _ModelSettingState extends State<ModelSetting> {
       _scanning = false;
     });
     widget.session.applyParams();
+    // 旧版本 dir-<hash> 在重新扫描后可能已不在清单里，修正为可用模型，
+    // 不自动加载（用户点卡片才切换），避免「扫完目录模型悄悄换了」。
+    if (!ModelConfig.isValidId(AppConfig.activeModelId) &&
+        result.models.isNotEmpty) {
+      AppConfig.activeModelId =
+          ModelCatalog.resolveSavedId(AppConfig.activeModelId);
+      await Prefs.saveAll();
+    }
   }
 
   /// 调用系统底层目录选择器（SAF / UIDocumentPicker）：只关联路径与 URI，
@@ -98,8 +107,8 @@ class _ModelSettingState extends State<ModelSetting> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _retryModel() async {
-    await widget.session.reloadModel();
+  Future<void> _retryModel({bool rescanAssets = false}) async {
+    await widget.session.reloadModel(rescanAssets: rescanAssets);
     if (mounted) setState(() {});
   }
 
@@ -250,14 +259,48 @@ class _ModelSettingState extends State<ModelSetting> {
               ),
             ),
             const SizedBox(height: 10),
+            Row(
+              children: <Widget>[
+                ModelAvatar(
+                  model: AppConfig.activeModel,
+                  size: 30,
+                  radius: 7,
+                  fontSize: 15,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '当前：${AppConfig.activeModel.name} · '
+                    '${AppConfig.activeModel.path.isEmpty ? '占位立绘' : AppConfig.activeModel.path}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: GalPalette.of(context).textDim,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
             Text(
-              '当前：${AppConfig.activeModel.name} · '
-              '${AppConfig.activeModel.path.isEmpty ? '占位立绘' : AppConfig.activeModel.path}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+              '目录模型会自动探测同目录的 avatar.png / 预览.png 等作为头像；'
+              '没有图片就回退到名字首字母。内置模型放一张 ',
               style: TextStyle(
-                color: GalPalette.of(context).textDim,
-                fontSize: 11,
+                color: GalPalette.of(context).textFaint,
+                fontSize: 10,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '内置 DeepSeek 需要 assets/live2d/deepseek/ 下的 .model3.json、'
+              '.moc3 与纹理；当前仓库只有 Animation/Exp3。补齐后到「存储」页'
+              '点「重新自检模型资源」，或直接在上面选一个本机目录模型。',
+              style: TextStyle(
+                color: GalPalette.of(context).textFaint,
+                fontSize: 10,
+                height: 1.5,
               ),
             ),
           ],
@@ -303,48 +346,74 @@ class _ModelSettingState extends State<ModelSetting> {
             ),
           ],
         ),
-        SectionCard(
-          title: 'Live2D 状态',
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    session.live2d.degradationReason ?? '模型已就绪',
-                    style: TextStyle(
-                      color: session.live2d.ready
-                          ? GalPalette.of(context).online
-                          : GalPalette.of(context).offline,
-                      fontSize: 11,
+        // 只订阅 modelRevision：模型刷新不会重建整张设定页。
+        ValueListenableBuilder<int>(
+          valueListenable: session.modelRevision,
+          builder: (BuildContext context, int _, Widget? __) => SectionCard(
+            title: 'Live2D 状态',
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      session.live2d.detailText,
+                      style: TextStyle(
+                        color: session.live2d.ready
+                            ? GalPalette.of(context).online
+                            : (session.live2d.loading
+                                ? GalPalette.of(context).busy
+                                : GalPalette.of(context).offline),
+                        fontSize: 11,
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.refresh,
-                    color: GalPalette.of(context).accent,
-                    size: 18,
+                  IconButton(
+                    icon: Icon(
+                      Icons.refresh,
+                      color: GalPalette.of(context).accent,
+                      size: 18,
+                    ),
+                    tooltip: session.live2d.loading
+                        ? '正在加载…'
+                        : '重新加载模型',
+                    onPressed: session.live2d.loading
+                        ? null
+                        : () => _retryModel(),
                   ),
-                  tooltip: '重新加载模型',
-                  onPressed: _retryModel,
-                ),
-              ],
-            ),
-            Text(
-              '舞台界面右上角也有常驻的「请重试」入口。',
-              style: TextStyle(
-                color: GalPalette.of(context).textFaint,
-                fontSize: 10,
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: session.live2d.loading
+                      ? null
+                      : () => _retryModel(rescanAssets: true),
+                  icon: const Icon(Icons.fact_check_outlined, size: 14),
+                  label: const Text(
+                    '重新自检内置资源（清缓存）',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
+              ),
+              Text(
+                '内置模型会先核对入口 JSON 引用的 .moc3 / 纹理 / 动作 / 表情，'
+                '缺文件会列清单；舞台右上角也有常驻的「请重试」入口。',
+                style: TextStyle(
+                  color: GalPalette.of(context).textFaint,
+                  fontSize: 10,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 }
 
-/// 单张预览卡：蓝色渐变剪影 + 名牌 + 选中光晕。
+/// 单张预览卡：头像（有图用图、没图用 name 首字母）+ 名牌 + 选中光晕。
 /// 不实例化 Live2DView（多个 controller 会吃内存），预览靠视觉卡片，
 /// 真正渲染只在舞台那一棵树上，点卡片即实时切换。
 class _PreviewCard extends StatelessWidget {
@@ -360,9 +429,6 @@ class _PreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String initial = model.name.isEmpty
-        ? '？'
-        : model.name.substring(0, 1).toUpperCase();
     return Container(
       width: 112,
       margin: const EdgeInsets.only(right: 10),
@@ -391,25 +457,12 @@ class _PreviewCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Expanded(
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(11),
-                    ),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: GalPalette.of(context).character,
-                      ),
-                      child: Center(
-                        child: Text(
-                          initial,
-                          style: TextStyle(
-                            color: GalPalette.of(context).accent
-                                .withValues(alpha: .85),
-                            fontSize: 44,
-                            fontWeight: FontWeight.w300,
-                          ),
-                        ),
-                      ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: ModelAvatar(
+                      model: model,
+                      radius: 10,
+                      fontSize: 44,
                     ),
                   ),
                 ),

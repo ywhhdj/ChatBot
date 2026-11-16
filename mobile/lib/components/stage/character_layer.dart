@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_live2d/flutter_live2d.dart';
 
 import '../../app/gal_palette.dart';
+import '../../app/routes.dart';
 import '../../app/stage_scope.dart';
 import '../../app/stage_session.dart';
 import '../../core/stage/stage_transform.dart';
@@ -39,9 +40,10 @@ class CharacterLayer extends StatelessWidget {
     final Widget live = controller != null
         ? IgnorePointer(
             child: Live2DView(
-              // 换模必须换 Element，否则插件 State 仍持有旧 controller；
-              // ready 变化不换 controller，key 稳定，视图不会被重建。
-              key: ValueKey<int>(controller.hashCode),
+              // 换 controller 必须换 Element，否则插件 State 仍持有旧 controller；
+              // 用门面的递增 revision 而不是 hashCode（hashCode 可能碰撞，
+              // 且不同 controller 复用同一 hash 时视图不会重建）。
+              key: ValueKey<int>(stage.controllerRevision),
               controller: controller,
             ),
           )
@@ -69,6 +71,48 @@ class CharacterLayer extends StatelessWidget {
                         color: p.accent,
                         fontSize: 48,
                         fontWeight: FontWeight.w300,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '…… 立绘尚未就位 ……',
+                      style: TextStyle(
+                        color: p.accent,
+                        fontSize: 13,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      stage.detailText,
+                      textAlign: TextAlign.center,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: p.textDim,
+                        fontSize: 11,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: p.accent,
+                        side: BorderSide(color: p.border),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                      ),
+                      onPressed: () =>
+                          AppRoutes.pushOnce(context, AppRoutes.settings),
+                      icon: const Icon(Icons.tune, size: 14),
+                      label: const Text(
+                        '到「设定 → 模型」',
+                        style: TextStyle(fontSize: 11),
                       ),
                     ),
                   ],

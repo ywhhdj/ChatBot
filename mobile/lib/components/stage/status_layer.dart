@@ -15,98 +15,107 @@ class StatusLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final StageSession session = StageScope.of(context);
-    // setPowerSave / startOverlay / applyParams 都会 notifyListeners，
-    // 包一层 AnimatedBuilder 让省电、浮窗、帧率开关等状态切换即时可见。
-    return AnimatedBuilder(
-      animation: session,
-      builder: (BuildContext context, Widget? _) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  AnimatedBuilder(
-                    animation: session,
-                    builder: (_, _) => StatusChip(state: session.ws.state),
-                  ),
-                  const SizedBox(width: 8),
-                  ValueListenableBuilder<String>(
-                    valueListenable: session.hint,
-                    builder: (_, String hint, _) => Expanded(
-                      child: Text(
-                        hint,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: GalPalette.of(context).textDim,
-                          fontSize: 11,
+    // 原来订阅整个 session：任何 WS / 输入 / 刷新通知都会重建整个状态栏，
+    // 刷新模型时就会「闪一下」。改为只订阅 modelRevision 与 visualRevision：
+    // 前者管模型状态，后者让「显示帧率 / 相机 / 减少动画」等开关改动即时生效
+    // （applyParams 只递增 visualRevision，不广播整个 session）。
+    // 嵌套订阅而不是每次 build 都 new 一个 Listenable.merge：
+    // merge 对象每次都变会让 AnimatedBuilder 反复注销/注册监听。
+    return ValueListenableBuilder<int>(
+      valueListenable: session.modelRevision,
+      builder: (BuildContext context, int _, Widget? outerChild) =>
+          ValueListenableBuilder<int>(
+        valueListenable: session.visualRevision,
+        builder: (BuildContext context, int _, Widget? innerChild) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    AnimatedBuilder(
+                      animation: session,
+                      builder: (_, _) => StatusChip(state: session.ws.state),
+                    ),
+                    const SizedBox(width: 8),
+                    ValueListenableBuilder<String>(
+                      valueListenable: session.hint,
+                      builder: (_, String hint, _) => Expanded(
+                        child: Text(
+                          hint,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: GalPalette.of(context).textDim,
+                            fontSize: 11,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.history,
-                      color: GalPalette.of(context).accent,
-                      size: 19,
+                    IconButton(
+                      icon: Icon(
+                        Icons.history,
+                        color: GalPalette.of(context).accent,
+                        size: 19,
+                      ),
+                      tooltip: '对话历史（新页面）',
+                      onPressed: () => AppRoutes.pushOnce(
+                        context,
+                        AppRoutes.history,
+                      ),
                     ),
-                    tooltip: '对话历史（新页面）',
-                    onPressed: () =>
-                        Navigator.of(context).pushNamed(AppRoutes.history),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.tune,
-                      color: GalPalette.of(context).accent,
-                      size: 20,
+                    IconButton(
+                      icon: Icon(
+                        Icons.tune,
+                        color: GalPalette.of(context).accent,
+                        size: 20,
+                      ),
+                      tooltip: '设定（新页面）',
+                      onPressed: () => AppRoutes.pushOnce(
+                        context,
+                        AppRoutes.settings,
+                      ),
                     ),
-                    tooltip: '设定（新页面）',
-                    onPressed: () =>
-                        Navigator.of(context).pushNamed(AppRoutes.settings),
-                  ),
-                ],
-              ),
-              if (AppConfig.showFps ||
-                  AppConfig.cameraEnabled ||
-                  AppConfig.reduceAnimations ||
-                  session.powerSave.value ||
-                  session.staticMode.value ||
-                  session.overlayOn.value)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2, left: 2),
-                  child: Row(
-                    children: <Widget>[
-                      if (AppConfig.showFps)
-                        ValueListenableBuilder<double>(
-                          valueListenable: session.fps,
-                          builder: (_, double fps, _) => _Tag(
-                            '${fps.toStringAsFixed(0)}fps / ${AppConfig.targetFps}',
-                            GalPalette.of(context).accent,
+                  ],
+                ),
+                if (AppConfig.showFps ||
+                    AppConfig.cameraEnabled ||
+                    AppConfig.reduceAnimations ||
+                    session.powerSave.value ||
+                    session.staticMode.value ||
+                    session.overlayOn.value)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2, left: 2),
+                    child: Row(
+                      children: <Widget>[
+                        if (AppConfig.showFps)
+                          ValueListenableBuilder<double>(
+                            valueListenable: session.fps,
+                            builder: (_, double fps, _) => _Tag(
+                              '${fps.toStringAsFixed(0)}fps / ${AppConfig.targetFps}',
+                              GalPalette.of(context).accent,
+                            ),
                           ),
-                        ),
-                      if (AppConfig.reduceAnimations)
-                        _Tag('减少动画', GalPalette.of(context).textDim),
-                      if (session.overlayOn.value)
-                        _Tag('置顶浮窗 · 右侧探头', GalPalette.of(context).online),
-                      if (AppConfig.cameraEnabled)
-                        _Tag('相机实时背景', GalPalette.of(context).accentSoft),
-                      const SizedBox(width: 6),
-                      AnimatedBuilder(
-                        animation: session,
-                        builder: (_, _) => Text(
+                        if (AppConfig.reduceAnimations)
+                          _Tag('减少动画', GalPalette.of(context).textDim),
+                        if (session.overlayOn.value)
+                          _Tag('置顶浮窗 · 右侧探头', GalPalette.of(context).online),
+                        if (AppConfig.cameraEnabled)
+                          _Tag('相机实时背景', GalPalette.of(context).accentSoft),
+                        const SizedBox(width: 6),
+                        Text(
                           '${AppConfig.activeModel.name} · ${AppConfig.quality.name}',
                           style: TextStyle(
                             color: GalPalette.of(context).textFaint,
                             fontSize: 10,
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

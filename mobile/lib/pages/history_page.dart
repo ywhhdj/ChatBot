@@ -13,7 +13,7 @@ class HistoryPage extends StatelessWidget {
     final session = StageScope.of(context);
     return GalPage(
       title: '对话历史',
-      subtitle: '最多保留 100 条 · 只存内存，不落库',
+      subtitle: '最多保留 100 条 · 自动保存在本机',
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         child: HistoryLayer(

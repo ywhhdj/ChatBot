@@ -110,8 +110,10 @@ class _ConnectionSettingState extends State<ConnectionSetting> {
                   label: const Text('重连', style: TextStyle(fontSize: 12)),
                 ),
                 TextButton.icon(
-                  onPressed: () =>
-                      Navigator.of(context).pushNamed(AppRoutes.connect),
+                  onPressed: () => AppRoutes.pushOnce(
+                    context,
+                    AppRoutes.connect,
+                  ),
                   icon: const Icon(Icons.open_in_new, size: 14),
                   label: const Text('独立连接页', style: TextStyle(fontSize: 11)),
                 ),

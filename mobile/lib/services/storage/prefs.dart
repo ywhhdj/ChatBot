@@ -1,12 +1,21 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/gal_palette.dart';
 import '../../core/config/app_config.dart';
 import '../../core/net/device_identity.dart';
+import 'history_codec.dart';
 
 /// 本地持久化：只在设置变更/启动时读写，禁止每帧访问（S7.5）。
+///
+/// 本轮补强：
+/// * `ensureLoaded()` 在 runApp 之前一次性读完，避免启动后色系/配置突变
+///   触发 MaterialApp 整树重建（页面「闪一下」的来源之一）；
+/// * `saveAll()` 用配置快照去重，滑杆防抖期间重复调用不会反复写 30+ 个 key；
+/// * 退出时 `flush()` 把防抖窗口里未落盘的改动补写，不再丢最后一次设置；
+/// * 对话历史有界持久化，重启不丢，坏数据自动兜底。
 class Prefs {
   Prefs._();
 
@@ -51,6 +60,10 @@ class Prefs {
   static const String _kDedupe = 'dedupe_adjacent';
   static const String _kOverlayPeek = 'overlay_peek_enabled';
   static const String _kOverlayScale = 'overlay_scale';
+  static const String _kHistory = 'chat_history_v1';
+
+  static bool _loaded = false;
+  static String _lastSnapshot = '';
 
   static Future<String?> getLastWsUrl() async =>
       (await SharedPreferences.getInstance()).getString(_kLastWsUrl);
@@ -62,6 +75,56 @@ class Prefs {
       (index != null && index >= 0 && index < values.length)
           ? values[index]
           : fallback;
+
+  /// 配置快照：只在内容真的变了才全量写盘（存储管理）。
+  static String _snapshot() => json.encode(<String, dynamic>{
+        'modelId': AppConfig.activeModelId,
+        'modelDir': AppConfig.modelDir,
+        'modelDirUri': AppConfig.modelDirUri,
+        'modelPreview': AppConfig.modelPreviewEnabled,
+        'quality': AppConfig.quality.index,
+        'camera': AppConfig.cameraEnabled,
+        'cameraFacing': AppConfig.cameraFacing.index,
+        'autoAsr': AppConfig.autoSendAsr,
+        'name': AppConfig.characterName,
+        'uid': AppConfig.uid,
+        'token': AppConfig.token,
+        'swipe': AppConfig.swipeRightVelocity,
+        'swipeMin': AppConfig.swipeMinDistance,
+        'poseHz': AppConfig.poseSendHz,
+        'deadZone': AppConfig.poseDeadZoneDeg,
+        'lowPassK': AppConfig.poseLowPassK,
+        'peekMs': AppConfig.peekDelayMs,
+        'peekHoldMs': AppConfig.peekHoldMs,
+        'flingMs': AppConfig.flingDurationMs,
+        'returnMs': AppConfig.returnDurationMs,
+        'typewriterCps': AppConfig.typewriterCps,
+        'turnStep': AppConfig.turnStepDeg,
+        'cooldownMs': AppConfig.triggerCooldownMs,
+        'mirrorText': AppConfig.mirrorTextInput,
+        'mirrorAsr': AppConfig.mirrorAsrText,
+        'autoReconnect': AppConfig.autoReconnect,
+        'maxAttempts': AppConfig.maxReconnectAttempts,
+        'targetFps': AppConfig.targetFps,
+        'showFps': AppConfig.showFps,
+        'powerSave': AppConfig.powerSaveEnabled,
+        'overlay': AppConfig.overlayEnabled,
+        'asrMode': AppConfig.asrMode.index,
+        'scheme': AppConfig.scheme.index,
+        'reduceAnimations': AppConfig.reduceAnimations,
+        'disableTypewriter': AppConfig.disableTypewriter,
+        'inputDebounce': AppConfig.inputDebounceMs,
+        'inputMerge': AppConfig.inputMergeEnabled,
+        'dedupe': AppConfig.dedupeAdjacent,
+        'overlayPeek': AppConfig.overlayPeekEnabled,
+        'overlayScale': AppConfig.overlayScale,
+      });
+
+  /// 启动前调用一次；`StageSession.start()` 再调也只会命中缓存。
+  static Future<void> ensureLoaded() async {
+    if (_loaded) return;
+    await loadAll();
+  }
 
   static Future<void> loadAll() async {
     final SharedPreferences p = await SharedPreferences.getInstance();
@@ -147,9 +210,13 @@ class Prefs {
             .toDouble();
 
     AppConfig.overlayActive = false;
+    _loaded = true;
+    _lastSnapshot = _snapshot();
   }
 
   static Future<void> saveAll() async {
+    final String snap = _snapshot();
+    if (_loaded && snap == _lastSnapshot) return;
     final SharedPreferences p = await SharedPreferences.getInstance();
     await p.setString(_kModelId, AppConfig.activeModelId);
     await p.setString(_kModelDir, AppConfig.modelDir);
@@ -191,11 +258,11 @@ class Prefs {
     await p.setBool(_kDedupe, AppConfig.dedupeAdjacent);
     await p.setBool(_kOverlayPeek, AppConfig.overlayPeekEnabled);
     await p.setDouble(_kOverlayScale, AppConfig.overlayScale);
+    _lastSnapshot = snap;
   }
 
   /// 高频参数变更（滑杆松手、连续拨开关）用这个：120ms 内的多次调用合并成
   /// 一次 saveAll()，避免每拖一下就全量写 30+ 个 SharedPreferences key。
-  /// 需要立即落盘的场景（换 uid、换模型、切色系）仍直接调 saveAll()。
   static Timer? _saveTimer;
 
   static void scheduleSave() {
@@ -206,10 +273,64 @@ class Prefs {
     });
   }
 
+  /// 退出 /  detached 时补写防抖窗口里的改动，避免丢设置。
+  static Future<void> flush() async {
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    try {
+      await saveAll();
+    } catch (_) {}
+    try {
+      await flushHistory();
+    } catch (_) {}
+  }
+
   static Future<String> resetUid() async {
     final SharedPreferences p = await SharedPreferences.getInstance();
     AppConfig.uid = DeviceIdentity.newUid();
     await p.setString(_kUid, AppConfig.uid);
+    // uid 已直接落盘，但快照要同步，后续 saveAll 不会因此重复写全量。
+    _lastSnapshot = _snapshot();
     return AppConfig.uid;
+  }
+
+  // ---- 对话历史（有界持久化） ----
+
+  static Timer? _historyTimer;
+  static List<String>? _pendingHistory;
+
+  static Future<List<String>> loadHistory() async {
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    return HistoryCodec.decode(
+      p.getString(_kHistory),
+      limit: AppConfig.maxHistoryItems,
+    );
+  }
+
+  static Future<void> saveHistory(List<String> items) async {
+    _pendingHistory = null;
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    await p.setString(
+      _kHistory,
+      HistoryCodec.encode(items, limit: AppConfig.maxHistoryItems),
+    );
+  }
+
+  static void scheduleHistorySave(List<String> items) {
+    _pendingHistory = List<String>.from(items);
+    _historyTimer?.cancel();
+    _historyTimer = Timer(const Duration(milliseconds: 250), () {
+      _historyTimer = null;
+      final List<String> snapshot = _pendingHistory ?? const <String>[];
+      unawaited(saveHistory(snapshot).catchError((Object _) {}));
+    });
+  }
+
+  static Future<void> flushHistory() async {
+    _historyTimer?.cancel();
+    _historyTimer = null;
+    final List<String>? items = _pendingHistory;
+    if (items == null) return;
+    await saveHistory(items);
   }
 }

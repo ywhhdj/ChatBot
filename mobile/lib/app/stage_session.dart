@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../core/config/app_config.dart';
+import '../core/config/model_config.dart';
+import '../core/config/model_motion.dart';
 import '../core/net/device_identity.dart';
 import '../core/net/ws_service.dart';
 import '../core/net/ws_url.dart';
@@ -13,7 +15,9 @@ import '../core/stage/stage_machine.dart';
 import '../core/voice/voice_service.dart';
 import '../debug/debug_flags.dart';
 import '../services/live2d/live2d_stage.dart';
+import '../services/live2d/model_asset_installer.dart';
 import '../services/live2d/model_catalog.dart';
+import '../services/live2d/model_resources.dart';
 import '../services/platform/overlay_channel.dart';
 import '../services/platform/permissions.dart';
 import '../services/storage/prefs.dart';
@@ -47,8 +51,11 @@ class StageSession extends ChangeNotifier {
     if (_disposed) return;
     // controller 一创建就刷新，让 CharacterLayer 立刻挂上 Live2DView，
     // 插件的 whenAttached 才能在超时前完成，模型才真正加载。
-    visualRevision.value++;
-    notifyListeners();
+    //
+    // 只递增 modelRevision：原来这里同时递增 visualRevision 并
+    // notifyListeners()，会把舞台 / 设置页整棵树都重建一遍，
+    // 刷新模型时用户就会看到「页面一闪而过」。
+    modelRevision.value++;
   }
 
   final ValueNotifier<int> stageRevision = ValueNotifier<int>(0);
@@ -64,6 +71,9 @@ class StageSession extends ChangeNotifier {
   /// 背景 / 相机 / 对话框的显式刷新信号：开关、档位、前后置、色系、
   /// 换模、减少动画等变更都递增它，避免依赖「碰巧被重建」的隐式链路。
   final ValueNotifier<int> visualRevision = ValueNotifier<int>(0);
+  /// Live2D controller / ready / 降级原因变化：只有立绘层与状态条订阅。
+  /// 与 visualRevision 分开，模型刷新不再带动背景 / 对话框 / 设置页整树重建。
+  final ValueNotifier<int> modelRevision = ValueNotifier<int>(0);
   final List<String> history = <String>[];
 
   bool mockMode = bool.fromEnvironment('STAGE_MOCK');
@@ -72,6 +82,7 @@ class StageSession extends ChangeNotifier {
   bool _paused = false;
   bool _started = false;
   bool _streaming = false;
+  bool _reloading = false;
   bool _sendRecordFrames = true;
   String _lastSent = '';
   bool _disposed = false;
@@ -85,9 +96,17 @@ class StageSession extends ChangeNotifier {
   final Set<String> _hiddenPanels = <String>{};
 
   void configureEndpoint(String wsUrl, String pairUid) {
-    if (_started) return;
+    final bool changed = _started && wsUrl.isNotEmpty && wsUrl != _wsUrl;
     _wsUrl = wsUrl;
     _pairUid = pairUid;
+    // 从连接页重新进入舞台（pushReplacementNamed(stage)）时，
+    // 原来 `_started` 直接 return，新地址永远进不了 WsService。
+    if (changed) {
+      AppConfig.wsUrl = wsUrl;
+      AppConfig.suggestedWsUrl = wsUrl;
+      ws.updateUrl(wsUrl, force: true);
+      unawaited(Prefs.setLastWsUrl(wsUrl));
+    }
   }
 
   AsrEngine get effectiveAsrEngine {
@@ -113,7 +132,10 @@ class StageSession extends ChangeNotifier {
   Future<void> start() async {
     if (_started) return;
     _started = true;
-    await Prefs.loadAll();
+    await Prefs.ensureLoaded();
+    history
+      ..clear()
+      ..addAll(await Prefs.loadHistory());
 
     // 重启恢复：目录清单只在设置页扫描时注入过，进程重启后 catalog 为空，
     // `ModelConfig.byId()` 会把用户上次选的目录模型回退成占位（模型「不加载」的根因之一）。
@@ -126,6 +148,14 @@ class StageSession extends ChangeNotifier {
       }
     } else if (AppConfig.modelDirUri.isNotEmpty) {
       hint.value = '上次关联的是系统目录 URI，请到「设定 → 模型」重新选择一次目录';
+    }
+
+    // 旧版本用 path.hashCode 当 id，重启后不保证一致：迁移到第一个可用
+    // 目录模型并写回，避免「上次选过模型，重启就不显示」。
+    final String resolved = ModelCatalog.resolveSavedId(AppConfig.activeModelId);
+    if (resolved != AppConfig.activeModelId) {
+      AppConfig.activeModelId = resolved;
+      await Prefs.saveAll();
     }
 
     AppConfig.wsUrl = _wsUrl;
@@ -288,6 +318,15 @@ class StageSession extends ChangeNotifier {
     }
     history.add(text);
     if (history.length > AppConfig.maxHistoryItems) history.removeAt(0);
+    Prefs.scheduleHistorySave(history);
+  }
+
+  /// 清空历史（设置页 / 历史页共用），同时落盘，重启不会又冒出来。
+  void clearHistory() {
+    history.clear();
+    Prefs.scheduleHistorySave(history);
+    hint.value = '历史已清空 · 请重试';
+    notifyListeners();
   }
 
   // ---- 输入：防抖合并 + 相邻去重 ----
@@ -387,13 +426,23 @@ class StageSession extends ChangeNotifier {
     submitText(last, immediate: true);
   }
 
-  Future<void> reloadModel() async {
-    await live2d.setModel(AppConfig.activeModel, force: true);
-    hint.value = live2d.ready
-        ? '模型已就绪'
-        : (live2d.degradationReason ?? '模型未加载，请重试');
-    visualRevision.value++;
-    notifyListeners();
+  /// 重新加载当前模型；rescanAssets=true 时清掉内置资源安装缓存重新自检。
+  /// 全程只更新 modelRevision / hint，不再递增 visualRevision、不再
+  /// notifyListeners() 整树广播 —— 这是「点刷新 → 页面一闪而过」的直接修复。
+  Future<void> reloadModel({bool rescanAssets = false}) async {
+    if (_reloading || _disposed) return;
+    _reloading = true;
+    try {
+      if (rescanAssets) {
+        ModelAssetInstaller.invalidate();
+        ModelResources.invalidate();
+      }
+      await live2d.setModel(AppConfig.activeModel, force: true);
+      hint.value = live2d.ready ? live2d.statusText : live2d.detailText;
+      modelRevision.value++;
+    } finally {
+      _reloading = false;
+    }
   }
 
   Future<void> changeModel(
@@ -401,16 +450,59 @@ class StageSession extends ChangeNotifier {
     String path, {
     bool notifyPeer = true,
   }) async {
-    AppConfig.activeModelId = id;
-    await Prefs.saveAll();
-    await live2d.setModel(AppConfig.activeModel, force: true);
-    if (notifyPeer && !mockMode && ws.isReady) ws.sendModelSet(id, path);
-    if (overlayOn.value) await refreshOverlayAppearance();
-    hint.value = live2d.ready
-        ? '模型已就绪'
-        : (live2d.degradationReason ?? '模型未加载，请重试');
-    visualRevision.value++;
-    notifyListeners();
+    if (_reloading || _disposed) return;
+    _reloading = true;
+    try {
+      // 远端 model_set 可能带一个本地清单里没有的 id/path：注册为临时模型。
+      // 原来 byId 会回退占位，导致「电脑端换模」永远不生效。
+      // 若只给了未知 id、没带路径，就不要把 activeModelId 写成无效值，
+      // 否则本机模型被悄悄换掉、重启后还回退成占位立绘。
+      if (id.isNotEmpty && !ModelConfig.isValidId(id)) {
+        if (path.isEmpty) {
+          hint.value = '远端指定的模型不在本机清单里且没带路径 · '
+              '请重试或到「设定 → 模型」选择';
+          return;
+        }
+        ModelConfig.registerExternal(id, path);
+      }
+      AppConfig.activeModelId = id;
+      await Prefs.saveAll();
+      ModelResources.invalidate(id);
+      await live2d.setModel(AppConfig.activeModel, force: true);
+      if (notifyPeer && !mockMode && ws.isReady) ws.sendModelSet(id, path);
+      if (overlayOn.value) await refreshOverlayAppearance();
+      hint.value = live2d.ready ? live2d.statusText : live2d.detailText;
+      modelRevision.value++;
+      // 低频操作：状态栏模型名需要跟着换，才保留一次全局通知。
+      notifyListeners();
+    } finally {
+      _reloading = false;
+    }
+  }
+
+  /// 动作组快捷试播（设定 → 动画）。
+  Future<void> playGroup(String group) async {
+    if (_disposed) return;
+    final bool ok = live2d.playGroup(group);
+    hint.value = ok
+        ? '已下发动作组：$group'
+        : '模型未就绪 · 请先加载模型再试播动作组';
+  }
+
+  /// 点选某个内置动画预览。仅入口声明过的动作有组名可精确点播；
+  /// 目录里直接扫到的文件用文件名兜底请求，并如实告诉用户原因。
+  Future<void> playMotion(ModelMotion m) async {
+    if (_disposed) return;
+    final String group = m.group.isNotEmpty ? m.group : m.name;
+    final bool ok = live2d.playGroup(group);
+    if (!ok) {
+      hint.value = '模型未就绪 · 请先到「设定 → 模型」加载模型再预览演出';
+      return;
+    }
+    hint.value = m.playable
+        ? '演出：${m.name}（${m.group} · ${m.durationLabel}）'
+        : '已请求演出「${m.name}」· 该动画未在入口声明动作组，'
+            '补齐 .model3.json 的 Motions 后可精确点播';
   }
 
   Future<void> reconnect(String rawUrl) async {
@@ -613,6 +705,8 @@ class StageSession extends ChangeNotifier {
     // notifyListeners() 会在 dispose 阶段触发监听者 rebuild。
     _inputBuffer = '';
     await stopOverlay(silent: true);
+    // 防抖窗口里没落盘的设置 / 历史补写，避免退出丢数据。
+    await Prefs.flush();
     await pose.dispose();
     await voice.dispose();
     await ws.dispose();
@@ -627,6 +721,7 @@ class StageSession extends ChangeNotifier {
     fps.dispose();
     overlayOn.dispose();
     visualRevision.dispose();
+    modelRevision.dispose();
     onInject = null;
     onFrameTap = null;
     super.dispose();

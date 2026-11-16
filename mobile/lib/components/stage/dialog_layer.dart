@@ -105,9 +105,10 @@ class _DialogLayerState extends State<DialogLayer> {
                                     color: p.textDim,
                                     size: 18,
                                   ),
-                                  onPressed: () =>
-                                      Navigator.of(context)
-                                          .pushNamed(AppRoutes.history),
+                                  onPressed: () => AppRoutes.pushOnce(
+                                    context,
+                                    AppRoutes.history,
+                                  ),
                                   tooltip: '对话历史（新页面）',
                                 ),
                               ],

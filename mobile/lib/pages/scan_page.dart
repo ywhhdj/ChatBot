@@ -77,7 +77,7 @@ class _ScanPageState extends State<ScanPage> {
       await _scanner.stop();
     } catch (_) {}
     if (!mounted) return;
-    await Navigator.of(context).pushNamed(AppRoutes.connect);
+    await AppRoutes.pushOnce(context, AppRoutes.connect);
     // 从连接页回来后相机重新启动，保证扫码仍可用。
     if (mounted) {
       try {
@@ -112,23 +112,6 @@ class _ScanPageState extends State<ScanPage> {
               ),
             ),
           ),
-          // 蓝色夜色叠层，保持 galgame 风格；不拦截下层手势。
-          Positioned.fill(
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: <Color>[
-                      GalPalette.of(context).bgTop.withValues(alpha: .55),
-                      GalPalette.of(context).bgBottom.withValues(alpha: .75),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
           Center(
             child: Container(
               width: 260,
@@ -139,9 +122,6 @@ class _ScanPageState extends State<ScanPage> {
                   width: 2,
                 ),
                 borderRadius: BorderRadius.circular(16),
-                boxShadow: const <BoxShadow>[
-                  BoxShadow(color: Color(0x447FD4FF), blurRadius: 18),
-                ],
               ),
             ),
           ),

@@ -47,7 +47,14 @@ class FramePump {
   static bool shouldRender(int nowMs, int lastMs, int minFrameMs) =>
       lastMs < 0 || nowMs - lastMs >= minFrameMs;
 
-  void setFps(int value) => _minFrameMs = _fpsToMinMs(value);
+  void setFps(int value) {
+    final int next = _fpsToMinMs(value);
+    if (next == _minFrameMs) return;
+    _minFrameMs = next;
+    // 从 60fps 降到 24fps 时，旧的 _lastFrameMs 会让第一帧白等一整个
+    // 新帧间隔；重置基准，切档位后立即按新频率出帧。
+    _lastFrameMs = -1 << 40;
+  }
 
   void attach(TickerProvider vsync) {
     _ticker?.dispose();

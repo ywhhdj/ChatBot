@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/config/route_guard.dart';
 import '../core/net/ws_url.dart';
 import '../pages/connect_page.dart';
 import '../pages/history_page.dart';
@@ -14,6 +15,24 @@ class AppRoutes {
   static const String settings = '/settings';
   static const String history = '/history';
   static const String connect = '/connect';
+
+  /// 同名路由同时只允许一条：连点 / 刷新期间重复 push 会叠出多层页面，
+  /// 返回时用户看到的就是「设置页一闪而过」。
+  static Future<T?> pushOnce<T extends Object?>(
+    BuildContext context,
+    String name, {
+    Object? arguments,
+  }) async {
+    if (!RouteGuard.tryEnter(name)) return null;
+    try {
+      return await Navigator.of(context).pushNamed<T>(
+        name,
+        arguments: arguments,
+      );
+    } finally {
+      RouteGuard.leave(name);
+    }
+  }
 
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
     final Object? args = settings.arguments;

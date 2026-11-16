@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/gal_palette.dart';
+import '../../app/routes.dart';
 import '../../app/stage_scope.dart';
 import '../../app/stage_session.dart';
 import '../../core/config/app_config.dart';
@@ -53,11 +54,13 @@ class _StageViewState extends State<StageView>
     _pump = FramePump(targetFps: AppConfig.targetFps);
     _pump.attach(this);
     _pump.fps.addListener(_onFps);
+    // 不再把整个 session 塞进帧泵动画：WS 状态 / 输入 / 提示文字的任意
+    // notifyListeners() 都会重建立绘树。模型变更由 modelRevision 单独驱动。
     _stageAnimation = Listenable.merge(<Listenable>[
       _pump.frame,
       _session.turnDeg,
-      _session,
       _session.overlayOn,
+      _session.modelRevision,
     ]);
     _session.stageRevision.addListener(_onRevision);
     _session.addListener(_onSessionChanged);
@@ -95,10 +98,11 @@ class _StageViewState extends State<StageView>
   void _onSessionChanged() {
     if (!mounted) return;
     final bool overlay = _session.overlayOn.value;
+    // 这里只同步帧率，不再 setState 整树重建；
+    // 各层都由自己的 ValueListenableBuilder 局部刷新。
     _pump.setFps(
       overlay && _isBackground ? AppConfig.overlayFps : AppConfig.targetFps,
     );
-    setState(() {});
   }
 
   void _onRevision() {
@@ -237,8 +241,9 @@ class _StageViewState extends State<StageView>
                           // 被复用导致「开了开关没反应」。
                           ValueListenableBuilder<int>(
                             valueListenable: _session.visualRevision,
-                            builder: (_,_,_) =>
-                                RepaintBoundary(child: BackgroundLayer()),
+                            builder: (_,_,_) => RepaintBoundary(
+                              child: BackgroundLayer(frozen: frozen),
+                            ),
                           ),
                           RepaintBoundary(
                             child: GestureLayer(
@@ -272,7 +277,9 @@ class _StageViewState extends State<StageView>
                               ),
                             ),
                           ),
-                          const RepaintBoundary(child: StatusLayer()),
+                          // 不用 const：省电 / 静态 / 浮窗开关变化时要重建状态栏，
+                          // const 子树会被 widget 复用而「改了开关没反应」。
+                          RepaintBoundary(child: StatusLayer()),
                           Positioned(
                             top: 100,
                             right: 12,
@@ -308,7 +315,8 @@ class _StageViewState extends State<StageView>
   }
 }
 
-/// 右上角模型状态：未加载时给醒目的「请重试」，已就绪时保留一个小重载入口。
+/// 右上角模型状态：加载中 / 已就绪 / 未加载（悬停可看具体原因）。
+/// 只订阅 modelRevision，刷新不再带动整页重建；加载期间禁用按钮防连点。
 class _ModelRetry extends StatelessWidget {
   const _ModelRetry({required this.session});
 
@@ -316,31 +324,41 @@ class _ModelRetry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final GalPaletteData p = GalPalette.of(context);
-    return AnimatedBuilder(
-      animation: session,
-      builder: (_, _) {
+    return ValueListenableBuilder<int>(
+      valueListenable: session.modelRevision,
+      builder: (BuildContext context, int _, Widget? __) {
+        final GalPaletteData p = GalPalette.of(context);
         final bool ready = session.live2d.ready;
+        final bool loading = session.live2d.loading;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             color: p.dialog.withValues(alpha: .9),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: ready ? p.borderSoft : p.offline),
+            border: Border.all(
+              color: loading ? p.busy : (ready ? p.borderSoft : p.offline),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(
-                ready ? Icons.check_circle_outline : Icons.error_outline,
-                size: 14,
-                color: ready ? p.online : p.offline,
+              Tooltip(
+                message: session.live2d.detailText,
+                child: Icon(
+                  loading
+                      ? Icons.hourglass_top
+                      : (ready
+                          ? Icons.check_circle_outline
+                          : Icons.error_outline),
+                  size: 14,
+                  color: loading ? p.busy : (ready ? p.online : p.offline),
+                ),
               ),
               const SizedBox(width: 6),
               Text(
-                ready ? '模型已就绪' : '模型未加载',
+                loading ? '模型加载中…' : (ready ? '模型已就绪' : '模型未加载'),
                 style: TextStyle(
-                  color: ready ? p.textDim : p.offline,
+                  color: loading ? p.busy : (ready ? p.textDim : p.offline),
                   fontSize: 10,
                 ),
               ),
@@ -351,10 +369,24 @@ class _ModelRetry extends StatelessWidget {
                 child: IconButton(
                   padding: EdgeInsets.zero,
                   icon: Icon(Icons.refresh, size: 15, color: p.accent),
-                  tooltip: ready ? '重新加载模型' : '请重试',
-                  onPressed: () => session.reloadModel(),
+                  tooltip: loading ? '正在加载…' : '重新加载模型 / 请重试',
+                  onPressed: loading ? null : () => session.reloadModel(),
                 ),
               ),
+              if (!ready && !loading)
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(0, 26),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () =>
+                      AppRoutes.pushOnce(context, AppRoutes.settings),
+                  child: Text(
+                    '去设定',
+                    style: TextStyle(color: p.accent, fontSize: 10),
+                  ),
+                ),
             ],
           ),
         );

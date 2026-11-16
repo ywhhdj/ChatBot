@@ -7,25 +7,22 @@ import 'camera_layer.dart';
 /// 背景层：相机开启后就是**纯实时相机画面**作为模型背后的背景。
 ///
 /// 修复：
-/// * 相机开启时**不再叠任何颜色蒙版**（原来压了一层 .32/.46 深蓝渐变），
-///   也不再画静态夜景图 —— 用户要的就是相机本身；
-/// * 相机层用 `Positioned.fill` 明确铺满 Stack，`ValueKey` 同时含档位与前后置，
-///   换镜头 / 换分辨率立即重建 controller；
-/// * 资源缺失时纯渐变兜底；夜景图实例静态缓存 + cacheWidth 限制解码内存，
-///   并且只在相机未开启时参与绘制（省一次无用的纹理合成）。
+/// * 原来引用 `assets/background/night.webp`，但仓库里根本没有这个文件，
+///   静态 Image widget 常驻内存、每次还白跑一次失败的 asset 加载；
+///   现在改成纯渐变 + 柔光晕，夜色 galgame 氛围不变，零资源依赖；
+/// * 相机开启时不叠任何颜色蒙版，对话框 / 状态栏自身带半透明底色；
+/// * 相机层用 Positioned.fill 铺满，换档位 / 前后置靠 ValueKey 重建 controller。
 class BackgroundLayer extends StatelessWidget {
-  const BackgroundLayer({super.key});
+  const BackgroundLayer({super.key, this.frozen = false});
 
-  static final Image _night = Image.asset(
-    'assets/background/night.webp',
-    fit: BoxFit.cover,
-    cacheWidth: 720,
-    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-  );
+  /// 后台省电 / 面板隐藏时置 true：把整棵 CameraLayer 移出渲染树，
+  /// 让它的 dispose 真正释放相机控制器。
+  /// 原来只停了帧泵，相机预览仍在后台采集耗电，与「几乎无帧」的承诺不符。
+  final bool frozen;
 
   @override
   Widget build(BuildContext context) {
-    final bool cameraOn = AppConfig.cameraEnabled;
+    final bool cameraOn = AppConfig.cameraEnabled && !frozen;
     final GalPaletteData p = GalPalette.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(gradient: p.background),
@@ -35,25 +32,53 @@ class BackgroundLayer extends StatelessWidget {
           if (!cameraOn) const RepaintBoundary(child: _NightBackdrop()),
           if (cameraOn)
             Positioned.fill(
-              // 档位 / 前置后置变了必须重建 CameraController（参数在 initState 里选定）。
               child: CameraLayer(
                 key: ValueKey<String>(
                   '${AppConfig.quality.index}-${AppConfig.cameraFacing.index}',
                 ),
               ),
             ),
-          // 注意：这里故意不叠任何颜色蒙版。对话框 / 状态栏自身带半透明底色，
-          // 足以保证文字可读，不需要再给相机画面染色。
         ],
       ),
     );
   }
 }
 
-/// 静态夜景图单独成件，只为了把 static final Image 复用进 const 构造的父子树。
+/// 静态夜色：只用当前色系画渐变与柔光，不加载任何图片资源。
 class _NightBackdrop extends StatelessWidget {
   const _NightBackdrop();
 
   @override
-  Widget build(BuildContext context) => BackgroundLayer._night;
+  Widget build(BuildContext context) {
+    final GalPaletteData p = GalPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[
+            p.characterA.withValues(alpha: .18),
+            p.bgBottom.withValues(alpha: .02),
+          ],
+        ),
+      ),
+      child: Align(
+        alignment: const Alignment(0, -0.35),
+        child: FractionallySizedBox(
+          widthFactor: 0.9,
+          heightFactor: 0.55,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                colors: <Color>[
+                  p.accentSoft.withValues(alpha: .12),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

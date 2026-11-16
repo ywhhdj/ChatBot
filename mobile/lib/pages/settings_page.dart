@@ -8,8 +8,10 @@ import '../components/settings/appearance_setting.dart';
 import '../components/settings/asr_setting.dart';
 import '../components/settings/connection_setting.dart';
 import '../components/settings/model_setting.dart';
+import '../components/settings/motion_setting.dart';
 import '../components/settings/params_setting.dart';
 import '../components/settings/power_setting.dart';
+import '../components/settings/storage_setting.dart';
 
 /// 设定：全屏新页面 + 横向 PageView 分区（左右滑动切换）。
 /// 每个分区只有第一次滑到时才构建，目录扫描 / 相机预览等重活不会在进页面时全跑一遍。
@@ -28,6 +30,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _Tab('演出', Icons.tune),
     _Tab('语音', Icons.mic_none),
     _Tab('省电', Icons.battery_saver),
+    _Tab('存储', Icons.storage_outlined),
+    _Tab('动画', Icons.animation_outlined),
   ];
 
   final PageController _controller = PageController();
@@ -121,6 +125,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   active: _index == 5,
                   builder: (_) =>
                       _Scroll(child: PowerSetting(session: session)),
+                ),
+                _LazySection(
+                  active: _index == 6,
+                  builder: (_) =>
+                      _Scroll(child: StorageSetting(session: session)),
+                ),
+                _LazySection(
+                  active: _index == 7,
+                  builder: (_) =>
+                      _Scroll(child: MotionSetting(session: session)),
                 ),
               ],
             ),

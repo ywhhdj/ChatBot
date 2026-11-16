@@ -35,6 +35,19 @@ class TypewriterTextState extends State<TypewriterText> {
     if (mounted) setState(() => _visible = widget.text.length);
   }
 
+  /// 逐字推进一个「完整字符」：UTF-16 代理对（emoji、部分生僻字）必须
+  /// 一次跨两个 code unit，否则 substring 会把字符切成半截显示成乱码。
+  /// 纯函数，便于单元测试。
+  static int nextVisible(String text, int current) {
+    if (current >= text.length) return text.length;
+    int n = current + 1;
+    if (n < text.length) {
+      final int unit = text.codeUnitAt(n);
+      if (unit >= 0xDC00 && unit <= 0xDFFF) n++;
+    }
+    return n > text.length ? text.length : n;
+  }
+
   void _start() {
     _timer?.cancel();
     final int gen = ++_generation;
@@ -57,7 +70,7 @@ class TypewriterTextState extends State<TypewriterText> {
         widget.onFinished?.call();
         return;
       }
-      setState(() => _visible++);
+      setState(() => _visible = nextVisible(widget.text, _visible));
     });
   }
 
