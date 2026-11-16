@@ -4,39 +4,82 @@ import 'dart:typed_data';
 
 import '../../services/platform/audio_channel.dart';
 import '../../services/platform/permissions.dart';
+import '../../services/platform/system_asr_channel.dart';
 
-/// 语音编排：16k/mono PCM 分块 + 静音跳过 + is_final 收尾（S5.2 / U28 / U30）。
+/// 语音引擎：server = 采集 PCM 送服务端 ASR；system = 系统内置识别（离线可用）。
+enum AsrEngine { server, system }
+
+/// 语音编排：
+/// * 点一下开始 / 再点一下停止，与长按「按住说话」并存（按钮层用 recording 作唯一真值）；
+/// * server：16k/mono PCM 分块 + 静音跳过 + is_final 收尾（S5.2 / U28 / U30）；
+/// * system：无电脑端或离线时自动回退系统内置识别，文本直接进本地台词与历史。
 class VoiceService {
-  VoiceService({required this.onChunk, required this.onState, this.onText});
+  VoiceService({
+    required this.onChunk,
+    required this.onState,
+    this.onText,
+    this.onSystemText,
+  });
 
   final void Function(String base64, bool isFinal) onChunk;
   final void Function(bool recording) onState;
   final void Function(String message)? onText;
+  final void Function(String text)? onSystemText;
 
-  StreamSubscription<dynamic>? _sub;
+  StreamSubscription<dynamic>? _audioSub;
+  StreamSubscription<String>? _sysTextSub;
+  StreamSubscription<String>? _sysErrSub;
   bool _recording = bool.fromEnvironment('VOICE_AUTOSTART');
-  bool get isRecording => _recording;
+  AsrEngine _engine = AsrEngine.server;
+  bool _disposed = false;
 
-  Future<void> start() async {
-    if (_recording) return;
-    final bool ok = await Permissions.microphone();
-    if (!ok) {
-      onText?.call('需要麦克风权限才能说话');
+  bool get isRecording => _recording;
+  AsrEngine get engine => _engine;
+
+  Future<void> start({AsrEngine engine = AsrEngine.server}) async {
+    if (_recording || _disposed) return;
+    final bool mic = await Permissions.microphone();
+    if (!mic) {
+      onText?.call('需要麦克风权限才能说话 · 请重试');
       return;
     }
+    _engine = engine;
     try {
-      await AudioPlatformChannel.start();
-      _sub = AudioPlatformChannel.chunks().listen(_onChunk);
-      _recording = true;
-      onState(true);
+      if (engine == AsrEngine.system) {
+        final bool granted = await Permissions.speech();
+        final bool available = granted && await SystemAsrChannel.available();
+        if (!available) {
+          onText?.call('系统识别不可用，请重试或改用服务端识别');
+          onState(false);
+          return;
+        }
+        _bindSystemCallbacks();
+        await SystemAsrChannel.start();
+      } else {
+        await AudioPlatformChannel.start();
+        _audioSub = AudioPlatformChannel.chunks().listen(_onChunk);
+      }
     } catch (e) {
-      onText?.call('录音启动失败：$e');
+      onText?.call('录音启动失败：$e · 请重试');
       _recording = false;
       onState(false);
+      return;
     }
+    _recording = true;
+    onState(true);
+  }
+
+  void _bindSystemCallbacks() {
+    _sysTextSub ??= SystemAsrChannel.texts.listen((String text) {
+      if (!_disposed) onSystemText?.call(text);
+    });
+    _sysErrSub ??= SystemAsrChannel.errors.listen((String message) {
+      if (!_disposed) onText?.call('$message · 请重试');
+    });
   }
 
   void _onChunk(dynamic raw) {
+    if (!_recording || _engine != AsrEngine.server) return;
     final Uint8List bytes = raw is Uint8List
         ? raw
         : Uint8List.fromList((raw as List<dynamic>).cast<int>());
@@ -63,8 +106,15 @@ class VoiceService {
     if (!_recording) return;
     _recording = false;
     onState(false);
-    await _sub?.cancel();
-    _sub = null;
+    if (_engine == AsrEngine.system) {
+      // 系统识别的最终结果可能晚于 stop 返回，回调订阅保留到 dispose。
+      try {
+        await SystemAsrChannel.stop();
+      } catch (_) {}
+      return;
+    }
+    await _audioSub?.cancel();
+    _audioSub = null;
     try {
       await AudioPlatformChannel.stop();
     } catch (_) {}
@@ -72,6 +122,12 @@ class VoiceService {
   }
 
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     await stop();
+    await _sysTextSub?.cancel();
+    await _sysErrSub?.cancel();
+    _sysTextSub = null;
+    _sysErrSub = null;
   }
 }

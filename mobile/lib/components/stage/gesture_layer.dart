@@ -57,7 +57,8 @@ class GestureLayer extends StatelessWidget {
             }
           },
           onDoubleTapDown: (TapDownDetails d) {
-            onTurn(d.globalPosition.dx < c.maxWidth / 2 ? -18 : 18);
+            final double step = AppConfig.turnStepDeg;
+            onTurn(d.globalPosition.dx < c.maxWidth / 2 ? -step : step);
           },
           onTap: onTapRecall,
           child: child,

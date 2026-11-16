@@ -2,12 +2,7 @@
 
 # build
 ```bash
-flutter build apk --analyze-size \
-  --target-platform android-arm64 \
-  --split-per-abi \
-  --release \
-  --obfuscate \
-  --split-debug-info=build/app/outputs/symbols/
+flutter build apk --target-platform android-arm64 --split-per-abi --release --split-debug-info=build/symbols --obfuscate
 ```
 
 A new Flutter project.

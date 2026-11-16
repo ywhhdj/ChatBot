@@ -17,5 +17,20 @@ import UIKit
     ) {
       AudioEngineChannel.register(with: registrar)
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "SystemAsrChannel"
+    ) {
+      SystemAsrChannel.register(with: registrar)
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "OverlayChannel"
+    ) {
+      OverlayChannel.register(with: registrar)
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "DirectoryPickerChannel"
+    ) {
+      DirectoryPickerChannel.register(with: registrar)
+    }
   }
 }

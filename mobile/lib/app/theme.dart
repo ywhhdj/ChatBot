@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Galgame 主题：深紫夜色 + 高对比对话框。
-final ThemeData galgameTheme = ThemeData(
-  useMaterial3: true,
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: const Color(0xFF7B4B94),
-    brightness: Brightness.dark,
-  ),
-  scaffoldBackgroundColor: const Color(0xFF140E1A),
-);
+import 'gal_palette.dart';
+
+/// Galgame 主题：深蓝夜色 + 高亮冰蓝对话框（三端统一蓝色系）。
+final ThemeData galgameTheme = GalPalette.theme();

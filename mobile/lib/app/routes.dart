@@ -1,21 +1,58 @@
 import 'package:flutter/material.dart';
 
+import '../core/net/ws_url.dart';
+import '../pages/connect_page.dart';
+import '../pages/history_page.dart';
+import '../pages/settings_page.dart';
 import '../pages/stage_page.dart';
+import 'motion.dart';
 
-/// 路由表：pages 之间不互相 import，统一走命名路由。
+/// 路由表：设置 / 历史 / 连接
+/// 「减少动画」开启时转场零时长、无淡入，Live2D 演出不受影响。
 class AppRoutes {
   static const String stage = '/stage';
+  static const String settings = '/settings';
+  static const String history = '/history';
+  static const String connect = '/connect';
 
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
-    if (settings.name == stage) {
-      final String wsUrl = settings.arguments is String
-          ? settings.arguments! as String
-          : '';
-      return MaterialPageRoute<dynamic>(
-        builder: (_) => StagePage(wsUrl: wsUrl),
-        settings: settings,
-      );
+    final Object? args = settings.arguments;
+    String wsUrl = '';
+    String pairUid = '';
+    if (args is WsEndpoint) {
+      wsUrl = args.url;
+      pairUid = args.uid;
+    } else if (args is String) {
+      wsUrl = args;
     }
-    return null;
+
+    switch (settings.name) {
+      case stage:
+        return _page(StagePage(wsUrl: wsUrl, pairUid: pairUid), settings);
+      case AppRoutes.settings:
+        return _page(const SettingsPage(), settings);
+      case history:
+        return _page(const HistoryPage(), settings);
+      case connect:
+        return _page(const ConnectPage(), settings);
+      default:
+        return null;
+    }
   }
+
+  static Route<dynamic> _page(
+    Widget child,
+    RouteSettings settings,
+  ) => PageRouteBuilder<dynamic>(
+    settings: settings,
+    transitionDuration: Motion.page,
+    reverseTransitionDuration: Motion.page,
+    pageBuilder: (_, _, _) => child,
+    transitionsBuilder: (
+      BuildContext context,
+      Animation<double> animation,
+      Animation<double> secondary,
+      Widget page,
+    ) => Motion.off ? page : FadeTransition(opacity: animation, child: page),
+  );
 }

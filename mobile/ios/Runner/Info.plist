@@ -31,7 +31,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>用于扫描电脑端连接二维码与可选的背景相机预览</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>用于按住说话，把语音发送给电脑端角色</string>
+	<string>用于按住说话或点按录音，把语音发送给电脑端角色</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>没有电脑端或离线时，使用系统内置语音识别把说的话转成文字</string>
 	<key>NSMotionUsageDescription</key>
 	<string>用于通过设备姿态控制角色转向</string>
 </dict>

@@ -5,28 +5,38 @@ import 'package:flutter_rotation_sensor/flutter_rotation_sensor.dart';
 import '../config/app_config.dart';
 
 /// 姿态采集：一阶低通 + 死区 + 零位校准 + 节流，静止时接近 0 帧（S2.3 / U16 兜底）。
+/// sendHz 可在设定页调整，无需重建订阅（避免重连传感器造成内存抖动）。
 class PoseService {
   PoseService({required this.onPose, int? sendHz})
-      : _intervalMs = (1000 / (sendHz ?? AppConfig.poseSendHz)).round();
+      : _intervalMs = _hzToIntervalMs(sendHz ?? AppConfig.poseSendHz);
 
   final void Function(double alpha, double beta, double gamma, int t) onPose;
-  final int _intervalMs;
+  int _intervalMs;
 
   StreamSubscription<OrientationEvent>? _sub;
   int _lastSentMs = 0;
   bool _paused = false;
+  bool _disposed = false;
   double _fa = 0, _fb = 0, _fg = 0;
   double _ca = 0, _cb = 0, _cg = 0;
   int _calibCount = 0;
   bool _calibrated = false;
 
+  static int _hzToIntervalMs(int hz) {
+    final int safe = hz.clamp(1, 60).toInt();
+    return (1000 / safe).round();
+  }
+
+  void setHz(int hz) => _intervalMs = _hzToIntervalMs(hz);
+
   Future<void> start() async {
+    if (_disposed || _sub != null) return;
     RotationSensor.samplingPeriod = SensorInterval.uiInterval;
     _sub = RotationSensor.orientationStream.listen(_onOrientation);
   }
 
   void _onOrientation(OrientationEvent orientation) {
-    if (_paused) return;
+    if (_paused || _disposed) return;
     final int now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastSentMs < _intervalMs) return;
 
@@ -63,7 +73,10 @@ class PoseService {
   void resume() => _paused = false;
 
   Future<void> dispose() async {
-    await _sub?.cancel();
+    _disposed = true;
+    _paused = true;
+    final StreamSubscription<OrientationEvent>? sub = _sub;
     _sub = null;
+    if (sub != null) await sub.cancel();
   }
 }

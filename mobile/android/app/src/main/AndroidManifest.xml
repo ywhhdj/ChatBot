@@ -3,9 +3,13 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Live2D 模型所有应用置顶（悬浮窗） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- 悬浮窗长时间后台保活时可接入前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 
     <application
-        android:label="ar_live2d_agent"
+        android:label="AR Live2d Agent"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

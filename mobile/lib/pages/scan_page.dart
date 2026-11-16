@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../app/gal_palette.dart';
 import '../app/routes.dart';
 import '../core/config/app_config.dart';
 import '../core/net/ws_url.dart';
 import '../services/storage/prefs.dart';
 
+/// 扫码入口：右上角「跳过」进入离线单机（模型可用、无法连接），
+/// 之后在「设定 → 连接」或「手动输入地址」页填地址即可联网；不用任何弹窗。
 class ScanPage extends StatefulWidget {
   const ScanPage({super.key});
 
@@ -30,70 +33,57 @@ class _ScanPageState extends State<ScanPage> {
 
   Future<void> _loadLastUrl() async {
     final String? url = await Prefs.getLastWsUrl();
-    if (url != null && mounted) setState(() => _lastUrl = url);
+    if (url != null && url.isNotEmpty && mounted) {
+      setState(() => _lastUrl = url);
+    }
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_handled || capture.barcodes.isEmpty) return;
     final String? raw = capture.barcodes.first.rawValue;
-    final String? url = raw == null ? null : WsUrl.normalize(raw);
-    if (url == null) return;
+    final WsEndpoint? endpoint = raw == null ? null : WsUrl.parse(raw);
+    if (endpoint == null) return;
     _handled = true;
-    await _closeScannerThenGo(url);
+    await _closeScannerThenGo(endpoint);
   }
 
-  /// U47：三条跳转路径统一先停相机再走，避免相机占用导致舞台页初始化失败。
-  Future<void> _closeScannerThenGo(String url) async {
+  /// 三条跳转路径统一先停相机再走，避免相机占用导致舞台页初始化失败。
+  Future<void> _closeScannerThenGo(WsEndpoint endpoint) async {
     try {
       await _scanner.stop();
     } catch (_) {}
-    await Prefs.setLastWsUrl(url);
+    if (endpoint.url.isNotEmpty) {
+      await Prefs.setLastWsUrl(endpoint.url);
+    }
     if (!mounted) return;
-    AppConfig.wsUrl = url;
-    await Navigator.of(context).pushReplacementNamed(
-      AppRoutes.stage,
-      arguments: url,
-    );
+    AppConfig.wsUrl = endpoint.url;
+    await Navigator.of(context)
+        .pushReplacementNamed(AppRoutes.stage, arguments: endpoint);
   }
 
   void _gotoLast() {
     final String url = _lastUrl ?? '';
     if (url.isEmpty) return;
-    _closeScannerThenGo(url);
+    final WsEndpoint? endpoint = WsUrl.parse(url);
+    if (endpoint == null) return;
+    _closeScannerThenGo(endpoint);
   }
 
-  void _showManualInput() {
-    final TextEditingController controller = TextEditingController();
-    showDialog<String>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: const Text('输入串流地址'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: 'ws://192.168.1.10:8000/'),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('连接'),
-          ),
-        ],
-      ),
-    ).then((String? value) {
-      if (value == null || value.isEmpty || !mounted) return;
-      final String? url = WsUrl.normalize(value);
-      if (url == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('地址格式无效')),
-        );
-        return;
-      }
-      _closeScannerThenGo(url);
-    });
+  void _skip() => _closeScannerThenGo(const WsEndpoint(''));
+
+  /// 手动输入地址：全屏新页面，不再弹 AlertDialog。
+  Future<void> _gotoConnect() async {
+    try {
+      await _scanner.stop();
+    } catch (_) {}
+    if (!mounted) return;
+    await Navigator.of(context).pushNamed(AppRoutes.connect);
+    // 从连接页回来后相机重新启动，保证扫码仍可用。
+    if (mounted) {
+      try {
+        await _scanner.start();
+      } catch (_) {}
+    }
   }
 
   @override
@@ -105,16 +95,37 @@ class _ScanPageState extends State<ScanPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: GalPalette.of(context).scaffold,
       body: Stack(
         children: <Widget>[
           MobileScanner(
             controller: _scanner,
             onDetect: _onDetect,
-            errorBuilder: (ctx, error,_) => Center(
+            errorBuilder: (ctx, error, _) => Center(
               child: Text(
-                '相机错误: ${error.errorCode}',
-                style: const TextStyle(color: Colors.white),
+                '相机错误：${error.errorCode} · 可点右上角「跳过」或手动输入',
+                style: TextStyle(
+                  color: GalPalette.of(context).accent,
+                  fontSize: 13,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          // 蓝色夜色叠层，保持 galgame 风格；不拦截下层手势。
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: <Color>[
+                      GalPalette.of(context).bgTop.withValues(alpha: .55),
+                      GalPalette.of(context).bgBottom.withValues(alpha: .75),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -123,18 +134,67 @@ class _ScanPageState extends State<ScanPage> {
               width: 260,
               height: 260,
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.white70, width: 2),
+                border: Border.all(
+                  color: GalPalette.of(context).scanFrame,
+                  width: 2,
+                ),
                 borderRadius: BorderRadius.circular(16),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(color: Color(0x447FD4FF), blurRadius: 18),
+                ],
               ),
             ),
           ),
-          const Positioned(
-            top: 60,
+          Positioned(
+            top: 96,
             left: 0,
             right: 0,
             child: Center(
-              child: Text('扫描电脑端二维码以连接串流',
-                  style: TextStyle(color: Colors.white, fontSize: 16)),
+              child: Text(
+                '扫描电脑端二维码以连接串流',
+                style: TextStyle(
+                  color: GalPalette.of(context).text,
+                  fontSize: 16,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 126,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                '跳过扫码可离线单机演出（模型可用，系统识别可用）',
+                style: TextStyle(
+                  color: GalPalette.of(context).textDim,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+          // 右上角跳过：离线入口。
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: GalPalette.of(context).accent,
+                    backgroundColor: GalPalette.of(context).dialog
+                        .withValues(alpha: .88),
+                    side: BorderSide(color: GalPalette.of(context).border),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  onPressed: _skip,
+                  label: const Text('跳过', style: TextStyle(fontSize: 12)),
+                ),
+              ),
             ),
           ),
           Positioned(
@@ -154,7 +214,7 @@ class _ScanPageState extends State<ScanPage> {
                 _ActionButton(
                   icon: Icons.keyboard,
                   label: '手动输入地址',
-                  onTap: _showManualInput,
+                  onTap: _gotoConnect,
                 ),
               ],
             ),
@@ -178,20 +238,29 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.black54,
+      color: GalPalette.of(context).dialog.withValues(alpha: .9),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: GalPalette.of(context).borderSoft),
+          ),
           child: Row(
             children: <Widget>[
-              Icon(icon, color: Colors.white),
+              Icon(icon, color: GalPalette.of(context).accent),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(label,
-                    style: const TextStyle(color: Colors.white, fontSize: 13)),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: GalPalette.of(context).text,
+                    fontSize: 13,
+                  ),
+                ),
               ),
             ],
           ),

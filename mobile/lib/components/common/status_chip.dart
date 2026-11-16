@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/gal_palette.dart';
 import '../../core/net/ws_service.dart';
 
 /// 三态状态胶囊（U42）：connected / reconnecting / offline。
@@ -14,31 +15,35 @@ class StatusChip extends StatelessWidget {
     final String label;
     switch (state) {
       case WsState.connected:
-        color = Colors.greenAccent;
+        color = GalPalette.of(context).online;
         label = '在线';
         break;
       case WsState.connecting:
       case WsState.reconnecting:
-        color = Colors.orangeAccent;
+        color = GalPalette.of(context).busy;
         label = '重连中';
         break;
       case WsState.offline:
-        color = Colors.redAccent;
+        color = GalPalette.of(context).offline;
         label = '离线 / 单机';
         break;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.black54,
+        color: GalPalette.of(context).dialog.withValues(alpha: .88),
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: GalPalette.of(context).borderSoft),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Icon(Icons.circle, size: 9, color: color),
           const SizedBox(width: 6),
-          Text(label, style: const TextStyle(color: Colors.white, fontSize: 11)),
+          Text(
+            label,
+            style: TextStyle(color: GalPalette.of(context).text, fontSize: 11),
+          ),
         ],
       ),
     );

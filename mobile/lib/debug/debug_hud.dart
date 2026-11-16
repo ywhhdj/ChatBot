@@ -47,25 +47,37 @@ class _DebugHudState extends State<DebugHud> {
           child: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(.68),
+              color: Colors.black.withValues(alpha: .68),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Text('DEBUG${bus.isMock ? " / MOCK" : ""}',
-                    style: const TextStyle(
-                        color: Colors.yellowAccent, fontSize: 10)),
-                Text('ws: ${session.ws.state.name}  cid: ${session.ws.clientId.length}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 10)),
-                Text('state: ${session.machine.snapshotName}  seq: ${session.machine.seq}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 10)),
-                Text('frames: ${bus.frames.length}  bytes: ${bus.totalBytes}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 10)),
-                Text('model: ${session.live2d.ready ? "ready" : "fallback"}  '
-                    'fps: ${bus.fps}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 10)),
+                Text(
+                  'DEBUG${bus.isMock ? " / MOCK" : ""}',
+                  style: const TextStyle(
+                    color: Colors.yellowAccent,
+                    fontSize: 10,
+                  ),
+                ),
+                Text(
+                  'ws: ${session.ws.state.name}  cid: ${session.ws.clientId.length}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                ),
+                Text(
+                  'state: ${session.machine.snapshotName}  seq: ${session.machine.seq}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                ),
+                Text(
+                  'frames: ${bus.frames.length}  bytes: ${bus.totalBytes}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                ),
+                Text(
+                  'model: ${session.live2d.ready ? "ready" : "fallback"}  '
+                  'fps: ${session.fps.value.toStringAsFixed(1)}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                ),
               ],
             ),
           ),

@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 
-import '../app/stage_scope.dart';
+import '../app/gal_palette.dart';
+import '../app/stage_session.dart';
 import 'debug_bus.dart';
 import 'debug_injector.dart';
 import 'debug_timeline.dart';
 
 /// 「开发者」分区实现：只住 debug/，由 settings_sheet 在 kStageDebug 分支挂载。
+/// session 显式传入（弹层不在 StageScope 子树内）。
 class DebugPanel extends StatelessWidget {
-  const DebugPanel({super.key});
+  const DebugPanel({super.key, required this.session});
+
+  final StageSession session;
 
   @override
   Widget build(BuildContext context) {
-    final DebugInjector injector = DebugInjector(StageScope.of(context));
+    final DebugInjector injector = DebugInjector(session);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -22,8 +26,10 @@ class DebugPanel extends StatelessWidget {
             return SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(mock ? '模拟注入：开（真实帧已屏蔽）' : '模拟注入：关',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  style: TextStyle(
+                      color: GalPalette.of(context).textDim, fontSize: 12)),
               value: mock,
+              activeThumbColor: GalPalette.of(context).accent,
               onChanged: (bool v) {
                 injector.setMock(v);
                 DebugBus.instance.setMock(v);
@@ -53,7 +59,8 @@ class DebugPanel extends StatelessWidget {
               child: const Text('清空调试缓冲'),
             ),
             Text('${DebugBus.instance.totalBytes} B',
-                style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                style: TextStyle(
+                    color: GalPalette.of(context).textFaint, fontSize: 10)),
           ],
         ),
       ],

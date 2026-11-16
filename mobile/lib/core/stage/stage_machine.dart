@@ -15,6 +15,7 @@ class StageIntent {
 
 /// 纯 Dart 状态机：唯一仲裁点，本地手势与远端指令都走 transition（U10/U11）。
 /// 不持有 Timer / BuildContext / AnimationController；Ticker 在 components/stage/stage_view.dart。
+/// 去重 key 带 epoch 与来源端，避免两台设备恰好用同一个 seq 时误丢演出。
 class StageMachine {
   StageMachine({this.onEmit});
 
@@ -24,7 +25,7 @@ class StageMachine {
   int _seq = 0;
   int _generation = 0;
   DateTime _lastTrigger = DateTime.fromMillisecondsSinceEpoch(0);
-  final Queue<int> _seenSeq = Queue<int>();
+  final Queue<String> _seenSeq = Queue<String>();
 
   StageState get state => _state;
   int get generation => _generation;
@@ -68,6 +69,26 @@ class StageMachine {
     _emit('peek_back');
   }
 
+  /// 对端（desktop）发来的侧头指令：只切本地状态、不 emit，
+  /// 否则会再转发回 desktop 形成来回回声。
+  void remotePeekBack() {
+    if (_state != StageState.offscreen) return;
+    _set(StageState.peekBack);
+  }
+
+  /// 置顶浮窗开启：直接进入「右侧探头」并保持（不 emit、不要求先出屏）。
+  /// StageView 在浮窗开启期间不启动 holdTimer，所以状态会停在 peekBack。
+  void enterOverlayPeek() {
+    _set(StageState.peekBack);
+  }
+
+  /// 关闭浮窗：从探头回场，并通知电脑端归位。
+  void exitOverlayPeek() {
+    if (_state != StageState.peekBack) return;
+    _set(StageState.returnIdle);
+    _emit('return_idle');
+  }
+
   void returnIdle() {
     if (_state != StageState.peekBack && _state != StageState.jumpOutLocal) return;
     _set(StageState.returnIdle);
@@ -83,10 +104,16 @@ class StageMachine {
     _set(StageState.idle);
   }
 
-  /// 远端事件也走同一仲裁 + seq 幂等（U11/U59）。
-  void remoteAction(String action, int remoteSeq) {
-    if (_seenSeq.contains(remoteSeq)) return;
-    _seenSeq.addLast(remoteSeq);
+  /// 远端事件也走同一仲裁 + 幂等（U11/U59）。
+  void remoteAction(
+    String action,
+    int remoteSeq, {
+    int epoch = 0,
+    String fromId = '',
+  }) {
+    final String key = '$epoch|$fromId|$remoteSeq';
+    if (_seenSeq.contains(key)) return;
+    _seenSeq.addLast(key);
     if (_seenSeq.length > AppConfig.maxStageSeqHistory) _seenSeq.removeFirst();
     switch (action) {
       case 'jump_out':
@@ -97,6 +124,10 @@ class StageMachine {
         break;
       case 'return_idle':
         if (_state == StageState.jumpOutLocal) returnIdle();
+        break;
+      case 'peek_back':
+        // 电脑端主动探头：本地已被甩出屏幕时跟着侧头回来。
+        remotePeekBack();
         break;
       default:
         break;

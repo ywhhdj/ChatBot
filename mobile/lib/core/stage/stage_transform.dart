@@ -20,6 +20,28 @@ class StageTransform {
 
   static const StageTransform idle = StageTransform();
 
+  /// 完全不可见（出屏 / 缩到 0）：组件层据此整棵跳过绘制，
+  /// 避免模型被 Transform 到屏幕外仍然提交 GPU（离屏绘制）。
+  bool get culled => opacity <= 0.001 || scale <= 0.001;
+
+  /// 置顶浮窗：缩小并停在右侧「探头」位置，避免遮挡其它应用又不至于看不见模型。
+  /// 纯数据，StageView 与单元测试共用。
+  static StageTransform overlayPeek({
+    required double width,
+    required double scale,
+    required double peekFraction,
+    required double overshoot,
+    double turnDeg = 0,
+  }) =>
+      StageTransform(
+        dx: width * (1 - peekFraction) - overshoot,
+        scale: scale,
+        opacity: 1,
+        peekClip: true,
+        peekFraction: peekFraction,
+        turnDeg: turnDeg,
+      );
+
   static double lerpDouble(double a, double b, double t) => a + (b - a) * t;
 
   StageTransform lerp(StageTransform other, double t) => StageTransform(
