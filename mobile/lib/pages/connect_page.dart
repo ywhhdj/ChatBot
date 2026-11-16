@@ -82,7 +82,7 @@ class _ConnectPageState extends State<ConnectPage> {
   Widget build(BuildContext context) {
     final session = StageScope.of(context);
     return GalPage(
-      title: '── 连接电脑端 ──',
+      title: '连接电脑端',
       subtitle: '没有电脑端可直接返回，离线用系统识别继续演出',
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),

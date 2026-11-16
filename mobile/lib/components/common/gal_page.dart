@@ -43,23 +43,29 @@ class GalPage extends StatelessWidget {
                     const SizedBox(width: 4),
                     Expanded(
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
-                          Text(title,
-                              style: TextStyle(
-                                  color: GalPalette.of(context).accent,
-                                  fontSize: 16,
-                                  letterSpacing: 2)),
+                          Text(
+                            title,
+                            style: TextStyle(
+                              color: GalPalette.of(context).accent,
+                              fontSize: 16,
+                              letterSpacing: 2,
+                            ),
+                          ),
                           if (subtitle != null)
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
-                              child: Text(subtitle!,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      color: GalPalette.of(context).textFaint,
-                                      fontSize: 10)),
+                              child: Text(
+                                subtitle!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: GalPalette.of(context).textFaint,
+                                  fontSize: 10,
+                                ),
+                              ),
                             ),
                         ],
                       ),

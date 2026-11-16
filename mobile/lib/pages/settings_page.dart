@@ -56,7 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final session = StageScope.of(context);
     final GalPaletteData p = GalPalette.of(context);
     return GalPage(
-      title: '── 设 定 ──',
+      title: '设 定',
       subtitle: '左右滑动切换分区 · 所有更改即时生效并保存',
       body: Column(
         children: <Widget>[
