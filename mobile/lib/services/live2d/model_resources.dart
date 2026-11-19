@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
 import '../../core/config/model_config.dart';
 import '../../core/config/model_motion.dart';
 import '../../core/config/model_path.dart';
+import 'model_entry_adapter.dart';
 
 /// 扫描一个模型「内置的所有动画与表情」，供「设定 → 演出」选择预览。
 ///
@@ -30,15 +30,21 @@ class ModelResources {
   static const int maxExpressions = 64;
   static const int maxEntriesVisited = 4000;
   static const int _metaHeadBytes = 512;
+  /// 每个 bundle 最多 128 条元数据，切模型频繁时缓存也要有界（LRU 8 个）。
+  static const int maxCachedModels = 8;
 
   static final Map<String, ModelResourceBundle> _cache =
       <String, ModelResourceBundle>{};
+
+  static String _cacheKey(ModelConfig cfg) =>
+      '${cfg.id}#${ModelPath.canonicalPath(cfg.path)}';
 
   static void invalidate([String? modelId]) {
     if (modelId == null) {
       _cache.clear();
     } else {
-      _cache.remove(modelId);
+      _cache.removeWhere((String k, ModelResourceBundle _) =>
+          k == modelId || k.startsWith('$modelId#'));
     }
   }
 
@@ -54,8 +60,13 @@ class ModelResources {
     ModelConfig cfg, {
     AssetBundle? bundle,
   }) async {
-    final ModelResourceBundle? cached = _cache[cfg.id];
-    if (cached != null) return _done(cached);
+    final String cacheKey = _cacheKey(cfg);
+    final ModelResourceBundle? cached = _cache[cacheKey];
+    if (cached != null) {
+      _cache.remove(cacheKey);
+      _cache[cacheKey] = cached;
+      return _done(cached);
+    }
     if (cfg.path.isEmpty) {
       return _done(const ModelResourceBundle(
         <ModelMotion>[],
@@ -72,13 +83,22 @@ class ModelResources {
     final AssetBundle? assetBundle = asset ? (bundle ?? rootBundle) : null;
 
     // ---- 1. 入口 JSON 里声明的动作 / 表情（可点播） ----
+    // 纯 .moc3 / VTS 包没有入口，适配层生成的兼容入口才是真正的声明来源。
+    String entryPath = ModelPath.normalize(cfg.path);
+    if (!asset && !entryPath.toLowerCase().endsWith('.json')) {
+      try {
+        final AdaptedEntry adapted = await ModelEntryAdapter.resolve(cfg);
+        if (adapted.ok && adapted.generatedPath.isNotEmpty) {
+          entryPath = adapted.generatedPath;
+        }
+      } catch (_) {}
+    }
     String? entrySource;
     try {
       if (asset) {
-        entrySource =
-            await assetBundle!.loadString(ModelPath.normalize(cfg.path));
-      } else if (cfg.path.toLowerCase().endsWith('.json')) {
-        final File f = File(ModelPath.normalize(cfg.path));
+        entrySource = await assetBundle!.loadString(entryPath);
+      } else if (entryPath.toLowerCase().endsWith('.json')) {
+        final File f = File(entryPath);
         if (await f.exists()) entrySource = await f.readAsString();
       }
     } catch (_) {
@@ -242,7 +262,10 @@ class ModelResources {
       note: notes.join(' · '),
       entryFound: entryFound,
     );
-    _cache[cfg.id] = result;
+    _cache[cacheKey] = result;
+    while (_cache.length > maxCachedModels) {
+      _cache.remove(_cache.keys.first);
+    }
     return _done(result);
   }
 
@@ -332,8 +355,9 @@ class ModelResources {
         }
       }
       if (bytes.isEmpty) return (null, null);
+      final int n = bytes.length < _metaHeadBytes ? bytes.length : _metaHeadBytes;
       final String head = utf8.decode(
-        bytes.sublist(0, bytes.length < _metaHeadBytes ? bytes.length : _metaHeadBytes),
+        Uint8List.sublistView(bytes, 0, n),
         allowMalformed: true,
       );
       return (ModelPath.parseDuration(head), ModelPath.parseLoop(head));

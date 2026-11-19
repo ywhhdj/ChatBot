@@ -5,6 +5,7 @@ import '../../app/stage_session.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/model_config.dart';
 import '../../services/live2d/model_asset_installer.dart';
+import '../../services/live2d/model_entry_adapter.dart';
 import '../../services/storage/prefs.dart';
 import '../common/model_avatar.dart';
 import '../common/retry_hint.dart';
@@ -42,6 +43,22 @@ class _StorageSettingState extends State<StorageSetting> {
         _note = probe == null
             ? '已重新自检：当前是用户目录模型，由目录预检负责'
             : (probe.ok ? '内置模型资源自检通过' : '自检发现缺失资源，见上方清单');
+      });
+    }
+  }
+
+  /// 适配层为不标准模型包生成的 `__gal_compat_*.model3.json` 只留一份缓存，
+  /// 这里让用户能主动清掉（原始模型文件一个都不动）。
+  Future<void> _cleanCompat() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final int removed = await ModelEntryAdapter.disposeGenerated();
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _note = removed == 0
+            ? '没有需要清理的兼容入口'
+            : '已清理 $removed 个兼容入口 · 原始模型文件未改动';
       });
     }
   }
@@ -180,6 +197,11 @@ class _StorageSettingState extends State<StorageSetting> {
                   onPressed: _busy ? null : _clearHistory,
                   icon: const Icon(Icons.delete_outline, size: 14),
                   label: const Text('清空对话历史', style: TextStyle(fontSize: 11)),
+                ),
+                TextButton.icon(
+                  onPressed: _busy ? null : _cleanCompat,
+                  icon: const Icon(Icons.cleaning_services_outlined, size: 14),
+                  label: const Text('清理兼容入口', style: TextStyle(fontSize: 11)),
                 ),
                 TextButton.icon(
                   onPressed: _busy ? null : _restore,

@@ -260,7 +260,7 @@ class _StageViewState extends State<StageView>
                               },
                               child: AnimatedBuilder(
                                 animation: _stageAnimation,
-                                builder: (BuildContext context, Widget? __) {
+                                builder: (BuildContext context, _) {
                                   final StageTransform t = _withOverlay(
                                     _session.machine.transform(
                                       _pump.progress,
@@ -326,7 +326,7 @@ class _ModelRetry extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<int>(
       valueListenable: session.modelRevision,
-      builder: (BuildContext context, int _, Widget? __) {
+      builder: (BuildContext context, int _, _) {
         final GalPaletteData p = GalPalette.of(context);
         final bool ready = session.live2d.ready;
         final bool loading = session.live2d.loading;

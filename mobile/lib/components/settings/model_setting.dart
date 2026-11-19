@@ -5,6 +5,7 @@ import '../../app/stage_session.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/model_config.dart';
 import '../../services/live2d/model_catalog.dart';
+import '../../services/live2d/model_resources.dart';
 import '../../services/platform/directory_picker_channel.dart';
 import '../../services/storage/prefs.dart';
 import '../common/model_avatar.dart';
@@ -58,6 +59,8 @@ class _ModelSettingState extends State<ModelSetting> {
     final CatalogResult result = await ModelCatalog.scan(AppConfig.modelDir);
     // 扫描结果必须注入全局清单，横向预览卡才会出现新模型。
     ModelConfig.registerCatalog(result.models);
+    // 目录换了 / 过滤后清单变了，演出资源按旧 path 缓存的结果要失效。
+    ModelResources.invalidate();
     final List<ModelConfig> models = ModelConfig.all;
     if (!mounted) return;
     setState(() {
@@ -71,7 +74,7 @@ class _ModelSettingState extends State<ModelSetting> {
     if (!ModelConfig.isValidId(AppConfig.activeModelId) &&
         result.models.isNotEmpty) {
       AppConfig.activeModelId =
-          ModelCatalog.resolveSavedId(AppConfig.activeModelId);
+          ModelCatalog.restoreSaved(AppConfig.activeModelId);
       await Prefs.saveAll();
     }
   }
@@ -92,6 +95,8 @@ class _ModelSettingState extends State<ModelSetting> {
     await Prefs.saveAll();
     final CatalogResult result = await ModelCatalog.fromPicked(picked);
     ModelConfig.registerCatalog(result.models);
+    // 目录换了 / 过滤后清单变了，演出资源按旧 path 缓存的结果要失效。
+    ModelResources.invalidate();
     final List<ModelConfig> models = ModelConfig.all;
     if (!mounted) return;
     setState(() {
@@ -123,8 +128,9 @@ class _ModelSettingState extends State<ModelSetting> {
           children: <Widget>[
             Text(
               '点「选择目录」调用系统底层目录选择器，只关联路径/URI、不复制模型文件；'
-              '支持 *.model3.json / *.model.json / *.moc3。也可手填绝对路径后扫描。'
-              '切换模型立即在舞台实时预览。',
+              '支持 *.model3.json / *.model.json / *.moc3 / 任意模型入口 JSON。'
+              '非标准包会自动生成兼容入口，重复与 App 自带模型会被过滤。'
+              '也可手填绝对路径后扫描，切换模型立即在舞台实时预览。',
               style: TextStyle(
                 color: GalPalette.of(context).textDim,
                 fontSize: 11,
@@ -230,6 +236,20 @@ class _ModelSettingState extends State<ModelSetting> {
                   fontSize: 10,
                 ),
               ),
+              if (_result!.skippedNote.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _result!.skippedNote,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: GalPalette.of(context).busy,
+                      fontSize: 10,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
               if (AppConfig.modelDirUri.isNotEmpty)
                 Text(
                   '系统 URI：${AppConfig.modelDirUri}（仅关联，未复制文件）',
@@ -244,7 +264,7 @@ class _ModelSettingState extends State<ModelSetting> {
           ],
         ),
         SectionCard(
-          title: '选择模型（横向滑动 · 懒加载预览）',
+          title: '选择模型',
           children: <Widget>[
             SizedBox(
               height: 158,
@@ -307,7 +327,7 @@ class _ModelSettingState extends State<ModelSetting> {
           ],
         ),
         SectionCard(
-          title: '画面 / 性能档位',
+          title: '性能档位',
           children: <Widget>[
             Wrap(
               spacing: 8,
@@ -350,7 +370,7 @@ class _ModelSettingState extends State<ModelSetting> {
         // 只订阅 modelRevision：模型刷新不会重建整张设定页。
         ValueListenableBuilder<int>(
           valueListenable: session.modelRevision,
-          builder: (BuildContext context, int _, Widget? __) => SectionCard(
+          builder: (BuildContext context, _, _) => SectionCard(
             title: 'Live2D 状态',
             children: <Widget>[
               Row(

@@ -13,6 +13,8 @@ public class DirectoryPickerChannel: NSObject, FlutterPlugin, UIDocumentPickerDe
   private static let exts = [".model3.json", ".model.json", ".moc3"]
   private static let maxDepth = 2
   private static let maxModels = 64
+  private static let maxEntries = 2000
+  private static let generatedPrefix = "__gal_compat_"
 
   private var channel: FlutterMethodChannel?
   private var pending: FlutterResult?
@@ -80,13 +82,18 @@ public class DirectoryPickerChannel: NSObject, FlutterPlugin, UIDocumentPickerDe
     }
     let path = url.path
     var files: [String] = []
-    listModels(path, depth: 0, into: &files)
+    var visited = 0
+    listModels(path, depth: 0, visited: &visited, into: &files)
+    let privateContainer = path.contains("/var/mobile/Containers/Data/Application/")
+    let note = privateContainer
+      ? "这是 App 自己的容器目录，里面的模型已由内置清单 / 物化副本加载过；请改选文件 App 里的模型目录（iOS 重启后需重新授权一次）"
+      : "已关联系统目录（未复制文件）；iOS 重启后如需访问请重新选择一次目录"
     finish([
       "path": path,
       "uri": url.absoluteString,
       "display": url.lastPathComponent,
       "files": files,
-      "note": "已关联系统目录（未复制文件）；iOS 重启后如需访问请重新选择一次目录",
+      "note": note,
     ])
   }
 
@@ -102,22 +109,29 @@ public class DirectoryPickerChannel: NSObject, FlutterPlugin, UIDocumentPickerDe
 
   private func isModel(_ name: String) -> Bool {
     let lower = name.lowercased()
+    if lower.hasPrefix(Self.generatedPrefix) { return false }
     return Self.exts.contains { lower.hasSuffix($0) }
   }
 
-  private func listModels(_ root: String, depth: Int, into out: inout [String]) {
+  private func listModels(
+    _ root: String,
+    depth: Int,
+    visited: inout Int,
+    into out: inout [String]
+  ) {
     guard depth <= Self.maxDepth, out.count < Self.maxModels else { return }
     let fm = FileManager.default
     guard let items = try? fm.contentsOfDirectory(atPath: root) else { return }
     for name in items {
-      if out.count >= Self.maxModels { return }
+      if out.count >= Self.maxModels || visited >= Self.maxEntries { return }
+      visited += 1
       let path = (root as NSString).appendingPathComponent(name)
       if isModel(name) {
         out.append(path)
       } else {
         var isDir: ObjCBool = false
         if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
-          listModels(path, depth: depth + 1, into: &out)
+          listModels(path, depth: depth + 1, visited: &visited, into: &out)
         }
       }
     }

@@ -262,7 +262,7 @@ class _ConnectionSettingState extends State<ConnectionSetting> {
     return SwitchListTile(
       contentPadding: EdgeInsets.zero,
       dense: true,
-      activeColor: GalPalette.of(context).accent,
+      activeThumbColor: GalPalette.of(context).accent,
       title: Text(
         label,
         style: TextStyle(color: GalPalette.of(context).textDim, fontSize: 11),

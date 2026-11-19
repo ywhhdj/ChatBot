@@ -10,7 +10,7 @@ import '../common/model_avatar.dart';
 import '../common/retry_hint.dart';
 import '../common/section_card.dart';
 
-/// 演出分区：列出当前模型**内置的所有动画与表情**，让用户自由选择预览。
+/// 演出分区：列出当前模型内置的所有动画与表情，让用户自由选择预览。
 ///
 /// * 懒加载：只有第一次滑到这一页才扫描（外层 _LazySection 已保证）；
 /// * 动画只读文件头部 512B 取时长，不载入几千行 Curves；
@@ -246,11 +246,6 @@ class _MotionSettingState extends State<MotionSetting> {
           SectionCard(
             title: '内置表情（${bundle.expressions.length}）',
             children: <Widget>[
-              _info(
-                context,
-                '表情资源已全部列出。插件当前只暴露了动作播放接口，'
-                '表情需在模型内部按参数切换，这里不假装能点播。',
-              ),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,

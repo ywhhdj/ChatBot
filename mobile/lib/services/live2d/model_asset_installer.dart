@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -75,6 +74,9 @@ class ModelAssetInstaller {
 
   static final Map<String, ModelInstallResult> _cache =
       <String, ModelInstallResult>{};
+  /// 适配层产出的规范化入口文本（零 IO 登记），只在物化回退时写盘。
+  static final Map<String, String> _compatSources = <String, String>{};
+  static final Map<String, String> _compatNames = <String, String>{};
 
   /// 最近一次自检结果：设置页「存储与维护」用它展示缺失清单与提醒。
   static ModelInstallResult? lastResult;
@@ -82,10 +84,25 @@ class ModelAssetInstaller {
   static void invalidate([String? assetPath]) {
     if (assetPath == null) {
       _cache.clear();
+      _compatSources.clear();
+      _compatNames.clear();
       lastResult = null;
     } else {
       _cache.remove(assetPath);
+      _compatSources.remove(assetPath);
+      _compatNames.remove(assetPath);
     }
+  }
+
+  /// 登记适配层生成的标准入口 JSON；不写任何文件、不复制纹理。
+  static void registerCompatEntry(
+    String cfgPath,
+    String source,
+    String entryName,
+  ) {
+    if (source.isEmpty) return;
+    _compatSources[cfgPath] = source;
+    _compatNames[cfgPath] = entryName;
   }
 
   /// 纯函数：抽出入口 JSON 引用的资源文件。
@@ -198,13 +215,36 @@ class ModelAssetInstaller {
       );
       final dynamic decoded = json.decode(raw);
       if (decoded is Map) {
-        final String entry =
-            ModelPath.normalize((decoded['entry'] ?? '').toString())
+        final List<String> candidates = <String>[];
+        void collect(dynamic v) {
+          if (v is String) {
+            final String s = ModelPath.normalize(v)
                 .replaceFirst(RegExp(r'^\./'), '');
-        if (entry.isNotEmpty && entry.toLowerCase().endsWith('.json')) {
+            if (s.toLowerCase().endsWith('.model3.json') ||
+                s.toLowerCase().endsWith('.model.json')) {
+              candidates.add(s);
+            }
+          } else if (v is List) {
+            for (final dynamic e in v) {
+              collect(e);
+            }
+          }
+        }
+
+        collect(decoded['entry']);
+        collect(decoded['entries']);
+        collect(decoded['files']);
+        for (final String entry in candidates) {
           final String candidate = dir.isEmpty ? entry : '$dir/$entry';
-          await b.loadString(candidate);
-          return (candidate, ModelPath.fileName(candidate), true);
+          try {
+            final String source = await b.loadString(candidate);
+            // 防止清单里某个 .json 只是动作 / 配置，被误当成入口。
+            if (source.contains('FileReferences') ||
+                source.contains('"Moc"') ||
+                source.contains('"textures"')) {
+              return (candidate, ModelPath.fileName(candidate), true);
+            }
+          } catch (_) {}
         }
       }
     } catch (_) {
@@ -229,8 +269,17 @@ class ModelAssetInstaller {
         if (list is List) {
           for (final dynamic e in list) {
             if (e is String) {
-              out.add(ModelPath.normalize(e)
-                  .replaceFirst(RegExp(r'^\./'), ''));
+              final String rel = ModelPath.normalize(e)
+                  .replaceFirst(RegExp(r'^\./'), '');
+              final String lower = rel.toLowerCase();
+              // 清单里的 "entry" 只是入口名（可能由适配层虚拟生成），
+              // 不是被引用的资源：把它算进来会永远报「缺入口文件」。
+              if (lower.endsWith('.model3.json') ||
+                  lower.endsWith('.model.json') ||
+                  lower == _markerName) {
+                continue;
+              }
+              out.add(rel);
             }
           }
         }
@@ -336,6 +385,16 @@ class ModelAssetInstaller {
           '子目录必须在 pubspec.yaml 里各写一行，否则文件不会进包');
     }
     warnings.addAll(textureWarnings(sizes));
+    // 入口 / 清单里一张纹理都没有时，模型多半是透明的；明确提醒，
+    // 别让用户对着「已就绪但看不到人」猜。
+    if (sizes.isEmpty &&
+        !allRefs.any((String r) => r.toLowerCase().endsWith('.png') ||
+            r.toLowerCase().endsWith('.jpg') ||
+            r.toLowerCase().endsWith('.jpeg') ||
+            r.toLowerCase().endsWith('.webp'))) {
+      warnings.add('没有检测到任何纹理引用：请确认 .model3.json 的 '
+          'FileReferences.Textures 与纹理文件齐全，否则模型会透明 / 黑屏');
+    }
 
     if (missing.isNotEmpty) {
       // 去重 + 把最可能的原因放前面
@@ -369,6 +428,8 @@ class ModelAssetInstaller {
   static Future<ModelInstallResult> materialize(
     ModelConfig cfg, {
     AssetBundle? bundle,
+    String? entrySource,
+    String? entryNameOverride,
   }) async {
     final String cfgPath = ModelPath.normalize(cfg.path);
     if (!cfgPath.startsWith('assets/')) {
@@ -385,23 +446,33 @@ class ModelAssetInstaller {
 
     final AssetBundle b = bundle ?? rootBundle;
     final String assetDir = ModelPath.dirName(cfgPath);
-    final (String entryPath, String entryName, _) =
+    final (String entryPath, String discoveredName, _) =
         await _resolveEntry(b, cfgPath);
-    if (entryPath.isEmpty) {
+    // 入口不在包里时，允许用适配层从 resources.json 生成的规范化入口。
+    final String? pending = entrySource ?? _compatSources[cfg.path];
+    final String source;
+    if (pending != null && pending.isNotEmpty) {
+      source = pending;
+    } else if (entryPath.isNotEmpty) {
+      try {
+        source = await b.loadString(entryPath);
+      } catch (_) {
+        return _fail('内置模型入口读不出来：$entryPath');
+      }
+    } else {
       return _fail('内置模型入口不存在：$cfgPath（物化回退也无法定位入口）');
     }
-
-    String source;
-    try {
-      source = await b.loadString(entryPath);
-    } catch (_) {
-      return _fail('内置模型入口读不出来：$entryPath');
-    }
+    final String entryName = (entryNameOverride ??
+            _compatNames[cfg.path] ??
+            (discoveredName.isNotEmpty
+                ? discoveredName
+                : ModelPath.fileName(cfgPath)))
+        .replaceFirst(RegExp(r'^.*/'), '');
     final List<String> refs = referencesFrom(source);
     final List<String> manifestFiles = await _manifestFiles(b, assetDir);
     final Set<String> allRefs = <String>{...refs, ...manifestFiles};
     if (allRefs.isEmpty) {
-      return _fail('内置模型入口缺少 FileReferences 资源清单：$entryPath');
+      return _fail('内置模型入口缺少 FileReferences 资源清单：$cfgPath');
     }
 
     final Directory base = await getApplicationDocumentsDirectory();
@@ -451,7 +522,14 @@ class ModelAssetInstaller {
     }
 
     await Directory(targetDir).create(recursive: true);
-    await _writeAsset(b, entryPath, entryTarget);
+    if (pending != null || entryPath.isEmpty) {
+      // 入口是适配层生成的：直接写规范化 JSON，不动 bundle。
+      final File f = File(entryTarget);
+      await f.create(recursive: true);
+      await f.writeAsString(source, flush: false);
+    } else {
+      await _writeAsset(b, entryPath, entryTarget);
+    }
     for (final MapEntry<String, String> e in toCopy.entries) {
       await _writeAsset(b, e.key, '$targetDir/${e.value}');
     }

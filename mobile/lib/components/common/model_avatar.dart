@@ -31,27 +31,40 @@ class ModelAvatar extends StatelessWidget {
   static const int _cacheWidth = 256;
   static const int _maxCached = 32;
   static final Map<String, Image> _images = <String, Image>{};
+  static final List<String> _order = <String>[];
 
-  static Image _image(String path) {
+  static Image _image(String path, double? size) {
     final Image? cached = _images[path];
-    if (cached != null) return cached;
-    if (_images.length >= _maxCached) _images.clear();
+    if (cached != null) {
+      _order.remove(path);
+      _order.add(path);
+      return cached;
+    }
+    // 预览卡只有 112px 宽，没必要按 256 解码；头像越大才放宽上限。
+    final int width = size == null
+        ? _cacheWidth
+        : (size * 2).clamp(96, 512).toInt();
     final Image image = ModelPath.isAssetPath(path)
         ? Image.asset(
             path,
             fit: BoxFit.cover,
-            cacheWidth: _cacheWidth,
+            cacheWidth: width,
             gaplessPlayback: true,
             errorBuilder: (_, _, _) => const SizedBox.shrink(),
           )
         : Image.file(
             File(path),
             fit: BoxFit.cover,
-            cacheWidth: _cacheWidth,
+            cacheWidth: width,
             gaplessPlayback: true,
             errorBuilder: (_, _, _) => const SizedBox.shrink(),
           );
     _images[path] = image;
+    _order.add(path);
+    // LRU：旧实现一满就 clear，横向滑预览卡会反复重建配置对象。
+    while (_order.length > _maxCached) {
+      _images.remove(_order.removeAt(0));
+    }
     return image;
   }
 
@@ -82,7 +95,7 @@ class ModelAvatar extends StatelessWidget {
                 ),
               ),
             ),
-            if (path.isNotEmpty) _image(path),
+            if (path.isNotEmpty && !path.contains('://')) _image(path, size),
           ],
         ),
       ),

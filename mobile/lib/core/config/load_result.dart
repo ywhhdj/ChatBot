@@ -45,6 +45,27 @@ class LoadResultInterpreter {
     return const LoadVerdict(false, '插件未返回加载结果，无法确认模型已渲染');
   }
 
+  /// 是否需要再等一拍再判定。
+  ///
+  /// 插件在部分版本里先返回 `void` / 先返回 `true`，`controller.value.isLoaded`
+  /// 是**异步**才写上的；旧实现只读一次状态，于是原生侧其实已经画出来了，
+  /// Dart 侧却判成失败、撤掉/保留占位 —— 这也是「模型不显示」的一类根因。
+  /// 明确失败（false / lastError）和明确成功（true + isLoaded）都不用等。
+  static bool needsPoll({
+    required dynamic futureValue,
+    required bool? stateIsLoaded,
+    required String stateError,
+  }) {
+    if (stateError.isNotEmpty) return false;
+    if (futureValue is bool && !futureValue) return false;
+    if (futureValue is bool && futureValue && stateIsLoaded == true) {
+      return false;
+    }
+    if (stateIsLoaded == false) return true;
+    if (futureValue is! bool && stateIsLoaded != true) return true;
+    return false;
+  }
+
   /// 把错误整理成占位层能显示的一行原因。
   static String failureText(String error, {bool threw = false}) {
     final String base = error.isEmpty ? '原生侧未确认加载结果' : error;

@@ -6,20 +6,23 @@ import '../../core/config/load_result.dart';
 import '../../core/config/model_config.dart';
 import '../../core/config/model_path.dart';
 import 'model_asset_installer.dart';
+import 'model_entry_adapter.dart';
 
 /// 插件门面：只使用已验证存在的 setModel / startMotion / dispose / Live2DView。
 /// 缺模型、缺 motion 组、插件异常一律降级，由组件层画占位与提示。
 ///
-/// 「检测通过、显示已就绪、占位消失、却看不到模型」的根因与修复：
+/// 本轮修复的「模型无法加载显示」链路：
+/// * 入口先经过 [ModelEntryAdapter]：VTube Studio 导出包 / 旧版 model.json /
+///   纯 .moc3 / 带注释与 BOM 的 JSON 都转成插件能解析的标准 .model3.json；
 /// * `loadModel` 返回 `Future<bool>`，**失败时返回 false 而不抛异常**，错误写在
-///   `controller.value.lastError`（LOAD_FAILED）。旧实现只 await 了 Future 就
-///   置 `_ready = true`，等于把「调用发出去了」当成「模型画出来了」；
-/// * 现在读取返回值 + 响应式状态交叉验证，只有原生侧真的确认加载才置 ready；
-/// * 文件存在性自检（入口 JSON / FileReferences）只能证明文件在，不能证明
-///   `.moc3` 能被 Cubism Core 解析，这两件事在 UI 上明确区分；
-/// * assets 内置模型先试物化后的绝对路径，被原生侧拒绝时自动用 pubspec 声明的
-///   assets 目录再试一次（插件自己会把 assets 解压到 cache）；
-/// * `whenAttached` 超时不再静默当成成功，会走失败分支给出原因。
+///   `controller.value.lastError`；成功也可能是异步写 `isLoaded`。
+///   现在读返回值 + 有界轮询响应式状态交叉验证，绝不把「调用发出去了」
+///   或「状态还没刷新」当成加载结果；
+/// * 失败回退旧 controller 时递增 [controllerRevision]，强制 Live2DView
+///   换 Element —— 旧实现控制器换了、视图没换，会一直挂着已 dispose 的
+///   controller，表现为黑屏 / 占位不消失；
+/// * assets 内置模型先试插件原生 assets 通道；入口缺失时由适配层从
+///   resources.json 生成规范化入口，走物化路径再试一次。
 class Live2DStage {
   Live2DStage({this.onChanged});
 
@@ -34,7 +37,7 @@ class Live2DStage {
   String? _reason;
   int _generation = 0;
   int _controllerRevision = 0;
-  /// 非致命提醒：入口自动发现、纹理过大等，加载成功后仍要展示。
+  /// 非致命提醒：入口自动发现、纹理过大、兼容入口等，加载成功后仍要展示。
   List<String> _warnings = const <String>[];
 
   void _emitChanged() {
@@ -45,6 +48,9 @@ class Live2DStage {
 
   static const Duration attachTimeout = Duration(milliseconds: 2500);
   static const Duration loadTimeout = Duration(seconds: 8);
+  /// 插件异步写 isLoaded：最多轮询 12 × 120ms，不做无限等待。
+  static const int maxStatePolls = 12;
+  static const Duration statePollInterval = Duration(milliseconds: 120);
 
   bool get ready => _ready;
   bool get loading => _loading;
@@ -94,13 +100,11 @@ class Live2DStage {
       return;
     }
 
-    // assets 内置：主通道用**插件原生的 assets 支持**（插件自己会把声明过的
-    // assets 目录解压到 temp），不再每次启动把 5 张 4096 纹理复制一遍。
-    // 这里只做存在性预检，顺便拿到真实入口名 / 纹理尺寸提醒。
     String normalized = ModelPath.normalize(cfg.path);
     String primaryDir = ModelPath.dirName(normalized);
     String primaryEntry = ModelPath.fileName(normalized);
     _warnings = const <String>[];
+    bool usedMaterialized = false;
 
     if (cfg.isAsset) {
       final ModelInstallResult checked =
@@ -109,17 +113,72 @@ class Live2DStage {
       // （新的 setModel 仍在跑，不能把它的「加载中」清掉）。
       if (gen != _generation) return;
       if (!checked.ok) {
-        _restore(old, oldConfig, checked.error);
+        // 入口 JSON 不在包里（或不是标准结构）：适配层用 resources.json
+        // 清单生成一份规范化入口，物化到磁盘后再交给插件解析。
+        final AdaptedEntry compat =
+            await ModelEntryAdapter.resolve(cfg);
+        if (gen != _generation) return;
+        if (compat.ok && compat.source.isNotEmpty) {
+          final ModelInstallResult materialized =
+              await ModelAssetInstaller.materialize(
+            cfg,
+            entrySource: compat.source,
+            entryNameOverride: compat.fileName,
+          );
+          if (gen != _generation) return;
+          if (materialized.ok) {
+            primaryDir = ModelPath.dirName(materialized.path);
+            primaryEntry = materialized.entryName.isNotEmpty
+                ? materialized.entryName
+                : compat.fileName;
+            usedMaterialized = true;
+            _warnings = <String>[...compat.warnings, ...materialized.warnings];
+          } else {
+            _restore(old, oldConfig, materialized.error);
+            return;
+          }
+        } else {
+          _restore(old, oldConfig, checked.error);
+          return;
+        }
+      } else {
+        primaryDir = checked.assetDir;
+        // 关键：用真实入口名（大肥鱼.model3.json），不能用配置里写死的那个。
+        primaryEntry = checked.entryName.isNotEmpty
+            ? checked.entryName
+            : primaryEntry;
+        _warnings = checked.warnings;
+        // 入口虽然存在但结构不标准：只登记规范化文本（零 IO），
+        // 等原生通道真的失败、走物化回退时才写盘，不提前复制 4096 纹理。
+        final AdaptedEntry compat =
+            await ModelEntryAdapter.resolve(cfg);
+        if (gen != _generation) return;
+        if (compat.ok && compat.source.isNotEmpty) {
+          ModelAssetInstaller.registerCompatEntry(
+            cfg.path,
+            compat.source,
+            compat.fileName,
+          );
+          _warnings = <String>[..._warnings, ...compat.warnings];
+        }
+      }
+    } else {
+      // 拓宽解析：把不标准 / 残缺 / 纯 .moc3 的入口适配成标准 model3.json。
+      final AdaptedEntry adapted = await ModelEntryAdapter.resolve(cfg);
+      if (gen != _generation) return;
+      if (!adapted.ok) {
+        _restore(old, oldConfig, adapted.error);
         return;
       }
-      primaryDir = checked.assetDir;
-      // 关键：用真实入口名（大肥鱼.model3.json），不能用配置里写死的那个。
-      primaryEntry = checked.entryName.isNotEmpty
-          ? checked.entryName
-          : primaryEntry;
-      _warnings = checked.warnings;
-    } else {
-      final String? local = ModelPath.checkLocal(normalized);
+      normalized = adapted.generatedPath.isNotEmpty
+          ? adapted.generatedPath
+          : normalized;
+      primaryDir = adapted.dir;
+      primaryEntry = adapted.fileName;
+      _warnings = adapted.warnings;
+      // 异步预检：不在 UI isolate 上做几百次同步 stat。
+      final String? local = await ModelPath.checkLocalAsync(normalized);
+      if (gen != _generation) return;
       if (local != null) {
         _restore(old, oldConfig, local);
         return;
@@ -147,6 +206,7 @@ class Live2DStage {
       primaryDir,
       primaryEntry,
       attached: attached,
+      cancelled: () => gen != _generation,
     );
     if (gen != _generation) {
       try {
@@ -156,8 +216,7 @@ class Live2DStage {
     }
 
     // 原生 assets 通道被拒绝：才回退到「物化成绝对路径」再试一次。
-    // 到这一步说明文件都在包里，物化不会再因为缺文件失败。
-    if (!attempt.verdict.ok && cfg.isAsset) {
+    if (!attempt.verdict.ok && cfg.isAsset && !usedMaterialized) {
       final ModelInstallResult materialized =
           await ModelAssetInstaller.materialize(cfg);
       if (gen != _generation) {
@@ -190,6 +249,7 @@ class Live2DStage {
               ? materialized.entryName
               : primaryEntry,
           attached: retryAttached,
+          cancelled: () => gen != _generation,
         );
         if (gen != _generation) {
           try {
@@ -212,6 +272,7 @@ class Live2DStage {
           _explainError(attempt.verdict.error),
           threw: attempt.threw,
         ),
+        viewSwapped: true,
       );
       return;
     }
@@ -239,7 +300,8 @@ class Live2DStage {
     if (r.contains('LOAD_FAILED')) {
       return '$r · 原生 Cubism 侧拒绝了模型：路径不对 / 缺文件（尤其纹理子目录）/ '
           '.moc3 版本超出插件内置 Core 支持范围（3.0–5.3）。'
-          '用 adb logcat 抓原生日志能看到具体原因';
+          '本 App 已自动把非标准入口转成兼容 .model3.json；若仍失败，'
+          '多为 .moc3 本体缺失或纹理超出 GL_MAX_TEXTURE_SIZE，用 adb logcat 看原生日志';
     }
     if (r.contains('VIEW_NOT_ATTACHED')) {
       return '$r · GL surface 还没挂载就下发了 loadModel，点右上角刷新重试';
@@ -247,6 +309,9 @@ class Live2DStage {
     if (r.contains('NATIVE_ERROR')) {
       return '$r · 原生异常，常见于 4096 纹理超出 GL_MAX_TEXTURE_SIZE 或 OOM，'
           '建议改用 2048 纹理重新导出';
+    }
+    if (r.contains('缺少') || r.contains('只读') || r.contains('.moc3')) {
+      return '$r · 解析适配层已给出具体缺失项，补齐后点「重新自检模型资源」';
     }
     return r;
   }
@@ -271,11 +336,13 @@ class Live2DStage {
   }
 
   /// 真正下发 loadModel，并按「返回值 + controller 响应式状态」判定成败。
+  /// 状态是异步写入的，先有界轮询再下结论。
   Future<_LoadAttempt> _attempt(
     Live2DViewController c,
     String dir,
     String file, {
     required bool attached,
+    bool Function()? cancelled,
   }) async {
     try {
       // 借 dynamic receiver 调用：不同插件版本返回 Future<bool> / Future / void，
@@ -287,15 +354,37 @@ class Live2DStage {
       );
       final dynamic awaited =
           await Future<dynamic>.value(result).timeout(loadTimeout);
-      final bool? stateLoaded = _stateIsLoaded(c);
-      final String stateError = _stateError(c);
-      LoadVerdict verdict = LoadResultInterpreter.interpret(
-        futureValue: awaited,
-        stateIsLoaded: stateLoaded,
-        stateError: stateError,
-      );
-      // 没等到 attach：即使插件返回了 true，也不能确认模型画在 surface 上。
-      if (!attached && verdict.ok) {
+      LoadVerdict verdict = const LoadVerdict(false, '未确认');
+      for (int i = 0; i <= maxStatePolls; i++) {
+        if (cancelled?.call() == true) {
+          return _LoadAttempt(
+            const LoadVerdict(false, '换模请求打断'),
+            threw: true,
+          );
+        }
+        final bool? loaded = _stateIsLoaded(c);
+        final String err = _stateError(c);
+        verdict = LoadResultInterpreter.interpret(
+          futureValue: awaited,
+          stateIsLoaded: loaded,
+          stateError: err,
+        );
+        if (!LoadResultInterpreter.needsPoll(
+          futureValue: awaited,
+          stateIsLoaded: loaded,
+          stateError: err,
+        )) {
+          break;
+        }
+        if (i < maxStatePolls) {
+          await Future<void>.delayed(statePollInterval);
+        }
+      }
+      // 没等到 attach：只有「原生没明确确认渲染」时才否决。
+      // 插件返回 true 且 isLoaded=true 时，超时不该把已画出来的模型判成失败。
+      if (!attached &&
+          verdict.ok &&
+          !(awaited == true && _stateIsLoaded(c) == true)) {
         verdict = const LoadVerdict(false, '视图未挂载（whenAttached 超时）');
       }
       return _LoadAttempt(verdict);
@@ -352,17 +441,20 @@ class Live2DStage {
   }
 
   /// 保留上一次可用 controller 与它的 config，避免同 id 重试被早退吞掉。
-  /// 旧 controller 只有在它自己确实加载过时才算可用，不再无条件认为「就绪」。
+  /// [viewSwapped] = 本代次已经创建并挂过新 controller：回退时必须换 Element，
+  /// 否则 Live2DView 仍持有被 dispose 的 controller，表现为黑屏/占位不消失。
   void _restore(
     Live2DViewController? old,
     ModelConfig? oldConfig,
-    String reason,
-  ) {
+    String reason, {
+    bool viewSwapped = false,
+  }) {
     _controller = old;
     _current = oldConfig;
     _ready = old != null && _stateIsLoaded(old) == true;
     _loading = false;
     _reason = reason;
+    if (viewSwapped) _controllerRevision++;
     _emitChanged();
   }
 

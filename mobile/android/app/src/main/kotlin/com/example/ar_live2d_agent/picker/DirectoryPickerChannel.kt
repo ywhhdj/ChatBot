@@ -24,7 +24,12 @@ class DirectoryPickerChannel private constructor(
         private const val REQ = 0x4C44
         private const val MAX_MODELS = 64
         private const val MAX_DEPTH = 2
+        private const val MAX_ENTRIES = 2000
+        private const val GENERATED_PREFIX = "__gal_compat_"
         private val MODEL_EXT = listOf(".model3.json", ".model.json", ".moc3")
+        private val PRIVATE_MARKERS = listOf(
+            "/data/user/0/", "/data/data/", "/data/app/", "/Android/data/"
+        )
 
         @Volatile
         private var instance: DirectoryPickerChannel? = null
@@ -125,18 +130,22 @@ class DirectoryPickerChannel private constructor(
             "/storage/$volume"
         }
         val candidate = if (rel.isEmpty()) base else "$base/$rel"
+        // App 自己的包目录 / 物化副本：不让用户「扫到已加载过的模型」。
+        if (PRIVATE_MARKERS.any { candidate.contains(it, ignoreCase = true) }) return ""
         return if (java.io.File(candidate).isDirectory) candidate else ""
     }
 
     private fun isModel(name: String): Boolean {
         val lower = name.lowercase()
+        if (lower.startsWith(GENERATED_PREFIX)) return false
         return MODEL_EXT.any { lower.endsWith(it) }
     }
 
     private fun listModels(treeUri: Uri, rootDocId: String, rootPath: String): List<String> {
         val out = mutableListOf<String>()
+        val visited = IntArray(1)
         try {
-            walk(treeUri, rootDocId, 0, rootPath, out)
+            walk(treeUri, rootDocId, 0, rootPath, out, visited)
         } catch (_: Exception) {
         }
         return out
@@ -148,6 +157,7 @@ class DirectoryPickerChannel private constructor(
         depth: Int,
         currentPath: String,
         out: MutableList<String>,
+        visited: IntArray,
     ) {
         if (depth > MAX_DEPTH || out.size >= MAX_MODELS) return
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
@@ -166,14 +176,14 @@ class DirectoryPickerChannel private constructor(
             val nameIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
             val mimeIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
             while (c.moveToNext() && out.size < MAX_MODELS) {
+                if (visited[0]++ >= MAX_ENTRIES) break
                 val id = if (idIdx >= 0) c.getString(idIdx) ?: continue else continue
                 val name = if (nameIdx >= 0) c.getString(nameIdx) ?: continue else continue
                 val mime = if (mimeIdx >= 0) c.getString(mimeIdx) ?: "" else ""
                 if (isModel(name)) {
-                    out.add(
-                        if (currentPath.isNotEmpty()) "$currentPath/$name"
-                        else "$treeUri/$name"
-                    )
+                    // 解析不出真实路径时不返回 content:// 伪路径：
+                    // 那条路径 Dart 侧不能直接读，列出来只会变成加载失败的卡片。
+                    if (currentPath.isNotEmpty()) out.add("$currentPath/$name")
                 } else if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                     walk(
                         treeUri,
@@ -181,6 +191,7 @@ class DirectoryPickerChannel private constructor(
                         depth + 1,
                         if (currentPath.isNotEmpty()) "$currentPath/$name" else "",
                         out,
+                        visited,
                     )
                 }
             }

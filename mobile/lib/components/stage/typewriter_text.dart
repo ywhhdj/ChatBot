@@ -97,13 +97,13 @@ class TypewriterTextState extends State<TypewriterText> {
   }
 
   @override
-  void didUpdateWidget(TypewriterText old) {
-    super.didUpdateWidget(old);
-    if (old.text == widget.text) {
+  void didUpdateWidget(TypewriterText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text == widget.text) {
       _syncFlag();
       return;
     }
-    if (_skipped && widget.text.startsWith(old.text)) {
+    if (_skipped && widget.text.startsWith(oldWidget.text)) {
       _visible = widget.text.length;
       if (mounted) setState(() {});
       return;

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// 三套 galgame 色系：黑夜 / 米白 / 蓝色（默认蓝）

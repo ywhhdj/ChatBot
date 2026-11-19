@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/config/app_config.dart';
 import '../core/config/model_config.dart';
 import '../core/config/model_motion.dart';
+import '../core/config/model_path.dart';
 import '../core/net/device_identity.dart';
 import '../core/net/ws_service.dart';
 import '../core/net/ws_url.dart';
@@ -17,6 +18,7 @@ import '../debug/debug_flags.dart';
 import '../services/live2d/live2d_stage.dart';
 import '../services/live2d/model_asset_installer.dart';
 import '../services/live2d/model_catalog.dart';
+import '../services/live2d/model_entry_adapter.dart';
 import '../services/live2d/model_resources.dart';
 import '../services/platform/overlay_channel.dart';
 import '../services/platform/permissions.dart';
@@ -150,9 +152,9 @@ class StageSession extends ChangeNotifier {
       hint.value = '上次关联的是系统目录 URI，请到「设定 → 模型」重新选择一次目录';
     }
 
-    // 旧版本用 path.hashCode 当 id，重启后不保证一致：迁移到第一个可用
-    // 目录模型并写回，避免「上次选过模型，重启就不显示」。
-    final String resolved = ModelCatalog.resolveSavedId(AppConfig.activeModelId);
+    // 旧版本用 path.hashCode 当 id，重启后不保证一致；现在 id 里就编码了
+    // 路径，优先按路径把上次那个模型恢复回来，而不是随便换一个或回退占位。
+    final String resolved = ModelCatalog.restoreSaved(AppConfig.activeModelId);
     if (resolved != AppConfig.activeModelId) {
       AppConfig.activeModelId = resolved;
       await Prefs.saveAll();
@@ -436,6 +438,7 @@ class StageSession extends ChangeNotifier {
       if (rescanAssets) {
         ModelAssetInstaller.invalidate();
         ModelResources.invalidate();
+        ModelEntryAdapter.invalidate();
       }
       await live2d.setModel(AppConfig.activeModel, force: true);
       hint.value = live2d.ready
@@ -465,6 +468,16 @@ class StageSession extends ChangeNotifier {
         if (path.isEmpty) {
           hint.value = '远端指定的模型不在本机清单里且没带路径 · '
               '请重试或到「设定 → 模型」选择';
+          return;
+        }
+        // 远端以前可以塞 URI / 私有目录 / 非模型文件，注册后必然加载失败
+        // 还会污染 activeModelId；先挡一道再注册。
+        final String? bad = ModelPath.validate(path);
+        if (bad != null ||
+            ModelPath.isAppOwnedPath(path) ||
+            !ModelPath.isModelFileName(path)) {
+          hint.value = '远端指定的模型路径不可加载：'
+              '${bad ?? '不是模型入口 / 落在应用私有目录'} · 请重试';
           return;
         }
         ModelConfig.registerExternal(id, path);
@@ -704,6 +717,7 @@ class StageSession extends ChangeNotifier {
 
   void Function(String direction, String type, int bytes)? onFrameTap;
 
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;

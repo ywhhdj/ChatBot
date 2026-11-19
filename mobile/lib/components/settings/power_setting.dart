@@ -112,7 +112,7 @@ class _PowerSettingState extends State<PowerSetting> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              activeColor: GalPalette.of(context).accent,
+              activeThumbColor: GalPalette.of(context).accent,
               title: Text(
                 '状态栏显示实时帧率',
                 style: TextStyle(
@@ -134,7 +134,7 @@ class _PowerSettingState extends State<PowerSetting> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              activeColor: GalPalette.of(context).accent,
+              activeThumbColor: GalPalette.of(context).accent,
               title: Text(
                 '切到后台时几乎无帧',
                 style: TextStyle(
@@ -184,7 +184,7 @@ class _PowerSettingState extends State<PowerSetting> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              activeColor: GalPalette.of(context).accent,
+              activeThumbColor: GalPalette.of(context).accent,
               title: Text(
                 '减少动画（除 Live2D 与逐字机外）',
                 style: TextStyle(
@@ -201,7 +201,7 @@ class _PowerSettingState extends State<PowerSetting> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              activeColor: GalPalette.of(context).accent,
+              activeThumbColor: GalPalette.of(context).accent,
               title: Text(
                 '关闭逐字机（默认关 = 保留逐字演出）',
                 style: TextStyle(
@@ -239,7 +239,7 @@ class _PowerSettingState extends State<PowerSetting> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              activeColor: GalPalette.of(context).accent,
+              activeThumbColor: GalPalette.of(context).accent,
               title: Text(
                 '启用置顶浮窗',
                 style: TextStyle(
@@ -266,7 +266,7 @@ class _PowerSettingState extends State<PowerSetting> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              activeColor: GalPalette.of(context).accent,
+              activeThumbColor: GalPalette.of(context).accent,
               title: Text(
                 '置定时缩小在右侧 · 默认右侧探头',
                 style: TextStyle(
