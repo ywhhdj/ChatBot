@@ -11,7 +11,7 @@ enum AsrEngine { server, system }
 
 /// 语音编排：
 /// * 点一下开始 / 再点一下停止，与长按「按住说话」并存（按钮层用 recording 作唯一真值）；
-/// * server：16k/mono PCM 分块 + 静音跳过 + is_final 收尾（S5.2 / U28 / U30）；
+/// * server：16k/mono PCM 分块 + 静音跳过 + is_final 收尾
 /// * system：无电脑端或离线时自动回退系统内置识别，文本直接进本地台词与历史。
 class VoiceService {
   VoiceService({
@@ -118,7 +118,7 @@ class VoiceService {
     try {
       await AudioPlatformChannel.stop();
     } catch (_) {}
-    onChunk('', true); // U28：空块 + is_final 由后端 flush 收尾
+    onChunk('', true); // 空块 + is_final 由后端 flush 收尾
   }
 
   Future<void> dispose() async {

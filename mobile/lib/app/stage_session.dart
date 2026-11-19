@@ -438,7 +438,11 @@ class StageSession extends ChangeNotifier {
         ModelResources.invalidate();
       }
       await live2d.setModel(AppConfig.activeModel, force: true);
-      hint.value = live2d.ready ? live2d.statusText : live2d.detailText;
+      hint.value = live2d.ready
+          ? (live2d.warningText.isEmpty
+              ? live2d.statusText
+              : '${live2d.statusText} · ${live2d.warningText}')
+          : live2d.detailText;
       modelRevision.value++;
     } finally {
       _reloading = false;
@@ -471,7 +475,11 @@ class StageSession extends ChangeNotifier {
       await live2d.setModel(AppConfig.activeModel, force: true);
       if (notifyPeer && !mockMode && ws.isReady) ws.sendModelSet(id, path);
       if (overlayOn.value) await refreshOverlayAppearance();
-      hint.value = live2d.ready ? live2d.statusText : live2d.detailText;
+      hint.value = live2d.ready
+          ? (live2d.warningText.isEmpty
+              ? live2d.statusText
+              : '${live2d.statusText} · ${live2d.warningText}')
+          : live2d.detailText;
       modelRevision.value++;
       // 低频操作：状态栏模型名需要跟着换，才保留一次全局通知。
       notifyListeners();

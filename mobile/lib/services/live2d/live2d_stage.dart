@@ -34,6 +34,8 @@ class Live2DStage {
   String? _reason;
   int _generation = 0;
   int _controllerRevision = 0;
+  /// 非致命提醒：入口自动发现、纹理过大等，加载成功后仍要展示。
+  List<String> _warnings = const <String>[];
 
   void _emitChanged() {
     try {
@@ -60,6 +62,10 @@ class Live2DStage {
 
   /// 未就绪时给出具体原因，供占位层与设定页展示。
   String get detailText => _reason ?? statusText;
+
+  /// 加载成功后仍要给用户看的提醒（4096 纹理 / 入口自动发现等）。
+  List<String> get warnings => _warnings;
+  String get warningText => _warnings.join(' · ');
 
   Future<void> setModel(ModelConfig cfg, {bool force = false}) async {
     if (_current?.id == cfg.id && !force && _ready) return;
@@ -88,22 +94,32 @@ class Live2DStage {
       return;
     }
 
-    // assets 内置：物化到应用文档目录，返回真实绝对路径；
-    // 用户目录：核对入口 JSON 的依赖文件是否齐全。
-    String realPath = ModelPath.normalize(cfg.path);
+    // assets 内置：主通道用**插件原生的 assets 支持**（插件自己会把声明过的
+    // assets 目录解压到 temp），不再每次启动把 5 张 4096 纹理复制一遍。
+    // 这里只做存在性预检，顺便拿到真实入口名 / 纹理尺寸提醒。
+    String normalized = ModelPath.normalize(cfg.path);
+    String primaryDir = ModelPath.dirName(normalized);
+    String primaryEntry = ModelPath.fileName(normalized);
+    _warnings = const <String>[];
+
     if (cfg.isAsset) {
-      final ModelInstallResult installed =
-          await ModelAssetInstaller.materialize(cfg);
+      final ModelInstallResult checked =
+          await ModelAssetInstaller.verify(cfg);
       // 被更新的换模请求打断：旧代次直接退出，且不改 _loading
       // （新的 setModel 仍在跑，不能把它的「加载中」清掉）。
       if (gen != _generation) return;
-      if (!installed.ok) {
-        _restore(old, oldConfig, installed.error);
+      if (!checked.ok) {
+        _restore(old, oldConfig, checked.error);
         return;
       }
-      realPath = installed.path;
+      primaryDir = checked.assetDir;
+      // 关键：用真实入口名（大肥鱼.model3.json），不能用配置里写死的那个。
+      primaryEntry = checked.entryName.isNotEmpty
+          ? checked.entryName
+          : primaryEntry;
+      _warnings = checked.warnings;
     } else {
-      final String? local = ModelPath.checkLocal(realPath);
+      final String? local = ModelPath.checkLocal(normalized);
       if (local != null) {
         _restore(old, oldConfig, local);
         return;
@@ -128,8 +144,8 @@ class Live2DStage {
 
     _LoadAttempt attempt = await _attempt(
       chosen,
-      ModelPath.dirName(realPath),
-      ModelPath.fileName(realPath),
+      primaryDir,
+      primaryEntry,
       attached: attached,
     );
     if (gen != _generation) {
@@ -139,40 +155,53 @@ class Live2DStage {
       return;
     }
 
-    // 内置模型：物化目录被原生侧拒绝时，用插件原生支持的 assets 目录再试一次。
-    // 插件会自行把 pubspec 声明的 assets 解压到 cache，不一定认我们复制的目录。
-    if (!attempt.verdict.ok && cfg.isAsset && !attempt.threw) {
-      try {
-        chosen.dispose();
-      } catch (_) {}
-      final Live2DViewController retry = Live2DViewController();
-      _controller = retry;
-      _controllerRevision++;
-      _reason = '物化路径未通过 · 正在用 assets 目录重试…';
-      _emitChanged();
-      final bool retryAttached = await _waitAttached(retry);
+    // 原生 assets 通道被拒绝：才回退到「物化成绝对路径」再试一次。
+    // 到这一步说明文件都在包里，物化不会再因为缺文件失败。
+    if (!attempt.verdict.ok && cfg.isAsset) {
+      final ModelInstallResult materialized =
+          await ModelAssetInstaller.materialize(cfg);
       if (gen != _generation) {
         try {
-          retry.dispose();
+          chosen.dispose();
         } catch (_) {}
         return;
       }
-      chosen = retry;
-      attempt = await _attempt(
-        retry,
-        ModelPath.dirName(cfg.path),
-        ModelPath.fileName(cfg.path),
-        attached: retryAttached,
-      );
-      if (gen != _generation) {
+      if (materialized.ok) {
         try {
-          retry.dispose();
+          chosen.dispose();
         } catch (_) {}
-        return;
+        final Live2DViewController retry = Live2DViewController();
+        _controller = retry;
+        _controllerRevision++;
+        _reason = 'assets 通道未通过 · 正在用物化路径重试…';
+        _emitChanged();
+        final bool retryAttached = await _waitAttached(retry);
+        if (gen != _generation) {
+          try {
+            retry.dispose();
+          } catch (_) {}
+          return;
+        }
+        chosen = retry;
+        attempt = await _attempt(
+          retry,
+          ModelPath.dirName(materialized.path),
+          materialized.entryName.isNotEmpty
+              ? materialized.entryName
+              : primaryEntry,
+          attached: retryAttached,
+        );
+        if (gen != _generation) {
+          try {
+            retry.dispose();
+          } catch (_) {}
+          return;
+        }
       }
     }
 
     if (!attempt.verdict.ok) {
+      _tryUnload(chosen);
       try {
         chosen.dispose();
       } catch (_) {}
@@ -180,7 +209,7 @@ class Live2DStage {
         old,
         oldConfig,
         LoadResultInterpreter.failureText(
-          attempt.verdict.error,
+          _explainError(attempt.verdict.error),
           threw: attempt.threw,
         ),
       );
@@ -198,6 +227,36 @@ class Live2DStage {
         old?.dispose();
       } catch (_) {}
     }
+  }
+
+  /// 把插件的错误码翻译成能直接照做的排查动作。
+  static String _explainError(String raw) {
+    final String r = raw.isEmpty ? '原生侧未给出原因' : raw;
+    if (r.contains('No assets found') || r.contains('INVALID_ARGS')) {
+      return '$r · pubspec.yaml 的 flutter.assets 漏声明了模型目录或纹理子目录'
+          '（assets 声明不递归，像「大肥鱼.4096/」必须单列一行）';
+    }
+    if (r.contains('LOAD_FAILED')) {
+      return '$r · 原生 Cubism 侧拒绝了模型：路径不对 / 缺文件（尤其纹理子目录）/ '
+          '.moc3 版本超出插件内置 Core 支持范围（3.0–5.3）。'
+          '用 adb logcat 抓原生日志能看到具体原因';
+    }
+    if (r.contains('VIEW_NOT_ATTACHED')) {
+      return '$r · GL surface 还没挂载就下发了 loadModel，点右上角刷新重试';
+    }
+    if (r.contains('NATIVE_ERROR')) {
+      return '$r · 原生异常，常见于 4096 纹理超出 GL_MAX_TEXTURE_SIZE 或 OOM，'
+          '建议改用 2048 纹理重新导出';
+    }
+    return r;
+  }
+
+  /// 1.0.2 起插件提供 `unloadModel()`：失败时把原生侧已分配的资源释放掉。
+  /// 用 dynamic 调用，老版本没有这个方法也不会编译失败。
+  static void _tryUnload(Live2DViewController c) {
+    try {
+      (c as dynamic).unloadModel();
+    } catch (_) {}
   }
 
   /// 等原生 GL surface 挂载；超时返回 false，由调用方明确记为「未确认」，
@@ -347,6 +406,7 @@ class Live2DStage {
     _current = null;
     _ready = false;
     _reason = null;
+    _warnings = const <String>[];
   }
 }
 

@@ -2,7 +2,7 @@ import AVFoundation
 import Flutter
 import UIKit
 
-/// AVAudioEngine 采集，float -> PCM16 经 EventChannel 回传 Dart（系统框架，零第三方依赖）。
+/// AVAudioEngine 采集，float -> PCM16 经 EventChannel 回传 Dart
 /// 若设备 inputFormat 非 16kHz，由后端 ASR 侧兼容；生产可在此接 AVAudioConverter 重采样。
 public class AudioEngineChannel: NSObject, FlutterPlugin, FlutterStreamHandler {
   private let engine = AVAudioEngine()

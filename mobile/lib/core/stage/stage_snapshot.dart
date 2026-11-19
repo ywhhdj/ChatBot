@@ -1,6 +1,6 @@
 import 'stage_transform.dart';
 
-/// 生命周期恢复用：不从头重播演出，按剩余时间续上（U13 / F07）。
+/// 生命周期恢复用：不从头重播演出，按剩余时间续上
 class StageSnapshot {
   const StageSnapshot({
     required this.stateName,

@@ -1,8 +1,7 @@
 import 'dart:math';
 
-/// 注册身份（docs/api.md §4.5.1）：uid 必须匹配 `[A-Za-z0-9._:-]{1,64}`，
+/// 注册身份：uid 必须匹配 `[A-Za-z0-9._:-]{1,64}`，
 /// 匿名场景用客户端持久化 UUID，重连绝不能换人。
-/// 纯 Dart，不依赖 SharedPreferences / uuid 包（避免新增依赖）。
 class DeviceIdentity {
   DeviceIdentity._();
 

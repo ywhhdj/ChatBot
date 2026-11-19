@@ -22,7 +22,6 @@ class ModelConfig {
   final String id;
   final String name;
   final String path;
-
   /// 预览头像：assets 路径或本机绝对路径，空串 = 用 name 首字母占位。
   /// 有路径但加载失败时组件层同样回退占位，不会出现空白卡片。
   final String avatarPath;
@@ -32,7 +31,6 @@ class ModelConfig {
   final Map<String, String> motionGroups;
   final Map<String, String> paramMap;
   final Map<String, String> expressions;
-
   /// 来自用户自选目录（不是 assets 内置清单）。
   final bool custom;
 
@@ -59,7 +57,7 @@ class ModelConfig {
     fallback,
     ModelConfig(
       id: 'deepseek-01',
-      name: 'DeepSeek',
+      name: '大肥鱼',
       path: 'assets/live2d/deepseek/大肥鱼.model3.json',
       motionGroups: <String, String>{
         'idle': 'Idle',
@@ -82,11 +80,10 @@ class ModelConfig {
 
   /// 当前可选清单：占位 + 内置 + 用户目录。
   static List<ModelConfig> get all => <ModelConfig>[
-    ...available,
-    ...catalog.where(
-      (ModelConfig m) => available.every((ModelConfig a) => a.id != m.id),
-    ),
-  ];
+        ...available,
+        ...catalog.where((ModelConfig m) =>
+            available.every((ModelConfig a) => a.id != m.id)),
+      ];
 
   static ModelConfig byId(String id) {
     for (final ModelConfig m in all) {
@@ -97,7 +94,8 @@ class ModelConfig {
   }
 
   /// id 是否仍在可选清单里（设定页做安全兜底）。
-  static bool isValidId(String id) => all.any((ModelConfig m) => m.id == id);
+  static bool isValidId(String id) =>
+      all.any((ModelConfig m) => m.id == id);
 
   /// 目录里的模型文件名（插件 loadModel 用 basename，不能把完整路径再传一遍）。
   String get fileName => ModelPath.fileName(path);
@@ -128,7 +126,9 @@ class ModelConfig {
       item,
     ];
     // 有界：远端连续换模型不会把 catalog 撑成无上限列表。
-    registerCatalog(next.length > 64 ? next.sublist(next.length - 64) : next);
+    registerCatalog(next.length > 64
+        ? next.sublist(next.length - 64)
+        : next);
     return item;
   }
 }

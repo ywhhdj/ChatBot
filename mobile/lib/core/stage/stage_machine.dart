@@ -62,7 +62,7 @@ class StageMachine {
 
   void onFlingFinished() => _set(StageState.offscreen);
 
-  /// 等一会儿侧头回来（S4.3），只由唯一 Timer 触发一次。
+  /// 等一会儿侧头回来，只由唯一 Timer 触发一次。
   void peekBack() {
     if (_state != StageState.offscreen) return;
     _set(StageState.peekBack);

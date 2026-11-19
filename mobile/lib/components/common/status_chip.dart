@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/gal_palette.dart';
 import '../../core/net/ws_service.dart';
 
-/// 三态状态胶囊（U42）：connected / reconnecting / offline。
+/// 三态状态胶囊：connected / reconnecting / offline。
 class StatusChip extends StatelessWidget {
   const StatusChip({super.key, required this.state});
 

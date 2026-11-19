@@ -31,9 +31,6 @@ android {
 
     buildTypes {
         release {
-            // ndk {
-            //     abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-            // }
             isMinifyEnabled = true
             isShrinkResources = true
             // TODO: Add your own signing config for the release build.

@@ -1,5 +1,4 @@
-/// 三端共用的帧字面量，与 `src/modules/events/types.py::WebSocketEventType` 逐字一致。
-/// 集中放置避免 mobile 各层拼错字符串（docs/api.md §4.2 / §4.5）。
+/// 三端共用的帧字面量，与 `src/modules/events/types.py::WebSocketEventType` 逐字一致
 class WsEvent {
   WsEvent._();
 

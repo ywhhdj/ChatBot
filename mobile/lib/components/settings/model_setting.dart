@@ -285,7 +285,7 @@ class _ModelSettingState extends State<ModelSetting> {
             const SizedBox(height: 6),
             Text(
               '目录模型会自动探测同目录的 avatar.png / 预览.png 等作为头像；'
-              '没有图片就回退到名字首字母。内置模型放一张 ',
+              '没有图片就回退到名字首字母。内置模型用 VTS 导出包自带的 大肥鱼.png。',
               style: TextStyle(
                 color: GalPalette.of(context).textFaint,
                 fontSize: 10,
@@ -294,9 +294,10 @@ class _ModelSettingState extends State<ModelSetting> {
             ),
             const SizedBox(height: 6),
             Text(
-              '内置 DeepSeek 需要 assets/live2d/deepseek/ 下的 .model3.json、'
-              '.moc3 与纹理；当前仓库只有 Animation/Exp3。补齐后到「存储」页'
-              '点「重新自检模型资源」，或直接在上面选一个本机目录模型。',
+              'VTube Studio 导出的纹理放在「大肥鱼.4096/」这类子目录里，'
+              'pubspec.yaml 必须给每个子目录单独写一行（Flutter assets 不递归）。'
+              '补齐后若仍加载失败，到「存储」页看自检缺失清单与纹理尺寸提醒，'
+              '或直接在上面选一个本机目录模型。',
               style: TextStyle(
                 color: GalPalette.of(context).textFaint,
                 fontSize: 10,

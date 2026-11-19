@@ -3,8 +3,8 @@ import 'dart:convert';
 import '../../debug/debug_flags.dart';
 import 'ws_events.dart';
 
-/// 帧编解码（core/，零 Widget / 零平台副作用）。
-/// 信封与 docs/contracts/device_events.md 逐字一致；release 下不拼接任何调试字段（U55）。
+/// 帧编解码
+/// 信封与 docs/contracts/device_events.md 逐字一致；release 下不拼接任何调试字段
 class WsFrame {
   WsFrame._();
 

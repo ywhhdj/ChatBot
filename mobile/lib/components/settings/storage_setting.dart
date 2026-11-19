@@ -118,10 +118,26 @@ class _StorageSettingState extends State<StorageSetting> {
                 '启动时一次读入内存 · 变更去重后落盘 · 退出补写'),
             const SizedBox(height: 4),
             Text(
-              '模型文件始终留在你选择的目录里；内置 assets 模型会按需复制到'
-              '应用文档目录一次，供原生插件读取。',
+              '内置 assets 模型优先走插件自己的 assets 解压通道，只做预检不复制；'
+              '仅当原生通道被拒绝时才回退到物化路径，避免把 4096 纹理重复落盘。',
               style: TextStyle(color: p.textFaint, fontSize: 10, height: 1.5),
             ),
+            if (probe != null && probe.hasWarnings) ...<Widget>[
+              const SizedBox(height: 8),
+              ...probe.warnings.map(
+                (String w) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '⚠ $w',
+                    style: TextStyle(
+                      color: p.busy,
+                      fontSize: 10,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
         if (probe != null && !probe.ok) ...<Widget>[

@@ -4,7 +4,7 @@ import 'package:flutter_rotation_sensor/flutter_rotation_sensor.dart';
 
 import '../config/app_config.dart';
 
-/// 姿态采集：一阶低通 + 死区 + 零位校准 + 节流，静止时接近 0 帧（S2.3 / U16 兜底）。
+/// 姿态采集：一阶低通 + 死区 + 零位校准 + 节流，静止时接近 0 帧
 /// sendHz 可在设定页调整，无需重建订阅（避免重连传感器造成内存抖动）。
 class PoseService {
   PoseService({required this.onPose, int? sendHz})

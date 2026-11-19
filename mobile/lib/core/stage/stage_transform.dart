@@ -1,4 +1,4 @@
-/// 舞台变换数值：core 只输出 double，组件层负责 Transform / ClipRect（§2.5.2）。
+/// 舞台变换数值：core 只输出 double，组件层负责 Transform / ClipRect
 class StageTransform {
   const StageTransform({
     this.dx = 0.0,

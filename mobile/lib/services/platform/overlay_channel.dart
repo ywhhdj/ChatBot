@@ -59,9 +59,9 @@ class OverlayChannel {
       await _method.invokeMethod<void>(
         'updateAppearance',
         <String, dynamic>{
-          if (name != null) 'name': name,
-          if (scheme != null) 'scheme': scheme,
-          if (scale != null) 'scale': scale,
+          'name': ?name,
+          'scheme': ?scheme,
+          'scale': ?scale,
         },
       );
     } catch (_) {

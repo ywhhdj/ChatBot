@@ -9,7 +9,6 @@ import '../common/section_card.dart';
 /// 演出 / 性能参数：全部可在手机上调，变更即生效、松手即持久化。
 ///
 /// 性能：每个滑杆是独立的 StatefulWidget，拖动时只重建自己；
-/// 旧实现每帧 setState 会重建整张设定面板（十几个 Slider + Switch），低档机掉帧。
 class ParamsSetting extends StatefulWidget {
   const ParamsSetting({super.key, required this.session});
 
