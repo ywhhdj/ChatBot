@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 流状态机展示 —— FrontendPlan F1-01 / F1-02
+ * 流状态机展示
  * 只显示当前请求的状态；request_id 用于用户反馈与诊断。
  */
 import { computed, onUnmounted, ref, watch } from 'vue';

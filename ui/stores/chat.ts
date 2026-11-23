@@ -10,7 +10,6 @@
  * - 每个会话设置消息上限，长时间对话渲染成本有界（F2-01）。
  */
 import { defineStore } from 'pinia';
-import { computed, markRaw, ref, shallowRef, type ComputedRef } from 'vue';
 
 const EMPTY: UI.ChatMessage[] = [];
 const EMPTY_IDS: string[] = [];

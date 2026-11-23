@@ -2,8 +2,6 @@
 
 把 Rust 侧的原始对象包成符合 `protocol.py` 契约的对象。
 职责仅限：参数校验、类型转换、错误翻译。**不含业务逻辑**。
-
-对应清单：R3（不长期持有 Py 对象）/ R4（释放 GIL）/ R6（错误不丢）。
 """
 
 from __future__ import annotations

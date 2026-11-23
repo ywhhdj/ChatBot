@@ -40,13 +40,7 @@ def _get_sync_executor():
 
 
 class CommandExecutor:
-    """命令执行器。
-
-    B0-06：每条命令都有**超时**与**输出上限**。
-    SecurityAndAuditDesign §8 明确要求"工具运行时间和 tool steps 有上限"——
-    否则一个卡死的浏览器操作或无限循环的技能脚本会永久占用执行线程，
-    而且 LLM 可以靠"多来几条慢命令"把整个池子拖死。
-    """
+    """命令执行器"""
 
     def __init__(
         self,
@@ -71,7 +65,7 @@ class CommandExecutor:
         results: List[CommandResult] = list(validated)
 
         if self._mode == "concurrent" and runnable:
-            # C63：return_exceptions，单条炸掉不影响整批
+            # return_exceptions，单条炸掉不影响整批
             executed = await asyncio.gather(
                 *(self._invoke(cmd) for _, cmd in runnable),
                 return_exceptions=True,
@@ -114,14 +108,6 @@ class CommandExecutor:
                 coro = method(*(position_args or []), **params)
                 data = await self._with_timeout(coro, limit, service_name, method_name)
             else:
-                # C62：同步方法丢到专用线程池，避免阻塞调度器 loop。
-                #
-                # 注意 asyncio.wait_for **杀不掉已提交到线程的任务** ——
-                # 超时后线程仍在跑。这是刻意的取舍：强杀线程会留下
-                # 半完成的副作用（写了一半的文件、锁没释放）。
-                # 所以我们让命令自己跑完，只是不再等它，
-                # 并在结果里如实标记 timeout（§9："取消/超时后资源释放，
-                # 后台异常可追踪"靠日志而非假装终止）。
                 loop = asyncio.get_running_loop()
                 fut = loop.run_in_executor(
                     _get_sync_executor(),
@@ -160,7 +146,7 @@ class CommandExecutor:
         return await asyncio.wait_for(awaitable, timeout=limit)
 
     def _cap_result(self, data: Any) -> Any:
-        """输出上限（SecurityAndAuditDesign §8：最大 response body）。
+        """输出上限
 
         工具返回整个目录树、整篇网页或大文件时，若不加约束会直接
         灌进 prompt 与审计历史。这里在**执行层**就截断，

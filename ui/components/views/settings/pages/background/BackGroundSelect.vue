@@ -3,114 +3,99 @@ import { requestService } from '@/api/services/request';
 import { emitBackgroundChange } from '@/events/event/background';
 import { useTempStore } from '@/stores/ui';
 import notification from '@/utils/notification';
-import { getFileExtension } from '@/utils/util';
+import { assetFingerprints, type LoadedAsset } from '@/utils/asset';
+import { useObjectUrls } from '@/composables/useObjectUrls';
 
 const uiStore = useTempStore();
-const fileInputType = ['.jpeg', '.png', '.webp', '.bmp', '.svg', '.tif', '.gif'];
-const uploadInput = ref<HTMLInputElement | null>(null);
-const currentIndex = ref(0);
+const urls = useObjectUrls(false);
+const selectedUrl = ref(uiStore.bgList[0]?.url || '');
 
-const getfileType = computed(() => {
-  return fileInputType.join(',');
-});
+const existing = computed(() => assetFingerprints(uiStore.bgList.map((b) => ({ label: b.name, src: b.url }))));
 
-const isSelected = (index: number) => {
-  return index === currentIndex.value;
-};
-const selectBackground = (url: string, index: number, duration?: number) => {
-  currentIndex.value = index;
+function isSelected(url: string) {
+  return url === selectedUrl.value;
+}
+
+function selectBackground(url: string, duration?: number) {
+  selectedUrl.value = url;
   emitBackgroundChange(url, duration);
-};
+}
 
-const triggerUpload = () => {
-  if (uploadInput.value) {
-    uploadInput.value.click();
-  }
-};
-
-const handleFileUpload = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  const files = Array.from(target.files || []);
-  if (files.length === 0) return;
-  files.forEach((file) => {
-    if (!file.type.startsWith('image/')) {
-      notification.showError({
-        title: '文件类型错误',
-        message: `${file.name} 不是图片文件`
-      });
-      return;
-    }
-    const ext = `.${getFileExtension(file.name)}`;
-    if (!fileInputType.includes(ext)) {
-      notification.showWarning({
-        title: '不支持的图片格式',
-        message: `${file.name} 格式不支持`
-      });
-      return;
-    }
-    const exists = uiStore.bgList.some((item) => item.name === file.name);
-    if (exists) {
-      notification.showWarning({
-        title: '文件已存在',
-        message: file.name
-      });
-      return;
-    }
+function onFiles(assets: LoadedAsset[]) {
+  let added = 0;
+  for (const asset of assets) {
+    if (!asset.file) continue;
+    const name = asset.label;
+    if (uiStore.bgList.some((item) => item.name === name)) continue;
     uiStore.bgList.push({
-      url: URL.createObjectURL(file),
-      name: file.name.replace(/\.[^.]+$/, ''), // 去除扩展名
-      index: uiStore.bgList.length, // 或 currentIndex + 1
-      duration: undefined, // 默认无过渡时长
+      url: urls.create(asset.file),
+      name,
+      index: uiStore.bgList.length,
+      duration: undefined,
     });
+    added += 1;
+  }
+  notification.showSuccess({
+    title: '自定义背景',
+    message: added ? `已添加 ${added} 张背景` : '所选背景已存在，未重复添加',
   });
-  if (target) target.value = '';
-};
+}
 
-const openBackgroundFolder = async () => {
-  await requestService.openFolder("images");
-};
+function onError(message: string) {
+  notification.showError({ title: '背景文件不支持', message });
+}
 
-const deleteBackground = (index: number) => {
+function onWarnings(messages: string[]) {
+  notification.showWarning({ title: '部分文件未添加', message: messages.slice(0, 2).join('；') });
+}
+
+async function openBackgroundFolder() {
+  await requestService.openFolder('images');
+}
+
+function deleteBackground(index: number) {
   if (index === 0) {
-    notification.showWarning({
-      title: '删除',
-      message: '默认背景不能删除'
-    })
+    notification.showWarning({ title: '删除', message: '默认背景不能删除' });
     return;
   }
-  const background = uiStore.bgList.splice(index, 1)[0];
-  if (background) {
-    URL.revokeObjectURL(background.url);
+  const removed = uiStore.bgList.splice(index, 1)[0];
+  if (removed) urls.revoke(removed.url);
+  if (!uiStore.bgList.some((b) => b.url === selectedUrl.value)) {
+    const fallback = uiStore.bgList[Math.min(index, uiStore.bgList.length - 1)];
+    if (fallback) selectBackground(fallback.url, fallback.duration);
   }
-  if (currentIndex.value >= uiStore.bgList.length) {
-    currentIndex.value = Math.max(0, uiStore.bgList.length - 1);
-    emitBackgroundChange(uiStore.bgList?.[currentIndex.value]?.url || '', uiStore.bgList?.[currentIndex.value]?.duration);
-  }
-};
+}
+
+// 全局列表里的 blob 仍可能被其它页面使用：只释放已不再引用的
+onBeforeUnmount(() => {
+  urls.prune(uiStore.bgList.map((b) => b.url));
+});
 </script>
 
 <template>
   <BackgroundList>
     <BackgroundCard
       v-for="(background, index) in uiStore.bgList"
-      :key="index"
-      :isSelected="background.index === currentIndex"
+      :key="background.url"
+      :isSelected="isSelected(background.url)"
     >
       <div class="background-image-container">
         <img
           :src="background.url"
           :alt="background.name"
           class="background-image"
+          decoding="async"
+          @error="onError('背景图片解码失败，请更换文件')"
         />
       </div>
       <div class="background-title">
         <div>{{ background.name }}</div>
         <div style="display: flex; gap: 8px;">
           <Button
-            :class="['background-select-btn', { selected: isSelected(index) }]"
-            @click="selectBackground(background.url, index, background.duration)"
+            :class="['background-select-btn', { selected: isSelected(background.url) }]"
+            @click="selectBackground(background.url, background.duration)"
           >
-            {{ isSelected(index) ? '已选中' : '选择' }}
+            {{ isSelected(background.url) ? '已选中' : '选择' }}
           </Button>
           <Button
             class="background-delete-btn"
@@ -122,22 +107,23 @@ const deleteBackground = (index: number) => {
       </div>
     </BackgroundCard>
   </BackgroundList>
-  <Button
-    type="big"
-    @click="triggerUpload"
-  >上传自定义背景</Button>
+
+  <AssetPicker
+    kind="image"
+    label="上传自定义背景"
+    icon="background"
+    button-type="big"
+    :raw-only="true"
+    :max-bytes="8 * 1024 * 1024"
+    :existing="existing"
+    @select="onFiles"
+    @error="onError"
+    @warnings="onWarnings"
+  />
   <Button
     type="big"
     @click="openBackgroundFolder"
   >打开背景文件夹</Button>
-  <input
-    multiple
-    type="file"
-    class="hidden"
-    ref="uploadInput"
-    @change="handleFileUpload"
-    :accept="getfileType"
-  />
 </template>
 
 <style scoped>
@@ -155,48 +141,36 @@ const deleteBackground = (index: number) => {
 
 .background-image-container {
   flex: 1;
-  /* 占据剩余空间 */
   position: relative;
   overflow: hidden;
 }
 
-/* 图片样式 */
 .background-image {
   position: relative;
   width: 100%;
   height: 100%;
   object-fit: cover;
   aspect-ratio: 16/9;
-  /* 保持图片比例 */
   transition: transform 0.3s ease;
 }
 
-/* 底部信息区域 */
-/* 修改卡片底部背景为毛玻璃效果 */
 .background-title {
   padding: 12px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   background: rgba(255, 255, 255, 0.15);
-  /* 更透明的背景 */
   backdrop-filter: blur(10px);
-  /* 毛玻璃效果 */
   -webkit-backdrop-filter: blur(10px);
-  /* Safari 支持 */
   border-top: 1px solid rgba(255, 255, 255, 0.2);
-  /* 更柔和的边框 */
   position: relative;
   z-index: 2;
 }
 
-/* 标题文本样式 */
-/* 标题文字颜色调整以适应毛玻璃背景 */
 .background-title::before {
   content: attr(data-title);
   font-weight: 500;
   color: rgba(255, 255, 255, 0.9);
-  /* 更亮的文字颜色 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -217,7 +191,6 @@ const deleteBackground = (index: number) => {
   flex-shrink: 0;
 }
 
-/* 选择按钮 */
 .background-select-btn {
   background: #4f46e5;
 }
@@ -229,35 +202,32 @@ const deleteBackground = (index: number) => {
 
 .background-delete-btn {
   background: #ef4444;
+}
 
-  &:hover {
-    background: #b91c1c;
-    transform: translateY(-1px);
-  }
+.background-delete-btn:hover {
+  background: #b91c1c;
+  transform: translateY(-1px);
 }
 
 .background-select-btn:active {
   transform: translateY(0);
 }
 
-.effect-list {
-  display: flex;
-  justify-content: space-around;
-  gap: 20px;
-  align-items: center;
+.background-select-btn.selected {
+  background-color: #10b981 !important;
 }
 
 @media (max-width: 768px) {
-
-  /*什么？你问我为什么这里是character-grid? 灵式编程懂不懂！ */
-  .character-grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  .background-title {
+    padding: 8px 12px;
   }
 }
 
-
-/* 已选中按钮样式 */
-.background-select-btn.selected {
-  background-color: #10b981 !important;
+@media (prefers-reduced-motion: reduce) {
+  .background-image,
+  .background-delete-btn,
+  .background-select-btn {
+    transition: none;
+  }
 }
 </style>

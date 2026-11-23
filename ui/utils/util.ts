@@ -1,16 +1,9 @@
+import { downloadBlob } from '@/utils/asset';
+
 export async function saveJsonFile(filename: string, data: any) {
-  return new Promise<void>((resolve, reject) => {
-    if (!filename) {
-      filename = new Date().toISOString() + '.json';
-    }
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    resolve();
-  });
+  const name = filename || `${new Date().toISOString()}.json`;
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json;charset=utf-8' });
+  downloadBlob(blob, name);
 }
 
 export async function loadJsonFile<T = any>(filename: string): Promise<T> {

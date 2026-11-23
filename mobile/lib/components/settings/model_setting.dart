@@ -12,7 +12,7 @@ import '../common/model_avatar.dart';
 import '../common/retry_hint.dart';
 import '../common/section_card.dart';
 
-/// 模型分区：用户可自由填任意目录，扫描出的模型用**横向懒加载预览卡**展示。
+/// 模型分区：用户可自由填任意目录，扫描出的模型用横向懒加载预览卡展示。
 /// 不用下拉框；点击卡片即刻应用到舞台（返回舞台就能看到实时预览效果）。
 class ModelSetting extends StatefulWidget {
   const ModelSetting({super.key, required this.session});

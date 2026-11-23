@@ -1,6 +1,6 @@
 import type { App, Plugin } from "vue";
-import { ForceLandscape } from "@/plugins/ForceLandscape";
-import logger, { initLoggerPlugin } from "@/plugins/LogForwarder";
+import { ForceLandscape } from "@/plugins/forceLandscape";
+import logger, { initLoggerPlugin } from "@/plugins/logForwarder";
 import { closeWebSocket, connectWebSocket } from "@/api/websocket";
 import { CONFIG } from "@/config";
 

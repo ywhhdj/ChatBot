@@ -209,9 +209,9 @@ class ConsolidationPlanner:
         report: ConsolidationReport,
         writer: Any = None,
     ) -> ConsolidationReport:
-        """把**非破坏性**建议写入。`writer` 由组合根注入。
+        """把非破坏性建议写入。`writer` 由组合根注入。
 
-        GC 永远不在这里执行：硬删除必须走墓碑协议 + 单独审批（M2-08）。
+        GC 永远不在这里执行：硬删除必须走墓碑协议 + 单独审批
         """
         if not self.features.consolidation_apply:
             report.warnings.append("consolidation.apply 未开启，仅返回 dry-run")

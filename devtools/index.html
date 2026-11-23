@@ -31,6 +31,8 @@
     <button class="tab" data-tab="smoke">功能冒烟</button>
     <button class="tab" data-tab="config">服务配置三态</button>
     <button class="tab" data-tab="stream">SSE / WS</button>
+    <button class="tab" data-tab="plugins">插件</button>
+    <button class="tab" data-tab="live2d">Live2D / Galgame</button>
   </nav>
 
   <main>
@@ -176,6 +178,120 @@
         </div>
       </div>
       <p class="hint">SSE 使用 <code>fetch + ReadableStream</code> 计算首帧延迟；WS 路由为 <code>/</code>，不受 CORS 约束。</p>
+    </section>
+
+    <!-- 插件（对齐 AIRI DevTools plugin-host） -->
+    <section class="panel" id="panel-plugins">
+      <div class="row wrap">
+        <input id="pgSource" placeholder="安装源：本地目录或 .zip 绝对路径" spellcheck="false" />
+        <label class="chk"><input type="checkbox" id="pgEnable" /> 安装后立即启用</label>
+        <button id="pgInstall" class="btn primary">安装</button>
+        <button id="pgRefresh" class="btn">刷新</button>
+        <span id="pgCount" class="muted"></span>
+      </div>
+      <div class="grid4" id="pgCards"></div>
+      <h2>Registry View</h2>
+      <div class="table-wrap tall"><table id="pgTable"></table></div>
+      <h2>Capability Matrix</h2>
+      <div class="table-wrap"><table id="pgCaps"></table></div>
+      <h3>动作日志</h3>
+      <pre id="pgLog" class="out">—</pre>
+      <p class="hint">对齐 AIRI 的 DevTools plugin-host：manifest、解析路径、enabled/loaded 状态、依赖缺失与热重载。<code>install</code> 默认只落盘，必须显式 <code>enable</code> 才执行插件代码。</p>
+    </section>
+
+    <!-- Live2D / Galgame 专项测试 -->
+    <section class="panel" id="panel-live2d">
+      <div class="row wrap">
+        <button id="l2dRefresh" class="btn primary">刷新状态</button>
+        <button id="l2dStart" class="btn">启动服务</button>
+        <button id="l2dStop" class="btn">停止服务</button>
+        <button id="l2dSuite" class="btn">离线自检 18 例</button>
+        <button id="l2dSmoke" class="btn">真实服务冒烟</button>
+        <span id="l2dBadge" class="badge badge-idle">未检测</span>
+      </div>
+      <div class="grid4" id="l2dCards"></div>
+
+      <h2>① 眼睛随鼠标移动（无动捕）</h2>
+      <div class="row wrap">
+        <input id="l2dGazePoints" class="mono" spellcheck="false"
+               value="[[0,0],[1,0],[0.6,0.6],[-0.8,0.2],[0,-0.7],[0,0]]"
+               placeholder='轨迹 [[nx,ny],…]，-1~1' />
+        <button id="l2dGazeDraw" class="btn">画视线曲线</button>
+        <button id="l2dGazeHome" class="btn">视线回中</button>
+        <span id="l2dGazeInfo" class="muted"></span>
+      </div>
+      <canvas id="l2dGazeCanvas" width="1100" height="220"
+              style="width:100%;height:220px;background:#0a0e15;border:1px solid #2a3242;border-radius:8px"></canvas>
+      <p class="hint">蓝线 = <code>ParamAngleX</code>（头转），金线 = <code>ParamEyeBallX</code>（眼球）。
+        曲线来自 <code>/api/live2d/test/gaze</code> 的纯逻辑模拟，<b>服务没启动也能画</b>；
+        启动服务后再用 <code>/api/live2d/gaze</code> 把位置注入真实模型。</p>
+
+      <h2>② 立绘动作 / 表情 / 情绪</h2>
+      <div class="row wrap">
+        <input id="l2dExpr" placeholder="表情 id（如 smile / normal）" />
+        <button id="l2dExprBtn" class="btn">切表情</button>
+        <input id="l2dMotion" placeholder="动作组（如 Idle / Tap）" value="Idle" />
+        <button id="l2dMotionBtn" class="btn">播动作</button>
+        <input id="l2dEmotion" placeholder="情绪（happy / shy…）" value="happy" />
+        <button id="l2dEmotionBtn" class="btn">按情绪切</button>
+      </div>
+      <div class="row wrap">
+        <button id="l2dSpeakOn" class="btn">说话开始</button>
+        <button id="l2dSpeakOff" class="btn">说话结束</button>
+        <button id="l2dBlink" class="btn">眨眼</button>
+        <button id="l2dReset" class="btn">复位表情/姿态</button>
+        <span id="l2dActionInfo" class="muted"></span>
+      </div>
+
+      <h2>③ EnhancedDialogueComponent</h2>
+      <div class="row wrap">
+        <input id="l2dSpeaker" placeholder="说话人" value="小柔" style="max-width:150px" />
+        <input id="l2dEmo" placeholder="情绪" value="happy" style="max-width:120px" />
+        <input id="l2dChoices" placeholder="选项，逗号分隔（可空）" style="max-width:220px" />
+        <label class="chk"><input type="checkbox" id="l2dInstant" /> 瞬时显示</label>
+      </div>
+      <div class="row">
+        <input id="l2dText" placeholder="台词正文（支持 <b> <i> <color=#FFD9A0> 与 \n）"
+               value="今天的风，好温柔呀。\n……你也在看吗？" />
+        <button id="l2dPush" class="btn primary">推送台词</button>
+        <button id="l2dSkip" class="btn">跳过</button>
+        <button id="l2dAdvance" class="btn">推进</button>
+        <button id="l2dClear" class="btn">清空</button>
+      </div>
+      <div class="two-col">
+        <div>
+          <h3>对话框状态</h3>
+          <pre id="l2dDialogueState" class="out">—</pre>
+        </div>
+        <div>
+          <h3>回看 Backlog</h3>
+          <div class="table-wrap" style="max-height:240px"><table id="l2dBacklog"></table></div>
+        </div>
+      </div>
+
+      <h2>④ 配置三态（保存 ≠ 应用）</h2>
+      <div class="row wrap">
+        <label class="chk"><input type="checkbox" id="l2dCfgGaze" checked /> 无动捕跟随鼠标</label>
+        <label class="chk"><input type="checkbox" id="l2dCfgIdle" checked /> 空闲随机表情</label>
+        <label class="chk"><input type="checkbox" id="l2dCfgFace" /> 启用动捕</label>
+        <label>打字速度 <input type="number" id="l2dCfgCps" value="30" min="1" max="120" /></label>
+        <label>帧率 <input type="number" id="l2dCfgFps" value="60" min="1" max="144" /></label>
+        <label>不透明度 <input type="number" id="l2dCfgOpacity" value="1" min="0" max="1" step="0.05" /></label>
+        <button id="l2dCfgSave" class="btn">① 只保存</button>
+        <button id="l2dCfgApply" class="btn primary">② 显式应用</button>
+      </div>
+      <pre id="l2dCfgState" class="out">—</pre>
+      <p class="hint">保存走 <code>PUT /api/service/live2d/config</code>，应用走
+        <code>PUT /api/service/live2d/config/apply</code>（<code>restart:false</code>，由
+        <code>on_config_change</code> 增量热应用）。保存后 <code>pending=true</code> 而运行态不变，
+        应用后才生效 —— 与 §3.21 一致。完整 112 项设置见 <code>GET /api/live2d/settings</code>。</p>
+
+      <h2>⑤ 自检 / 冒烟结果</h2>
+      <pre id="l2dTestOut" class="out tall-out">—</pre>
+      <h2>⑥ 运行态与性能</h2>
+      <pre id="l2dStatusOut" class="out">—</pre>
+      <p class="hint">本页是 <code>devtools/</code> 的第 9 个面板，纯静态、零依赖、不注册后端路由、
+        不进打包产物（见 §3.22）。动作类操作需要 live2d 服务已启动；<b>离线自检与视线曲线不需要</b>。</p>
     </section>
   </main>
 

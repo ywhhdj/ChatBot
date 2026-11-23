@@ -12,8 +12,8 @@ _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 def _parse_args(argv: list[str]) -> tuple[bool, str]:
-    debug = os.environ.get("CHATBOT_DEBUG", "").strip().lower() in _TRUE_VALUES
-    ui_mode = os.environ.get("CHATBOT_UI_MODE", "auto").strip().lower() or "auto"
+    debug = os.environ.get("DEBUG", "").strip().lower() in _TRUE_VALUES
+    ui_mode = os.environ.get("UI_MODE", "auto").strip().lower() or "auto"
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -29,7 +29,7 @@ def _parse_args(argv: list[str]) -> tuple[bool, str]:
         i += 1
     if ui_mode not in ("auto", "desktop", "web"):
         ui_mode = "auto"
-    os.environ["CHATBOT_UI_MODE"] = ui_mode
+    os.environ["UI_MODE"] = ui_mode
     return debug, ui_mode
 
 

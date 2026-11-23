@@ -22,6 +22,7 @@ class ConnectionInfo:
     client_id: str
     uid: str = ""
     device: str = "unknown"
+    registered: bool = False
     connected_at: datetime = field(default_factory=datetime.now)
     last_heartbeat: datetime = field(default_factory=datetime.now)
     metadata: dict = field(default_factory=dict)
@@ -73,7 +74,7 @@ class ClientEventBridge:
         self._bindings.append((event, sync_dispatcher))
 
     def unregister(self) -> None:
-        """L2：按 (event, callback) 精确解绑。
+        """按 (event, callback) 精确解绑。
 
         绝不能 `events.off(event)` —— 那会清空该事件的全部监听器，
         把其他客户端和 Live2D 的唇形同步回调一起干掉。
@@ -88,7 +89,7 @@ class ClientEventBridge:
     # ---------- 预置绑定 ----------
 
     def bind_defaults(self) -> None:
-        """L7：连接建立时一次性注册全部事件，避免漏掉流式期间产生的数据。"""
+        """连接建立时一次性注册全部事件，避免漏掉流式期间产生的数据。"""
         cid = self.client_id
 
         async def send_log(log_data):
@@ -122,7 +123,7 @@ class ClientEventBridge:
             )
 
         async def send_final_audio(*args, **kwargs):
-            """W14：完成事件用 RESULT 类型，不再拿 LLM_FINAL_TEXT 发 "聊天完成" 字符串。"""
+            """完成事件用 RESULT 类型，不再拿 LLM_FINAL_TEXT 发 "聊天完成" 字符串。"""
             await self.manager.send_json(
                 cid,
                 type=events.types.WebSocketEventType.RESULT,

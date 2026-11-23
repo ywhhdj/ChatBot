@@ -44,13 +44,56 @@ class _AsyncLoopMixin:
                 pass
 
     def _async_put(self, item) -> None:
+        """把投递放进 loop 线程内执行，异常也在那里捕获。
+
+        B58：原实现 ``call_soon_threadsafe(self._queue.put_nowait, item)``
+        在队列满时抛的 ``QueueFull`` 发生在 **event loop 线程**，
+        调用方的 ``except asyncio.QueueFull`` 根本接不到。更糟的是 stop()
+        的 None 哨兵也会因此丢失，工作线程 join 超时后永久泄漏。
+        现在哨兵满队列时先丢一个旧 chunk 再塞，保证一定能停。
+        """
         loop = getattr(self, "_loop", None)
         if loop is None or loop.is_closed():
             return
+        queue = self._queue
+
+        def deliver() -> None:
+            try:
+                queue.put_nowait(item)
+            except asyncio.QueueFull:
+                if item is None:
+                    try:
+                        queue.get_nowait()
+                    except Exception:
+                        pass
+                    try:
+                        queue.put_nowait(None)
+                    except Exception:
+                        pass
+                # 普通音频块满队列 = 背压，丢弃即可
+
         try:
-            loop.call_soon_threadsafe(self._queue.put_nowait, item)
-        except (RuntimeError, asyncio.QueueFull):
+            loop.call_soon_threadsafe(deliver)
+        except RuntimeError:
             pass
+
+    def _sync_put_nowait(self, item) -> None:
+        """同步队列版的哨兵保证。"""
+        queue = getattr(self, "_queue", None)
+        if queue is None:
+            return
+        try:
+            queue.put_nowait(item)
+        except Full:
+            if item is None:
+                try:
+                    queue.get_nowait()
+                except Empty:
+                    pass
+                try:
+                    queue.put_nowait(None)
+                except Full:
+                    pass
 
 
 class AsyncRmsMeter(_AsyncLoopMixin):
@@ -92,10 +135,7 @@ class AsyncRmsMeter(_AsyncLoopMixin):
         if self.is_async:
             self._async_put(None)  # B26：内部已判空
         else:
-            try:
-                self._queue.put_nowait(None)  # type: ignore[union-attr]
-            except (Full, AttributeError):
-                pass
+            self._sync_put_nowait(None)
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1)
         self._thread = None
@@ -147,7 +187,7 @@ class AsyncRmsMeter(_AsyncLoopMixin):
     def __worker(self) -> None:
         while self._running:
             try:
-                chunk = self._queue.get()  # type: ignore[union-attr]
+                chunk = self._queue.get(timeout=0.05)  # type: ignore[union-attr]
             except Empty:
                 continue
             if chunk is None:
@@ -187,10 +227,7 @@ class AsyncChunkPlayer(_AsyncLoopMixin):
         if self.is_async:
             self._async_put(None)
         else:
-            try:
-                self._queue.put_nowait(None)  # type: ignore[union-attr]
-            except (Full, AttributeError):
-                pass
+            self._sync_put_nowait(None)
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1)
         self._thread = None
@@ -221,7 +258,7 @@ class AsyncChunkPlayer(_AsyncLoopMixin):
     def __worker(self) -> None:
         while self._running:
             try:
-                chunk = self._queue.get()  # type: ignore[union-attr]
+                chunk = self._queue.get(timeout=0.05)  # type: ignore[union-attr]
             except Empty:
                 continue
             if chunk is None:

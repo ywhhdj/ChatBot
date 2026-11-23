@@ -339,7 +339,7 @@ async function cfSave() {
 
 async function cfApply() {
   const id = $('cfService').value;
-  const r = await req('PUT', `/service/${id}/config/apply`, { body: { restart: false } });
+  const r = await req('PUT', `/service/${id}/config/apply`, { body: { restart: true } });
   renderCfState(r.data);
   cfLog(`③ apply_config → ${r.status}（restart=false，避免调试时重启真实服务）`, r.data);
 }
@@ -417,10 +417,269 @@ function wsSend(text) {
   wsWrite(`[send] ${text}`);
 }
 
+/* ───────────────────────── 插件（AIRI Registry View） ───────────────────────── */
+function pgLog(line, obj) {
+  const pre = $('pgLog');
+  const stamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const text = `[${stamp}] ${line}${obj !== undefined ? '\n' + fmt(obj) : ''}`;
+  pre.textContent = pre.textContent === '—' ? text : `${text}\n\n${pre.textContent}`;
+}
+
+async function loadPlugins() {
+  const r = await req('GET', '/plugin');
+  if (!r.ok || !r.data || !Array.isArray(r.data.plugins)) {
+    $('pgCards').innerHTML = '';
+    cards('pgCards', [{ k: '插件', v: '不可达', cls: 'err', s: r.error || `HTTP ${r.status}` }]);
+    return;
+  }
+  const list = r.data.plugins;
+  $('pgCount').textContent = `${list.length} 个插件`;
+  cards('pgCards', [
+    { k: '插件总数', v: list.length, s: `内置 ${list.filter((x) => x.source === 'builtin').length}` },
+    { k: '已启用', v: list.filter((x) => x.enabled).length, cls: 'ok', s: 'enabled=true' },
+    { k: '已激活', v: list.filter((x) => x.loaded).length, cls: 'ok', s: 'state=active' },
+    { k: '等待依赖', v: list.filter((x) => x.state === 'pending').length,
+      cls: list.some((x) => x.state === 'pending') ? 'warn' : '', s: 'pending / missing' },
+  ]);
+
+  const rows = list.map((p) => {
+    const st = p.state === 'active' ? 'st-ok' : p.state === 'pending' ? 'st-warn' : p.error ? 'st-err' : '';
+    const ops = [
+      ['enable', '启用'], ['disable', '停用'], ['reload', '重载'],
+    ].map(([a, label]) => `<button class="btn pg-act" data-act="${a}" data-id="${esc(p.id)}">${label}</button>`).join(' ')
+      + (p.removable ? ` <button class="btn pg-act pg-del" data-act="uninstall" data-id="${esc(p.id)}">卸载</button>` : '');
+    return `<tr>
+      <td class="mono"><b>${esc(p.id)}</b></td>
+      <td class="mono">${esc(p.version)}</td>
+      <td>${esc(p.source)}</td>
+      <td class="${st}">${esc(p.state)}</td>
+      <td>${p.enabled ? '✓' : '—'}</td>
+      <td>${p.loaded ? '✓' : '—'}</td>
+      <td class="mono">${esc((p.inject || []).join(', ') || '—')}</td>
+      <td class="mono">${esc((p.services || []).join(', ') || '—')}</td>
+      <td class="mono">${esc((p.missing || []).join(', ') || '—')}</td>
+      <td class="mono">${esc(p.path || '—')}</td>
+      <td>${ops}</td></tr>`;
+  }).join('');
+  $('pgTable').innerHTML = `<thead><tr><th>id</th><th>版本</th><th>来源</th><th>状态</th><th>启用</th><th>激活</th><th>inject</th><th>services</th><th>missing</th><th>路径</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="11" class="muted">无插件</td></tr>'}</tbody>`;
+  $('pgTable').querySelectorAll('.pg-act').forEach((b) => {
+    b.addEventListener('click', () => pgAction(b.dataset.act, b.dataset.id));
+  });
+
+  const cap = await req('GET', '/plugin/capabilities');
+  const svcs = cap.data?.services || [];
+  const capRows = svcs.map((s) => `<tr>
+    <td class="mono">${esc(s.name)}</td>
+    <td class="${s.ready ? 'st-ok' : 'st-warn'}">${s.ready ? 'ready' : 'not ready'}</td>
+    <td class="mono">${esc((s.providers || []).join(', ') || '—')}</td>
+    <td class="mono">${esc(s.value_type || '—')}</td></tr>`).join('');
+  $('pgCaps').innerHTML = `<thead><tr><th>服务名</th><th>状态</th><th>提供者</th><th>值类型</th></tr></thead><tbody>${capRows || '<tr><td colspan="4" class="muted">无能力</td></tr>'}</tbody>`;
+}
+
+async function pgAction(action, id) {
+  let r;
+  if (action === 'uninstall') r = await req('DELETE', `/plugin/${encodeURIComponent(id)}`);
+  else r = await req('POST', `/plugin/${encodeURIComponent(id)}/${action}`);
+  pgLog(`${action} ${id} → ${r.status}`, r.data || r.body);
+  await loadPlugins();
+}
+
+async function pgInstall() {
+  const source = $('pgSource').value.trim();
+  if (!source) { pgLog('安装失败：source 为空'); return; }
+  const enable = $('pgEnable').checked;
+  const r = await req('POST', '/plugin/install', { body: { source, enable } });
+  pgLog(`install ${source}（enable=${enable}）→ ${r.status}`, r.data || r.body);
+  await loadPlugins();
+}
+
+/* ───────────────────────── Live2D / Galgame ───────────────────────── */
+function l2dLog(line, obj) {
+  const pre = $('l2dTestOut');
+  const stamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const text = `[${stamp}] ${line}${obj !== undefined ? '\n' + fmt(obj) : ''}`;
+  pre.textContent = pre.textContent === '—' ? text : `${text}\n\n${pre.textContent}`;
+}
+
+function l2dBadge(text, kind) {
+  const b = $('l2dBadge');
+  b.textContent = text;
+  b.className = `badge badge-${kind}`;
+}
+
+async function loadLive2DStatus() {
+  const r = await req('GET', '/live2d/status');
+  const d = r.data || {};
+  $('l2dStatusOut').textContent = fmt(r.ok ? d : { error: r.error || `HTTP ${r.status}` });
+  const running = !!d.running, loaded = !!d.model_loaded;
+  l2dBadge(loaded ? '模型已加载' : running ? '服务运行中（模型待载）' : '服务未启动',
+           loaded ? 'ok' : running ? 'idle' : 'err');
+  cards('l2dCards', [
+    { k: '模型 / 服务', v: loaded ? 'READY' : running ? 'RUNNING' : 'OFF',
+      cls: loaded ? 'ok' : running ? 'warn' : 'err',
+      s: d.model_path ? d.model_path.split(/[\\/]/).slice(-2).join('/') : '—' },
+    { k: 'FPS / p95', v: (d.fps || 0).toFixed(1),
+      s: `avg ${(d.avg_ms || 0).toFixed(1)}ms · p95 ${(d.p95_ms || 0).toFixed(1)}ms` },
+    { k: '视线来源', v: d.gaze_source || 'center',
+      cls: d.gaze_source === 'face' ? 'warn' : d.gaze_source === 'mouse' ? 'ok' : '',
+      s: `动捕 ${d.face_active ? '活跃' : '无数据'} · 跟随鼠标 ${d.gaze_when_no_face ? '开' : '关'}` },
+    { k: '待机 / 说话', v: d.idle ? 'IDLE' : d.speaking ? 'SPEAK' : 'ACTIVE',
+      cls: d.idle ? 'warn' : '', s: `表情 ${(d.expressions || []).length} · 动作组 ${Object.keys(d.motion_groups || {}).length}` },
+    { k: '渲染 / 内存', v: `${d.render_scale || 1}×`,
+      s: `${d.render_width || 0}×${d.render_height || 0} · RSS ${(d.process_rss_mb || 0).toFixed(0)} MB` },
+  ]);
+  return d;
+}
+
+function drawGazeChart(frames) {
+  const cv = $('l2dGazeCanvas');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, pad = 26;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0e15'; ctx.fillRect(0, 0, W, H);
+  // 网格与 ±1 / 0 基准
+  ctx.strokeStyle = '#202838'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad + (H - 2 * pad) * i / 4;
+    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - pad, y); ctx.stroke();
+  }
+  const mid = H / 2;
+  ctx.strokeStyle = '#3a4658'; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(pad, mid); ctx.lineTo(W - pad, mid); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#7d8aa0'; ctx.font = '11px ui-monospace, monospace';
+  ctx.fillText('+1', 4, pad + 4); ctx.fillText('0', 8, mid + 4); ctx.fillText('-1', 4, H - pad + 4);
+
+  const plot = (key, color) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+    frames.forEach((f, i) => {
+      const x = pad + (W - 2 * pad) * (frames.length === 1 ? 0.5 : i / (frames.length - 1));
+      const y = mid - Math.max(-1, Math.min(1, Number(f[key]) || 0)) * (H / 2 - pad);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke();
+    ctx.fillStyle = color;
+    frames.forEach((f, i) => {
+      const x = pad + (W - 2 * pad) * (frames.length === 1 ? 0.5 : i / (frames.length - 1));
+      const y = mid - Math.max(-1, Math.min(1, Number(f[key]) || 0)) * (H / 2 - pad);
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+    });
+  };
+  plot('angle_x', '#4ea1ff');
+  plot('eyeball_x', '#f0b357');
+  ctx.fillStyle = '#4ea1ff'; ctx.fillText('■ ParamAngleX（头）', W - 250, 18);
+  ctx.fillStyle = '#f0b357'; ctx.fillText('■ ParamEyeBallX（眼球）', W - 250, 34);
+}
+
+async function l2dGaze() {
+  let points;
+  try { points = JSON.parse($('l2dGazePoints').value || '[]'); }
+  catch (e) { l2dLog('视线轨迹 JSON 解析失败', String(e)); return; }
+  const r = await req('POST', '/live2d/test/gaze', { body: { points } });
+  if (!r.ok || !r.data) { l2dLog('视线曲线请求失败', r.body || r.error); return; }
+  drawGazeChart(r.data.frames || []);
+  $('l2dGazeInfo').textContent =
+    `${r.data.points} 个采样点 · 灵敏度 ${r.data.config_used?.gaze_sensitivity} · ` +
+    `眼球强度 ${r.data.config_used?.gaze_eyeball}`;
+  // 同时把最后一个点注入真实模型（服务没启动也不影响曲线）
+  const last = points[points.length - 1] || [0, 0];
+  const g = await req('POST', '/live2d/gaze', { body: { nx: last[0], ny: last[1] } });
+  l2dLog(`视线曲线完成，末点注入模型 ${g.ok ? '已提交' : '服务未启动（仅曲线）'}`,
+         r.data.config_used);
+}
+
+async function l2dAction(label, method, path, body) {
+  const r = await req(method, path, body === undefined ? {} : { body });
+  $('l2dActionInfo').textContent =
+    `${label} → ${r.status} ${r.ok ? '✓' : '×'} ${r.data?.note || ''}`;
+  l2dLog(label, r.data || r.body || r.error);
+  return r;
+}
+
+async function loadDialogue() {
+  const s = await req('GET', '/live2d/dialogue');
+  $('l2dDialogueState').textContent = fmt(s.ok ? s.data : { error: s.error });
+  const b = await req('GET', '/live2d/backlog', { query: { limit: 20, offset: 0 } });
+  const rows = (b.data?.entries || []).map((e, i) => `<tr>
+    <td class="mono">${i + 1}</td><td class="mono">${esc(e.speaker || '—')}</td>
+    <td>${esc(e.text || '')}</td><td>${e.read ? '已读' : '—'}</td></tr>`).join('');
+  $('l2dBacklog').innerHTML =
+    `<thead><tr><th>#</th><th>说话人</th><th>台词</th><th>状态</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="muted">暂无回看</td></tr>'}</tbody>`;
+}
+
+async function l2dPush() {
+  const choices = ($('l2dChoices').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const text = $('l2dText').value.replace(/\\n/g, '\n');
+  const r = await l2dAction('推送台词', 'PUT', '/live2d/dialogue', {
+    text, speaker: $('l2dSpeaker').value, emotion: $('l2dEmo').value,
+    instant: $('l2dInstant').checked, choices,
+  });
+  await loadDialogue();
+  return r;
+}
+
+async function l2dCfgState() {
+  const r = await req('GET', '/service/live2d/config');
+  $('l2dCfgState').textContent = fmt(r.ok ? r.data : { error: r.error || `HTTP ${r.status}` });
+  return r;
+}
+
+function l2dCfgPatch() {
+  return {
+    gaze_when_no_face: $('l2dCfgGaze').checked,
+    idle_enabled: $('l2dCfgIdle').checked,
+    is_face_detected: $('l2dCfgFace').checked,
+    dialogue_typing_cps: Number($('l2dCfgCps').value || 30),
+    fps: Number($('l2dCfgFps').value || 60),
+    opacity: Number($('l2dCfgOpacity').value || 1),
+  };
+}
+
+async function l2dCfgSave() {
+  const r = await req('PUT', '/service/live2d/config',
+                      { body: { config: l2dCfgPatch() } });
+  l2dLog('① 只保存配置（pending 应变为 true，运行态不变）', r.data || r.body);
+  await l2dCfgState();
+  await loadLive2DStatus();
+}
+
+async function l2dCfgApply() {
+  const r = await req('PUT', '/service/live2d/config/apply',
+                      { body: { restart: false } });
+  l2dLog('② 显式应用（on_config_change 增量热应用，不重启）', r.data || r.body);
+  await l2dCfgState();
+  await loadLive2DStatus();
+}
+
+async function l2dSuite() {
+  const r = await req('POST', '/live2d/test/suite');
+  const d = r.data || {};
+  l2dLog(`离线自检 ${d.passed}/${d.total} 通过（${d.elapsed_ms}ms，${d.environment}）`, d.cases);
+  l2dBadge(`自检 ${d.passed}/${d.total}`, d.ok ? 'ok' : 'err');
+  $('l2dTestOut').textContent =
+    `${d.passed}/${d.total} 通过 · ${d.elapsed_ms}ms\n\n` +
+    (d.cases || []).map(c => `[${c.ok ? 'PASS' : 'FAIL'}] ${c.name} (${c.ms}ms) ${typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail)}`).join('\n')
+    + '\n\n' + (r.ok ? '' : fmt(r.body));
+}
+
+async function l2dSmoke() {
+  const r = await req('POST', '/live2d/test/smoke', { body: {} });
+  const d = r.data || {};
+  l2dLog(`真实服务冒烟 ${d.passed}/${d.total} 通过`, d.steps);
+  await loadDialogue();
+  await loadLive2DStatus();
+}
+
 /* ───────────────────────── 初始化 ───────────────────────── */
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`));
+  if (name === 'plugins' && !$('pgTable').innerHTML) loadPlugins();
+  if (name === 'live2d' && !$('l2dCards').innerHTML) {
+    loadLive2DStatus();
+    loadDialogue();
+    l2dCfgState();
+  }
 }
 
 function bind() {
@@ -440,6 +699,37 @@ function bind() {
   $('wsPing').addEventListener('click', () => wsSend(JSON.stringify({ type: 'websocket.heartbeat', ts: Date.now() / 1000 })));
   $('wsClose').addEventListener('click', () => { if (state.ws) state.ws.close(); });
   $('wsBody').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) wsSend($('wsBody').value); });
+  $('pgInstall').addEventListener('click', pgInstall);
+  $('pgRefresh').addEventListener('click', loadPlugins);
+  $('pgSource').addEventListener('keydown', (e) => { if (e.key === 'Enter') pgInstall(); });
+
+  // Live2D / Galgame 面板
+  const bind = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  bind('l2dRefresh', loadLive2DStatus);
+  bind('l2dStart', () => l2dAction('启动服务', 'POST', '/service/live2d/start', {}).then(loadLive2DStatus));
+  bind('l2dStop', () => l2dAction('停止服务', 'POST', '/service/live2d/stop', {}).then(loadLive2DStatus));
+  bind('l2dSuite', l2dSuite);
+  bind('l2dSmoke', l2dSmoke);
+  bind('l2dGazeDraw', l2dGaze);
+  bind('l2dGazeHome', () => l2dAction('视线回中', 'POST', '/live2d/gaze', { nx: 0, ny: 0 }));
+  bind('l2dExprBtn', () => l2dAction('切表情', 'POST', '/live2d/expression',
+    { expression: $('l2dExpr').value.trim() }));
+  bind('l2dMotionBtn', () => l2dAction('播动作', 'POST', '/live2d/motion',
+    { group: $('l2dMotion').value.trim() || 'Idle', index: 0, priority: 2 }));
+  bind('l2dEmotionBtn', () => l2dAction('按情绪切', 'POST', '/live2d/emotion',
+    { emotion: $('l2dEmotion').value.trim() }));
+  bind('l2dSpeakOn', () => l2dAction('说话开始', 'POST', '/live2d/speaking', { on: true }));
+  bind('l2dSpeakOff', () => l2dAction('说话结束', 'POST', '/live2d/speaking', { on: false }));
+  bind('l2dBlink', () => l2dAction('眨眼', 'POST', '/live2d/blink', {}));
+  bind('l2dReset', () => l2dAction('复位', 'POST', '/live2d/reset', { target: 'all' }));
+  bind('l2dPush', l2dPush);
+  bind('l2dSkip', () => l2dAction('跳过打字机', 'POST', '/live2d/dialogue/skip', {}).then(loadDialogue));
+  bind('l2dAdvance', () => l2dAction('推进台词', 'POST', '/live2d/dialogue/advance', {}).then(loadDialogue));
+  bind('l2dClear', () => l2dAction('清空对话', 'POST', '/live2d/dialogue/clear', {}).then(loadDialogue));
+  bind('l2dCfgSave', l2dCfgSave);
+  bind('l2dCfgApply', l2dCfgApply);
+  $('l2dGazePoints').addEventListener('keydown', (e) => { if (e.key === 'Enter') l2dGaze(); });
+  $('l2dText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) l2dPush(); });
 }
 
 bind();

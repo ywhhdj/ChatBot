@@ -28,6 +28,7 @@ onUnmounted(() => destroy());
 
 <template>
   <div class="bg-group">
+    <!-- <ServiceShortcut /> -->
     <Notification />
     <BackgroundGroup />
   </div>

@@ -67,8 +67,7 @@ class CharacterOrchestrator:
         #: 本轮实际执行的命令条数（摘要与审计用）
         self._last_commands: List[Any] = []
         #: 轻量路由判断缓存：同一句话不重复付费调用 LLM。
-        #: 有界 LRU，避免长期运行后无上限增长（旧实现到 256 条整表清空，
-        #: 会周期性把热点全部打回付费调用）。
+        #: 有界 LRU，避免长期运行后无上限增长
         self._judge_cache: "OrderedDict[str, str]" = OrderedDict()
         self._judge_cache_limit = 256
         self._judge_cache_lock = threading.RLock()

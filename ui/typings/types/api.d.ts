@@ -26,7 +26,7 @@ declare namespace API {
     description?: string;
     value: boolean | string;
     config?: any[];
-  }| {};
+  } | {};
   type ServiceConfigItems = Record<ServiceId, ServiceConfigItem>;
   type QQBotInfo = {
     id: string;
@@ -35,7 +35,6 @@ declare namespace API {
     share_url: string;
     welcome_msg: string;
   }
-  type ModelName = "google_facelandmarker" | "umi_ocr" | "paddle_ocr";
   type ModelDownloadProgress = {
     model_name: ModelName;
     progress?: number;
@@ -48,24 +47,59 @@ declare namespace API {
   } & ServiceConfigItem>
 }
 
-declare namespace WebSocketAPI{
+declare namespace WebSocketAPI {
+  /** 统一出站信封；from_id 是真实发送方 */
   type WebSocketResponse<T = any> = {
     type: string;
+    ok?: boolean;
+    message?: string;
     data?: T;
     from?: string;
+    from_id?: string;
+    request_id?: string;
+    stream_id?: string;
+    ts?: number;
     timestamp?: number;
   }
   interface WebSocketRequest<T = any> {
     type: string
     data?: T | {
       client_id?: string;
+      request_id?: string;
+      stream_id?: string;
     } & T
+    client_id?: string
+    request_id?: string
+    stream_id?: string
     timestamp?: number
   }
   type WebSocketConnectResponse = {
     client_id: string;
     connected_at: string;
     last_heartbeat: string;
+  };
+  /** REGISTER 帧 */
+  type RegisterData = {
+    uid: string;
+    device: "mobile" | "desktop" | "unknown";
+    token?: string;
+  };
+  type RegisterResponse = { uid: string; device: string };
+  type DeviceFrame = {
+    action?: string;
+    seq?: number;
+    epoch?: number;
+    t?: number;
+    params?: Record<string, any>;
+    from_role?: string;
+    from_id?: string;
+    uid?: string;
+    text?: string;
+    source?: string;
+    deg?: number;
+    direction?: string;
+    model_id?: string;
+    model_path?: string;
   };
   type RecordEventType = "audio_chunk" | "stop" | "asr_result";
   type RecordAudioChunkData = {

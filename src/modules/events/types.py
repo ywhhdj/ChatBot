@@ -100,6 +100,28 @@ class WebSocketEventType:
     SUBSCRIBE = "subscribe"          # 订阅固定 allowlist 内的事件
     UNSUBSCRIBE = "unsubscribe"
     CANCEL = "cancel"                # 按 request_id 取消本连接的在途请求
+    
+    
+    # ---- 注册帧（CONNECT 之后、业务消息之前；CONTROL_EVENTS 即时执行） ----
+    REGISTER = "register"
+
+    # ---- 三端设备联动（server / desktop / mobile 共用同一套字面量） ----
+    DEVICE_HELLO = "device.hello"
+    DEVICE_POSE = "device.pose"
+    DEVICE_STAGE_EVENT = "device.stage_event"
+    DEVICE_PLAY_ANIMATION = "device.play_animation"
+    DEVICE_MODEL_SET = "device.model_set"
+    DEVICE_TEXT_INPUT = "device.text_input"   # 手机打字 / 语音识别文本 → 电脑端
+    DEVICE_ASR_TEXT = "device.asr_text"       # ASR 中间结果 → 电脑端
+
+    @classmethod
+    def device_events(cls) -> frozenset:
+        """所有设备帧（高频、短路径，不占业务 inflight）。"""
+        return frozenset({
+            cls.DEVICE_HELLO, cls.DEVICE_POSE, cls.DEVICE_STAGE_EVENT,
+            cls.DEVICE_PLAY_ANIMATION, cls.DEVICE_MODEL_SET,
+            cls.DEVICE_TEXT_INPUT, cls.DEVICE_ASR_TEXT,
+        })
 
 class ToolEventType:
     TOOL_CALL_START   = "tool.call.start"      # 开始调用某个工具

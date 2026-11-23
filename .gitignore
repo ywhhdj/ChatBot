@@ -8,8 +8,6 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-resources/models/
-
 node_modules
 .DS_Store
 dist
@@ -30,10 +28,15 @@ pnpm-workspace.yaml
 *.sln
 *.sw?
 *.lock
+**.pyd
 
+log/
+models/
 **/dist/*
 **/__pycache__/*
 memory/*
+data/
+mobile/assets/
 
 *.tsbuildinfo
 

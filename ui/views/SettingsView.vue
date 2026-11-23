@@ -1,45 +1,57 @@
 <script setup lang="ts">
+import { useRoute, type LocationQuery } from 'vue-router';
 import { defaultUIStore } from '@/stores/ui';
+import {
+  SETTINGS_PAGE_MAP,
+  SETTINGS_PAGE_NAMES,
+  SETTINGS_TABS,
+  MORE_TABS,
+} from '@/components/views/settings/settingsPages';
 
+const route = useRoute();
 const uiStore = defaultUIStore();
 const shouldShowOverlay = ref(false);
 const overlayOpacity = ref(0);
 
-// 组件映射表
-const componentMap: Record<UI.SettingsTab, Component> = {
-  general: defineAsyncComponent(() => import('@/components/views/settings/pages/GeneralSetting.vue')),
-  history: defineAsyncComponent(() => import('@/components/views/settings/pages/HistorySetting.vue')),
-  character: defineAsyncComponent(() => import('@/components/views/settings/pages/CharacterSetting.vue')),
-  background: defineAsyncComponent(() => import('@/components/views/settings/pages/BackgroundSetting.vue')),
-  sound: defineAsyncComponent(() => import('@/components/views/settings/pages/SoundSetting.vue')),
-  save: defineAsyncComponent(() => import('@/components/views/settings/pages/SaveSetting.vue')),
-  more: defineAsyncComponent(() => import('@/components/views/settings/pages/MoreSetting.vue')),
+const currentComponent = computed(() => SETTINGS_PAGE_MAP[uiStore.currentTab.settings] || null);
+
+/** 与组件名一致；配合模块级映射，KeepAlive 才真正复用实例 */
+const keepAliveInclude = SETTINGS_PAGE_NAMES;
+
+function applyRouteTab(query: LocationQuery) {
+  const tab = String(query.tab ?? '');
+  const sub = String(query.sub ?? '');
+  if (SETTINGS_TABS.includes(tab as UI.SettingsTab)) {
+    uiStore.setCurrentSettingsTab(tab as UI.SettingsTab);
+  }
+  if (tab === 'more' && MORE_TABS.includes(sub as UI.MoreTab)) {
+    uiStore.setCurrentMoreTab(sub as UI.MoreTab);
+  }
 }
 
-const currentComponent = computed(() => {
-  return componentMap[uiStore.currentTab.settings] || null
-});
+watch(() => route.query, (query) => applyRouteTab(query));
 
-const keepAliveInclude = computed(() => {
-  return Object.keys(componentMap).join(',')
-});
-
-let hideTimer: number | null = null
-
+let hideTimer: number | null = null;
+let rafId = 0;
 
 onMounted(() => {
-  shouldShowOverlay.value = true
-  requestAnimationFrame(() => {
-    overlayOpacity.value = 1
+  applyRouteTab(route.query);
+  // 尊重减弱动效偏好：直接跳过入场遮罩，避免无谓的全屏合成
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) return;
+  shouldShowOverlay.value = true;
+  rafId = requestAnimationFrame(() => {
+    overlayOpacity.value = 1;
   });
-  hideTimer = setTimeout(() => {
+  hideTimer = window.setTimeout(() => {
     shouldShowOverlay.value = false;
     hideTimer = null;
-  }, 300)
+  }, 300);
 });
 
 onUnmounted(() => {
-  if (hideTimer) clearTimeout(hideTimer)
+  if (hideTimer) clearTimeout(hideTimer);
+  if (rafId) cancelAnimationFrame(rafId);
   overlayOpacity.value = 0;
 });
 </script>
@@ -47,8 +59,8 @@ onUnmounted(() => {
 <template>
   <div v-bind="$attrs">
     <div
+      v-if="shouldShowOverlay"
       class="blur-overlay"
-      v-show="shouldShowOverlay"
       :style="{ opacity: overlayOpacity }"
     ></div>
     <div class="settings-panel">
@@ -57,7 +69,10 @@ onUnmounted(() => {
       </div>
       <div class="pages">
         <MenuPage width="90%">
-          <KeepAlive :include="keepAliveInclude">
+          <KeepAlive
+            :include="keepAliveInclude"
+            :max="10"
+          >
             <component :is="currentComponent" />
           </KeepAlive>
         </MenuPage>
@@ -67,14 +82,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.header {
-  display: flex;
-  align-items: center;
-  padding: 10px 15px;
-  position: relative;
-  justify-content: space-between;
-}
-
 .settings-panel {
   position: fixed;
   top: 0;
@@ -86,8 +93,6 @@ onUnmounted(() => {
   box-sizing: border-box;
   z-index: 3;
   color: #333;
-  /* background-color: rgba(0, 0, 0, 0.15);
-  background-color: transparent; */
 }
 
 .nav {
@@ -118,16 +123,9 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   z-index: 2;
-
-  /* 初始状态 */
   opacity: 0;
   backdrop-filter: blur(2px);
-  /* background-color: rgba(0, 0, 0, 0.2); */
-
-  /* 过渡效果 */
   transition: opacity 0.3s ease;
-
-  /* 确保覆盖层可以点击穿透 */
   pointer-events: none;
 }
 

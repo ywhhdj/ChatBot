@@ -8,12 +8,6 @@
  *   需要富文本时传 markdown=true，由固定高度的 Markdown 容器承载。
  * - 字体/主题变化后 bump measureVersion 重测，避免首屏高度偏差。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import VirtualList from '@/components/common/VirtualList.vue';
-import Markdown from '@/components/common/Markdown.vue';
-import ToolCallCard from '@/components/chat/tools/ToolCallCard.vue';
-import ToolStepGroup from '@/components/chat/tools/ToolStepGroup.vue';
-import AsyncState from '@/components/common/AsyncState.vue';
 
 type Row = {
   id: string;

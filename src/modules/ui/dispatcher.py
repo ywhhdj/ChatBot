@@ -1,7 +1,7 @@
-"""主线程任务调度器（Qt 驱动，零 asyncio 依赖）。
+"""主线程任务调度器
 
-架构前提（见清单第 0 节）：
-  * 主线程跑 Qt，**没有 asyncio loop**。
+架构前提：
+  * 主线程跑 Qt，没有 asyncio loop。
   * 因此本调度器不能用 loop.call_soon_threadsafe 之类的手段唤醒，
     全部改为 threading 原语 + Qt 侧 QTimer(16ms) 轮询消费。
   * 跨线程调用一律带超时（默认 30s），杜绝 D3 类永久阻塞。
@@ -66,10 +66,7 @@ def join_with_pump(thread: Optional[threading.Thread], timeout: float = 5.0) -> 
 
 @on_event_class([
     (types.AppEventType.MainThreadDispatcherEventType.RUN_ON_MAIN_THREAD, "run_on_main_thread"),
-    (
-        types.AppEventType.MainThreadDispatcherEventType.RUN_ASYNC_ON_MAIN_THREAD,
-        "run_async_on_main_thread",
-    ),
+    (types.AppEventType.MainThreadDispatcherEventType.RUN_ASYNC_ON_MAIN_THREAD,"run_async_on_main_thread"),
     (types.AppEventType.MainThreadDispatcherEventType.STOP, "stop"),
 ])
 class MainThreadDispatcher(BaseManager):
@@ -112,7 +109,7 @@ class MainThreadDispatcher(BaseManager):
             self._sync_tasks.clear()
 
         for func, args, kwargs, future_id in tasks_to_execute:
-            # B10：先摘掉登记再结算，避免泄漏与超时后的重复 settle
+            # 先摘掉登记再结算，避免泄漏与超时后的重复 settle
             with self._future_lock:
                 future = self._pending_futures.pop(future_id, None)
             try:
@@ -158,7 +155,7 @@ class MainThreadDispatcher(BaseManager):
             self._sync_tasks.append((func, args, kwargs, future_id))
 
         try:
-            # D3：一律带超时，绝不无限等待
+            # 一律带超时，绝不无限等待
             return future.result(timeout=timeout)
         except futures.TimeoutError:
             self._discard_future(future_id)
@@ -180,7 +177,7 @@ class MainThreadDispatcher(BaseManager):
     ) -> Any:
         """执行一个协程，其中对 Qt 的访问会被路由回主线程。
 
-        A8：主线程不承载 asyncio loop，所以不能在 Qt 线程里
+        主线程不承载 asyncio loop，所以不能在 Qt 线程里
         `new_event_loop().run_until_complete(...)` —— 那会冻结 UI 并可能死锁。
         正确做法：在**调用方自己的 loop** 里 await 这个协程；
         协程内部凡是碰 Qt 的地方，通过 run_on_main_thread() 回到主线程即可。

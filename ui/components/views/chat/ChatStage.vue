@@ -1,19 +1,6 @@
 <script setup lang="ts">
 /**
- * 聊天舞台 —— FrontendPlan Step 3 / Step 4 / Step 5
- *
- * 把既有「新组件栈」接进 galgameUI：底部对话框 + 上方历史卷轴 + 立绘留白，
- * 视觉沿用 ChatDialog.vue 的渐变上沿、玻璃蒙层、白色文字与 Maoken 字体。
- *
- * 职责边界：
- * - 只做展示编排与用户交互；业务状态以后端为准（F1-05）；
- * - 每次请求显式传 session_id，character_id 只作为 UI 隔离维度（F0-06）；
- * - 切换会话/角色前 detach 旧流，迟到 chunk 不覆盖新会话（F1-06 / F1-07）；
- * - 通知只在页面层触发，取消静默，底层 service 不弹窗（F0-04）；
- * - 卸载释放录音 handler、流与 store 视图缓存（F1-03 / F2-05）。
- *
- * 性能：只读请求并行 + 迟到响应 token 校验，虚拟滚动 / token 批量 flush /
- * markRaw 增量 patch 由 ChatMessageList 与 chat store 承担；本容器只传引用。
+ * 聊天舞台
  */
 import {
   computed,
@@ -22,6 +9,8 @@ import {
   onMounted,
   ref,
   shallowRef,
+  withDefaults,
+  defineProps,
 } from 'vue';
 import { useRouter } from 'vue-router';
 import { useChatStore } from '@/stores/chat';
@@ -37,17 +26,12 @@ import {
   unregisterRecordHandler,
 } from '@/api/websocket/handlers/record';
 
-import AsyncState from '@/components/common/AsyncState.vue';
-import OperationStatus from '@/components/common/OperationStatus.vue';
-import Button from '@/components/base/Button.vue';
-import Select from '@/components/base/Select.vue';
-import ChatSessionBar from '@/components/chat/ChatSessionBar.vue';
-import ChatMessageList from '@/components/chat/ChatMessageList.vue';
-import ChatComposer from '@/components/chat/ChatComposer.vue';
-import ChatNameplate from '@/components/chat/ChatNameplate.vue';
-import StreamStatus from '@/components/chat/StreamStatus.vue';
-import AgentSidePanel from '@/components/chat/AgentSidePanel.vue';
-import RestorePlanDialog from '@/components/chat/RestorePlanDialog.vue';
+// 编辑立绘时历史卷轴让位、对话框隐藏，避免半透明层挡住贴纸拖拽
+const props = withDefaults(defineProps<{
+  avatarEditing?: boolean
+}>(), {
+  avatarEditing: false,
+});
 
 const router = useRouter();
 const uiStore = defaultUIStore();
@@ -82,6 +66,16 @@ const lastWarning = computed(() => warnings.value[warnings.value.length - 1] || 
 const sessionBarRef = ref<any>(null);
 const messageListRef = ref<any>(null);
 
+watch(
+  () => props.avatarEditing,
+  (editing) => {
+    if (!editing) return;
+    agentVisible.value = false;
+    restoreVisible.value = false;
+    slotPickerVisible.value = false;
+  }
+);
+
 const routeOptions = [
   { id: '', label: '自动路由' },
   { id: 'pure_chat', label: '纯对话' },
@@ -91,13 +85,13 @@ const routeOptions = [
 
 // ---------- 流（唯一状态机） ----------
 function pushWarning(message: string) {
-  // 有界缓冲：异常流刷警告时只保留最近 5 条（FrontendDesign §7）
+  // 有界缓冲：异常流刷警告时只保留最近 5 条
   warnings.value = [...warnings.value.slice(-4), message];
 }
 
 function notifyError(err: unknown) {
   const apiErr = err instanceof ApiClientError ? err : toApiClientError(err);
-  // 用户主动取消不是错误通知（F0-04）
+  // 用户主动取消不是错误通知
   if (apiErr.kind === 'cancelled') return;
   const view = errorView(apiErr);
   notification.showError({
@@ -208,7 +202,7 @@ async function loadMessages() {
   historyError.value = null;
   try {
     const data = await historyService.messages(sid, { limit: 200 });
-    // 归属校验：切换会话后的迟到响应不得写入当前 store（F1-05 / F1-06）
+    // 归属校验：切换会话后的迟到响应不得写入当前 store
     if (token !== loadToken || sid !== sessionId.value) return;
     const mapped: UI.ChatMessage[] = (data.messages || []).map((m, i) => ({
       id: `hist_${sid}_${i}_${m.timestamp}`,
@@ -275,7 +269,10 @@ async function onCreateSession() {
     applySession(created.id, created.character_id || characterId.value);
     await loadMessages();
     sessionBarRef.value?.refresh?.();
-    notification.showSuccess({ title: '新会话', message: '已创建并切换到新会话' });
+    notification.showSuccess({
+      title: '新会话',
+      message: '已创建并切换到新会话'
+    });
   } catch (err) {
     notifyError(err);
   }
@@ -284,7 +281,10 @@ async function onCreateSession() {
 // ---------- 发送 / 取消 / 重试 ----------
 function onSend(text: string) {
   if (!sessionId.value) {
-    notification.showError({ title: '无法发送', message: '请先选择或创建会话' });
+    notification.showError({
+      title: '无法发送',
+      message: '请先选择或创建会话'
+    });
     return;
   }
   // 显式隔离维度由 useChatStream 注入；route 只取 ChatRequest 声明值
@@ -367,7 +367,10 @@ async function openRestore() {
 
 function confirmRestore() {
   if (!slotChoice.value) {
-    notification.showWarning({ title: '恢复计划', message: '请先选择存档槽' });
+    notification.showWarning({
+      title: '恢复计划',
+      message: '请先选择存档槽'
+    });
     return;
   }
   restoreSlotId.value = slotChoice.value;
@@ -378,7 +381,10 @@ function confirmRestore() {
 function onRestored(snapshot: UI.OperationSnapshot) {
   // 用户点击后不立刻显示成功：只按服务端终态更新 UI
   if (snapshot.phase === 'succeeded') {
-    notification.showSuccess({ title: '恢复完成', message: '存档已按服务端终态恢复' });
+    notification.showSuccess({
+      title: '恢复完成',
+      message: '存档已按服务端终态恢复'
+    });
   } else if (snapshot.phase === 'partial_failure') {
     notification.showWarning({
       title: '恢复未完全成功',
@@ -429,153 +435,154 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <AsyncState
-    class="stage-root"
-    :state="bootView"
-    :error="bootError"
-    loading-text="正在连接会话服务…"
-    @retry="boot"
+  <div
+    class="chat-stage"
+    :class="{ 'is-avatar-editing': props.avatarEditing }"
   >
-    <div class="chat-stage">
-      <ChatSessionBar
-        ref="sessionBarRef"
-        :session-id="sessionId"
-        :character-id="characterId"
-        :stream-phase="phase"
-        :disabled="bootView === 'loading'"
-        :on-before-switch="detachBeforeSwitch"
-        :initial-sessions="sessions"
-        :initial-characters="characters"
-        @switch-session="onSwitchSession"
-        @switch-character="onSwitchCharacter"
-        @create-session="onCreateSession"
+    <ChatSessionBar
+      ref="sessionBarRef"
+      :session-id="sessionId"
+      :character-id="characterId"
+      :stream-phase="phase"
+      :disabled="bootView === 'loading'"
+      :on-before-switch="detachBeforeSwitch"
+      :initial-sessions="sessions"
+      :initial-characters="characters"
+      @switch-session="onSwitchSession"
+      @switch-character="onSwitchCharacter"
+      @create-session="onCreateSession"
+    />
+
+    <!-- 历史卷轴：保持立绘可见，长历史由 VirtualList 承接；编辑态让位给贴纸拖拽 -->
+    <section
+      class="history-wrap"
+      :class="{ 'is-editing': props.avatarEditing }"
+    >
+      <ChatMessageList
+        ref="messageListRef"
+        :messages="messages"
+        :loading="historyState === 'loading'"
+        :error="historyError"
+        :streaming="isBusy"
+        :markdown="markdown"
+        @retry="loadMessages"
       />
+    </section>
 
-      <!-- 历史卷轴：保持立绘可见，长历史由 VirtualList 承接 -->
-      <section class="history-wrap">
-        <ChatMessageList
-          ref="messageListRef"
-          :messages="messages"
-          :loading="historyState === 'loading'"
-          :error="historyError"
-          :streaming="isBusy"
-          :markdown="markdown"
-          @retry="loadMessages"
-        />
-      </section>
+    <!-- 底部 galgame 对话框：非编辑态常驻、贴底且 z 高于立绘（半透明渐变透出立绘下半身）-->
+    <section
+      v-show="!props.avatarEditing"
+      class="dialog"
+    >
+      <div class="chatbox-box">
+        <div class="chatbox-main">
+          <ChatNameplate
+            :name="characterName"
+            :subtitle="subtitle"
+            :emotion="emotion"
+            :streaming="isBusy"
+            :mic-granted="micGranted"
+            :agent-visible="agentVisible"
+            :busy="isBusy"
+            @toggle-agent="agentVisible = !agentVisible"
+            @open-restore="openRestore"
+            @open-history="openHistory"
+            @open-settings="openSettings"
+            @voice-start="onVoiceStart"
+            @voice-stop="onVoiceStop"
+          />
 
-      <!-- 底部 galgame 对话框：沿用 ChatDialog 的渐变上沿与玻璃蒙层 -->
-      <section class="dialog">
-        <div class="chatbox-box">
-          <div class="chatbox-main">
-            <ChatNameplate
-              :name="characterName"
-              :subtitle="subtitle"
-              :emotion="emotion"
-              :streaming="isBusy"
-              :mic-granted="micGranted"
-              :agent-visible="agentVisible"
-              :busy="isBusy"
-              @toggle-agent="agentVisible = !agentVisible"
-              @open-restore="openRestore"
-              @open-history="openHistory"
-              @open-settings="openSettings"
-              @voice-start="onVoiceStart"
-              @voice-stop="onVoiceStop"
-            />
+          <div class="chatbox-line"></div>
 
-            <div class="chatbox-line"></div>
-
-            <div class="status-row">
-              <StreamStatus
-                :state="state"
-                :phase="phase"
-                @cancel="onCancel"
-              />
-              <Button
-                v-if="phase === 'failed'"
-                type="select"
-                @click="onRetryStream"
-              >重试</Button>
-              <span
-                v-if="lastWarning"
-                class="warning-text"
-                :title="lastWarning"
-              >{{ lastWarning }}</span>
-            </div>
-
-            <ChatComposer
-              v-model="draft"
-              :streaming="isBusy"
-              :disabled="!sessionId"
-              @send="onSend"
+          <div class="status-row">
+            <StreamStatus
+              :state="state"
+              :phase="phase"
               @cancel="onCancel"
             />
-
-            <div class="stage-tools">
-              <span class="tool-label">路由</span>
-              <Select
-                v-model="routeChoice"
-                :options="routeOptions"
-                :disabled="isBusy"
-              />
-              <Button
-                type="nav"
-                :class="{ 'is-active': markdown }"
-                @click="markdown = !markdown"
-              >{{ markdown ? '富文本' : '纯文本' }}</Button>
-              <span class="tool-spacer"></span>
-              <OperationStatus
-                v-if="operationId"
-                :operation-id="operationId"
-                label="存档恢复"
-                @settled="onOperationSettled"
-                @error="onOperationError"
-              />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <AgentSidePanel
-        v-model:visible="agentVisible"
-        :messages="messages"
-      />
-
-      <RestorePlanDialog
-        v-model:visible="restoreVisible"
-        :slot-id="restoreSlotId"
-        @restored="onRestored"
-        @partial-failure="onPartialFailure"
-      />
-
-      <Transition name="fade">
-        <div
-          v-if="slotPickerVisible"
-          class="slot-picker"
-          role="dialog"
-          aria-label="选择存档槽"
-        >
-          <div class="slot-picker-head">选择存档槽 · 恢复预演是只读操作</div>
-          <Select
-            v-model="slotChoice"
-            :options="slotOptions"
-          />
-          <div class="slot-picker-actions">
             <Button
+              v-if="phase === 'failed'"
               type="select"
-              :disabled="!slotChoice"
-              @click="confirmRestore"
-            >查看恢复计划</Button>
+              @click="onRetryStream"
+            >重试</Button>
+            <span
+              v-if="lastWarning"
+              class="warning-text"
+              :title="lastWarning"
+            >{{ lastWarning }}</span>
+          </div>
+
+          <ChatComposer
+            v-model="draft"
+            :streaming="isBusy"
+            :disabled="!sessionId"
+            @send="onSend"
+            @cancel="onCancel"
+          />
+
+          <div class="stage-tools">
+            <span class="tool-label">路由</span>
+            <Select
+              v-model="routeChoice"
+              :options="routeOptions"
+              :disabled="isBusy"
+            />
             <Button
               type="nav"
-              @click="slotPickerVisible = false"
-            >取消</Button>
+              :class="{ 'is-active': markdown }"
+              @click="markdown = !markdown"
+            >{{ markdown ? '富文本' : '纯文本' }}</Button>
+            <span class="tool-spacer"></span>
+            <OperationStatus
+              v-if="operationId"
+              :operation-id="operationId"
+              label="存档恢复"
+              @settled="onOperationSettled"
+              @error="onOperationError"
+            />
           </div>
         </div>
-      </Transition>
-    </div>
-  </AsyncState>
+      </div>
+    </section>
+
+    <AgentSidePanel
+      v-model:visible="agentVisible"
+      :messages="messages"
+    />
+
+    <RestorePlanDialog
+      v-model:visible="restoreVisible"
+      :slot-id="restoreSlotId"
+      @restored="onRestored"
+      @partial-failure="onPartialFailure"
+    />
+
+    <Transition name="fade">
+      <div
+        v-if="slotPickerVisible"
+        class="slot-picker"
+        role="dialog"
+        aria-label="选择存档槽"
+      >
+        <div class="slot-picker-head">选择存档槽 · 恢复预演是只读操作</div>
+        <Select
+          v-model="slotChoice"
+          :options="slotOptions"
+        />
+        <div class="slot-picker-actions">
+          <Button
+            type="select"
+            :disabled="!slotChoice"
+            @click="confirmRestore"
+          >查看恢复计划</Button>
+          <Button
+            type="nav"
+            @click="slotPickerVisible = false"
+          >取消</Button>
+        </div>
+      </div>
+    </Transition>
+  </div>
 </template>
 
 <style scoped>
@@ -587,11 +594,29 @@ onBeforeUnmount(() => {
 
 .chat-stage {
   position: relative;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+.chat-stage.is-avatar-editing {
+  pointer-events: none;
+}
+
+.chat-stage.is-avatar-editing> :first-child,
+.chat-stage.is-avatar-editing .slot-picker,
+.chat-stage.is-avatar-editing :deep(.side-panel),
+.chat-stage.is-avatar-editing :deep(.restore-dialog) {
+  pointer-events: auto;
+}
+
+/* 历史卷轴在编辑态完全让位：不抢指针、不遮挡画布 */
+.chat-stage.is-avatar-editing .history-wrap {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* 历史卷轴：半透明渐变，立绘与背景仍可见 */
@@ -603,14 +628,20 @@ onBeforeUnmount(() => {
   border-radius: 12px 12px 0 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-bottom: none;
-  background: linear-gradient(
-    to top,
-    rgba(0, 14, 39, 0.62) 0%,
-    rgba(0, 14, 39, 0.05) 100%
-  );
+  background: linear-gradient(to top,
+      rgba(0, 14, 39, 0.62) 0%,
+      rgba(0, 14, 39, 0.05) 100%);
   backdrop-filter: blur(1px);
   box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  transition: opacity 0.16s ease-out;
+}
+
+/* Step 11：编辑立绘时历史卷轴彻底让位（opacity 不改变布局尺寸，虚拟列表不重算），
+   返回对话时原位恢复 */
+.history-wrap.is-editing {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .dialog {
@@ -641,12 +672,10 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   height: 40px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 14, 39, 0.3) 50%,
-    rgba(0, 14, 39, 0.6) 100%
-  );
+  background: linear-gradient(to bottom,
+      transparent 0%,
+      rgba(0, 14, 39, 0.3) 50%,
+      rgba(0, 14, 39, 0.6) 100%);
   pointer-events: none;
 }
 
@@ -762,6 +791,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
+
   .chatbox-main,
   .history-wrap {
     width: 90%;

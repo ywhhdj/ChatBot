@@ -1,4 +1,17 @@
 declare namespace UI {
+  interface TabItem {
+    id: string;
+    label: string;
+    icon?: UI.IconType;
+    disabled?: boolean;
+  }
+  interface ConfirmSpec {
+    title: string;
+    message: string;
+    confirmText: string;
+    cancelText: string;
+    danger?: boolean;
+  }
   type MoreTab =
     | "modelprovider"
     | "monitor"

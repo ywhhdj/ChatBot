@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+  <head>
+    <meta charset="UTF-8">
+    <title>Live2D Web 交互测试</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #2b2b2b;
+        font-family: sans-serif;
+      }
+
+      #canvas-container {
+        width: 100vw;
+        height: 100vh;
+      }
+
+      /* 控制面板 */
+      #ui-panel {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px;
+        border-radius: 8px;
+        max-height: 90vh;
+        overflow-y: auto;
+        display: none;
+        /* 默认隐藏，按 H 键显示 */
+      }
+
+      .btn {
+        display: block;
+        width: 100%;
+        margin-bottom: 5px;
+        padding: 5px;
+        cursor: pointer;
+      }
+    </style>
+    <!-- 引入依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.2/dist/browser/pixi.min.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+    <!-- 必须本地引入 Cubism Core -->
+    <script src="./live2dcubismcore.min.js"></script>
+  </head>
+
+  <body>
+    <div id="canvas-container"></div>
+    <div id="ui-panel">
+      <h3>参数控制</h3>
+      <div id="param-buttons"></div>
+      <hr>
+      <h3>部件显隐</h3>
+      <div id="part-buttons"></div>
+    </div>
+
+    <script>
+      // 初始化 PIXI 应用
+      const app = new PIXI.Application({
+        view: document.createElement('canvas'),
+        transparent: true,
+        resizeTo: window,
+        autoStart: true,
+      });
+      document.getElementById('canvas-container').appendChild(app.view);
+
+      let currentModel = null;
+
+      // 加载模型 (注意替换为你模型目录的真实路径)
+      // 假设模型目录叫 deepseek，放在同级的 models 文件夹下
+      const modelUrl = './models/deepseek/deepseek.model3.json';
+
+      PIXI.live2d.Live2DModel.from(modelUrl).then(model => {
+        currentModel = model;
+        app.stage.addChild(model);
+
+        // 调整模型大小和位置
+        model.scale.set(0.5);
+        model.x = app.screen.width / 2;
+        model.y = app.screen.height / 2;
+        model.anchor.set(0.5, 0.5);
+
+        // 开启自动眨眼、呼吸（需要模型配置了对应参数）
+        model.internalModel.motionManager.expressionManager = null; // 禁用默认表情，防止冲突
+        model.internalModel.motionManager.startRandomMotion('Idle');
+
+        // 初始化 UI 面板数据
+        initUI(model);
+
+        // 绑定点击互动
+        model.on('hit', (hitAreas) => {
+          // hitAreas 会返回点击到的部位名称，比如 "Head", "Body"
+          if (hitAreas.includes("Head")) {
+            console.log("摸头！");
+            // 触发摸头动作或参数
+          }
+        });
+
+        // 鼠标跟随（如果你想要的话）
+        model.on('pointermove', (e) => {
+          model.focus(e.global.x, e.global.y);
+        });
+
+      }).catch(err => {
+        console.error("模型加载失败:", err);
+      });
+
+      // 初始化控制面板
+      function initUI(model) {
+        const coreModel = model.internalModel.coreModel;
+
+        // --- 1. 参数控制面板 (自动解析 cdi3.json 生成按钮) ---
+        const paramDiv = document.getElementById('param-buttons');
+        // 这里可以硬编码你关心的参数，或者通过读取 cdi3.json 动态生成
+        // 针对你的“大肥鱼”模型，我们直接做几个关键按钮
+        const targetParams = {
+          'key1': '黑脸',
+          'key2': '落泪',
+          'Clothes1': '长短裙切换',
+          'Clothes2': '大小变',
+          'ParamAngleX': '头部 X',
+          'ParamMouthOpenY': '张嘴'
+        };
+
+        for (const [id, name] of Object.entries(targetParams)) {
+          const btn = document.createElement('button');
+          btn.className = 'btn';
+          btn.innerText = `切换 ${name} (${id})`;
+          btn.onclick = () => {
+            // 读取当前值，翻转 0 和 1 (假设是开关型参数)
+            let currentVal = coreModel.getParameterValueById(id);
+            let newVal = currentVal > 0.5 ? 0.0 : 1.0;
+            coreModel.setParameterValueById(id, newVal);
+            console.log(`设置参数 ${id} 为 ${newVal}`);
+          };
+          paramDiv.appendChild(btn);
+        }
+
+        // --- 2. 部件透明度面板 (直接控制拼装) ---
+        const partDiv = document.getElementById('part-buttons');
+        // 获取模型所有部件
+        const partCount = coreModel.getPartCount();
+        for (let i = 0; i < partCount; i++) {
+          const partId = coreModel.getPartIdByIndex(i);
+          // 过滤掉物理骨骼等无意义部件，只显示有名字的
+          if (!partId || partId.startsWith("Part") || partId.includes("_Skinning")) {
+            // 为了演示，只挑几个关键部件展示
+            if (partId === "Part107" || partId === "Part97" || partId === "Part77") {
+              const btn = document.createElement('button');
+              btn.className = 'btn';
+              btn.innerText = `隐藏/显示 ${partId}`;
+              btn.onclick = () => {
+                let currentOpacity = coreModel.getPartOpacityById(partId);
+                let newOpacity = currentOpacity > 0.5 ? 0.0 : 1.0;
+                coreModel.setPartOpacityById(partId, newOpacity);
+                console.log(`设置部件 ${partId} 透明度为 ${newOpacity}`);
+              };
+              partDiv.appendChild(btn);
+            }
+          }
+        }
+
+        // 显示面板
+        document.getElementById('ui-panel').style.display = 'block';
+      }
+
+      // 键盘按 H 隐藏/显示面板
+      window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'h') {
+          const panel = document.getElementById('ui-panel');
+          panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+      });
+    </script>
+  </body>
+
+</html>

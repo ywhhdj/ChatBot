@@ -9,7 +9,6 @@
  */
 import { computed } from 'vue';
 import Button from '@/components/base/Button.vue';
-import VoiceRecord from '@/components/chat/buttons/VoiceRecord.vue';
 
 const props = withDefaults(
   defineProps<{

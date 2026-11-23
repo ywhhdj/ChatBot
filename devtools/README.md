@@ -31,8 +31,37 @@ npm run devtools          # 等价于 vite --open /devtools/index.html
 | 功能冒烟 | 批量跑只读 GET 端点出表格；写操作默认不执行，勾选后才跑且仍有黑名单 |
 | 服务配置三态 | 可视化 `get_config` → `update_config`（`pending=true`）→ `apply_config`（`pending=false`） |
 | SSE / WS | SSE 首帧延迟 / 帧数 / 事件序列；WS 连接、心跳、收发帧 |
+| 插件 | 对齐 AIRI DevTools plugin-host 的 Registry View（manifest / 路径 / enabled / loaded / state / missing）与 Capability Matrix；支持目录 / zip 安装、启用、停用、热重载、卸载 |
+| Live2D / Galgame | 立绘状态与性能、鼠标视线折线、表情/动作/情绪、EnhancedDialogueComponent 台词与回看、配置三态验收、离线自检与真实服务冒烟 |
 
-服务配置三态面板是 `docs/api.md §3.20` 的验收入口：
+插件面板是 `docs/api.md §3.24` 的验收入口：安装后必须看到 `enabled=false` / `state=not_loaded`，显式启用才变 `active`；禁用 `builtin-services` 后依赖它的第三方插件应自动回 `pending`。
+
+## Live2D 面板怎么测（§3.25）
+
+**不需要启动 live2d 服务也能验的部分**：
+
+1. 点「离线自检 18 例」→ 调 `POST /api/live2d/test/suite`，覆盖视线、动捕回落、
+   待机演出、口型闭合、性能自适应、打字机与标点停顿、队列、回看、QSS/XSS、
+   存档三态；与 `python src/tests/test_live2d.py` 同一套用例。
+2. 在轨迹框里改 `[[nx,ny],…]` 点「画视线曲线」→ 调 `POST /api/live2d/test/gaze`，
+   蓝线 `ParamAngleX`（头转）、金线 `ParamEyeBallX`（眼球）。这是纯逻辑模拟，
+   **不碰 Qt / OpenGL / GPU**。
+
+**需要服务已启动的部分**：
+
+3. 点「启动服务」（等于 `POST /api/service/live2d/start`），模型加载后状态卡片变 `READY`。
+4. 表情 / 动作 / 情绪 / 说话 / 眨眼 / 复位按钮逐项点，看立绘反应与右下角动作日志。
+5. 推送台词 → 观察打字机、名称框、等待指示器；再点跳过 / 推进 / 清空，看对话框状态与回看表。
+6. 配置三态：勾掉「无动捕跟随鼠标」、改打字速度与帧率 → **① 只保存**
+   （`pending=true`、运行态不变）→ **② 显式应用**（`on_config_change` 热应用，
+   `restart:false`，不重启服务）。
+7. 点「真实服务冒烟」→ 自动跑 status → gaze → expression → motion → emotion →
+   dialogue → skip → backlog → status，逐步给 ok/detail。
+
+> 表情 / 动作 id 必须来自你自己的 `.model3.json`；不存在的 id 会被引擎静默过滤，
+> 这是设计而不是 bug。完整 112 项设置的分组见 `GET /api/live2d/settings`。
+
+服务配置三态面板是 `docs/api.md §3.22` 的验收入口：
 ② 保存后 `active_config` 必须保持不变；③ 应用后才 `config == active_config`。
 面板里的 apply 用 `restart=false`，避免调试时重启真实服务。
 

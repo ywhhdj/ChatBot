@@ -1,4 +1,4 @@
-"""`MemoryUsageEvent` 管线（M1-04 / §8.3）。
+"""`MemoryUsageEvent` 管线
 
 四条硬规则，逐条对应文档：
 
@@ -12,13 +12,6 @@
    匹配的记忆。
 4. **强化路径不持有会话锁，不在请求线程中执行**。
    所以 `publish()` 只做 O(1) 入队，真正写库由 `flush()` 在后台跑。
-
-为什么不用 `asyncio.Queue`
-────────────────────────
-事件可能从 Qt 主线程、调度器线程、Web loop 三处同时发布。
-`asyncio.Queue` 绑定单个 loop，跨线程 put 需要 `call_soon_threadsafe`，
-反而更容易写错。这里用 `deque + Lock`，`flush()` 由任一调用方触发
-（通常是空闲定时器），与 loop 无关。
 """
 
 from __future__ import annotations

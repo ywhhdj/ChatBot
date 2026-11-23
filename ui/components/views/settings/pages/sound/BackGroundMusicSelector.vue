@@ -1,122 +1,108 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { emitMusicPause, emitMusicPlay, emitMusicProgress } from '@/events/event/music';
 import notification from '@/utils/notification';
 import { useTempStore } from '@/stores/ui';
-import { getFileExtension } from '@/utils/util';
-
+import { assetFingerprints, type LoadedAsset } from '@/utils/asset';
+import { useObjectUrls } from '@/composables/useObjectUrls';
 
 const uiStore = useTempStore();
+const urls = useObjectUrls(false);
 
-const audioFileTypes = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.webm'];
 const currentIndex = ref(0);
-const uploadInput = ref<HTMLInputElement | null>(null);
-const getAudioFileType = computed(() => audioFileTypes.join(','));
-const isMusicPlaying = ref(false)
+const isMusicPlaying = ref(false);
 const playPauseButtonText = computed(() => (isMusicPlaying.value ? '⏸ 暂停' : '▶ 播放'));
+const musicName = computed(() => uiStore.musicList[currentIndex.value]?.name || '未选择音乐');
+const existing = computed(() => assetFingerprints(uiStore.musicList.map((m) => ({ label: m.name, src: m.url }))));
 
-const handleStop = () => {
+function clampIndex(next: number): number {
+  if (!uiStore.musicList.length) return 0;
+  return Math.min(Math.max(next, 0), uiStore.musicList.length - 1);
+}
+
+function handleStop() {
   isMusicPlaying.value = false;
   emitMusicPause();
-};
+}
 
-const handlePlayPause = () => {
+function handlePlayPause() {
   isMusicPlaying.value = !isMusicPlaying.value;
-  if (isMusicPlaying.value) {
-    const music = uiStore.musicList[currentIndex.value];
-    if (music?.url) {
-      emitMusicPlay(music.url);
-    } else {
-      const first = uiStore.musicList[0];
-      if (first) {
-        emitMusicPlay(first.url);
-        currentIndex.value = 0;
-      }
-    }
+  if (!isMusicPlaying.value) {
+    emitMusicPause();
+    return;
   }
-  else emitMusicPause();
-};
+  const music = uiStore.musicList[currentIndex.value] || uiStore.musicList[0];
+  if (music?.url) {
+    currentIndex.value = uiStore.musicList.findIndex((m) => m.url === music.url);
+    emitMusicPlay(music.url);
+  } else {
+    isMusicPlaying.value = false;
+  }
+}
 
-const playMusic = (music: UI.Music) => {
+function playMusic(music: UI.Music) {
+  const index = uiStore.musicList.findIndex((item) => item.url === music.url);
+  if (index < 0) return;
+  currentIndex.value = index;
   isMusicPlaying.value = true;
-  const index = uiStore.musicList.findIndex(item => item.url === music.url);
-  if (index !== -1) currentIndex.value = index;
   emitMusicPlay(music.url);
 }
 
-const updateMusicProgress = (index: number, progress: number) => {
-  if (uiStore.musicList[index]) {
-    uiStore.musicList[index].progress = progress;
-  }
-};
-const updateBgMusicProgress = (index: number) => {
-  if (uiStore.musicList[index]) {
-    emitMusicProgress(uiStore.musicList[index].progress / 100);
-  }
-};
+function updateMusicProgress(index: number, progress: number) {
+  if (uiStore.musicList[index]) uiStore.musicList[index].progress = progress;
+}
 
-const triggerUpload = () => {
-  uploadInput.value?.click();
-};
+function updateBgMusicProgress(index: number) {
+  const music = uiStore.musicList[index];
+  if (music) emitMusicProgress(music.progress / 100);
+}
 
-const handleMusicUpload = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  const files = Array.from(target.files || []);
-  files.forEach((file) => {
-    if (!file || !file.type.startsWith('audio/')) return;
-    const ext = `.${getFileExtension(file.name)}`;
-    if (!audioFileTypes.includes(ext)) {
-      notification.showWarning({
-        title: '不支持的音频格式',
-        message: `${file.name} 格式不支持`
-      });
-      return;
-    }
-    const musicName = file.name.replace(/\.[^.]+$/, '');
-    if (uiStore.musicList.some((item) => item.name === musicName)) {
-      notification.showWarning({
-        title: '文件已存在',
-        message: musicName
-      });
-      return;
-    };
-    uiStore.musicList.push({
-      name: musicName,
-      url: URL.createObjectURL(file),
-      progress: 0,
-    });
+function onFiles(assets: LoadedAsset[]) {
+  let added = 0;
+  for (const asset of assets) {
+    if (!asset.file) continue;
+    if (uiStore.musicList.some((item) => item.name === asset.label)) continue;
+    uiStore.musicList.push({ name: asset.label, url: urls.create(asset.file), progress: 0 });
+    added += 1;
+  }
+  notification.showSuccess({
+    title: '背景音乐',
+    message: added ? `已添加 ${added} 首音乐` : '所选音乐已存在，未重复添加',
   });
-  if (target) target.value = '';
-};
+}
 
-const deleteMusic = (index: number) => {
-  if (index < 0 || index >= uiStore.musicList.length || index === 0) {
-    notification.showWarning({
-      title: '删除失败',
-      message: "默认音乐不能删除",
-    });
+function onError(message: string) {
+  notification.showError({ title: '音频文件不支持', message });
+}
+
+function onWarnings(messages: string[]) {
+  notification.showWarning({ title: '部分文件未添加', message: messages.slice(0, 2).join('；') });
+}
+
+function deleteMusic(index: number) {
+  if (index <= 0 || index >= uiStore.musicList.length) {
+    notification.showWarning({ title: '删除失败', message: '默认音乐不能删除' });
     return;
-  };
-  const removed = uiStore.musicList.splice(index, 1)[0];
-  if (removed?.url?.startsWith('blob:')) {
-    URL.revokeObjectURL(removed.url);
   }
+  const removed = uiStore.musicList.splice(index, 1)[0];
+  if (removed) urls.revoke(removed.url);
+
   if (currentIndex.value === index) {
-    currentIndex.value = Math.min(currentIndex.value, uiStore.musicList.length - 1);
-    const nextMusic = uiStore.musicList[currentIndex.value];
-    if (nextMusic) {
-      emitMusicPlay(nextMusic.url);
-    } else {
-      emitMusicPause();
+    currentIndex.value = clampIndex(index);
+    const next = uiStore.musicList[currentIndex.value];
+    // 只在原本播放中才切歌，暂停状态不擅自开始播放
+    if (isMusicPlaying.value && next) emitMusicPlay(next.url);
+    else if (!next) {
       isMusicPlaying.value = false;
+      emitMusicPause();
     }
   } else if (currentIndex.value > index) {
-    currentIndex.value--;
+    currentIndex.value = clampIndex(currentIndex.value - 1);
   }
-};
+}
 
-const musicName = computed(() => {
-  const music = uiStore.musicList[currentIndex.value];
-  return music ? music.name : '未选择音乐';
+onBeforeUnmount(() => {
+  urls.prune(uiStore.musicList.map((m) => m.url));
 });
 </script>
 
@@ -124,16 +110,17 @@ const musicName = computed(() => {
   <div class="music-controls">
     <Button
       type="big"
-      @click="handlePlayPause"
       class="left-button"
+      @click="handlePlayPause"
     >{{ playPauseButtonText }}</Button>
     <Button
       type="big"
-      @click="handleStop"
       class="left-button"
+      @click="handleStop"
     >■ 停止</Button>
     <span class="music-name">当前: {{ musicName }}</span>
   </div>
+
   <div class="music-list">
     <div
       v-if="uiStore.musicList.length === 0"
@@ -149,32 +136,37 @@ const musicName = computed(() => {
       <div class="music-item-progress">
         <Silder
           :value="music.progress"
-          @change="(value) => updateMusicProgress(index, value)"
-          @input="() => updateBgMusicProgress(index)"
           :max="100"
           :min="0"
           :step="0.1"
+          @change="(value) => updateMusicProgress(index, value)"
+          @input="() => updateBgMusicProgress(index)"
         />
       </div>
-      <Button
-        @click="deleteMusic(index)"
-        icon="delete"
+      <button
+        type="button"
         class="action-btn-delete glass-effect"
-      />
+        aria-label="删除音乐"
+        @click.stop="deleteMusic(index)"
+      ><Icon
+        icon="delete"
+        :size="14"
+      /></button>
     </div>
   </div>
+
   <div class="music-upload">
-    <Button
-      type="big"
-      @click="triggerUpload"
-    >➕ 添加音乐</Button>
-    <input
-      ref="uploadInput"
-      type="file"
-      :accept="getAudioFileType"
-      multiple
-      style="display: none"
-      @change="handleMusicUpload"
+    <AssetPicker
+      kind="audio"
+      label="➕ 添加音乐"
+      icon="sound"
+      button-type="big"
+      :raw-only="true"
+      :max-bytes="32 * 1024 * 1024"
+      :existing="existing"
+      @select="onFiles"
+      @error="onError"
+      @warnings="onWarnings"
     />
   </div>
 </template>
@@ -222,7 +214,6 @@ const musicName = computed(() => {
   border-bottom: 1px solid #444;
   transition: background-color 0.2s;
   border-radius: 8px;
-
 }
 
 .music-item:hover {
@@ -241,33 +232,26 @@ const musicName = computed(() => {
   white-space: nowrap;
 }
 
-/* .action-btn-delete {
-  flex-shrink: 0;
-  margin-left: 10px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.action-btn-delete.glass-effect {
-  background: rgba(255, 0, 0, 0.3);
-  transition: all 0.2s ease;
-} */
-
 .action-btn-delete {
   padding: 4px 8px;
   color: #ddd;
   cursor: pointer;
   border-radius: 4px;
-  transition:
-    background-color 0.2s,
-    border-color 0.2s;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background-color 0.2s, border-color 0.2s;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .action-btn-delete.glass-effect:hover {
   transform: translateY(-1px);
-  background-color:
-    color-mix(in oklab, var(--color-red-500) 10%, transparent);
+  background-color: color-mix(in oklab, var(--color-red-500) 10%, transparent);
+}
+
+.action-btn-delete:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .left-button.big {

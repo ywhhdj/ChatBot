@@ -68,7 +68,13 @@ declare namespace UI {
     | "url"
     | "key"
     | "delete"
-    | "log";
+    | "log"
+    | "edit"
+    | "eye"
+    | "eyeOff"
+    | "export"
+    | "import"
+    | "flip"
   interface MenuItem {
     type?: ButtonType;
     name?: string;

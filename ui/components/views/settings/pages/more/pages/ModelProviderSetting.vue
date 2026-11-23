@@ -3,54 +3,60 @@ import { defaultUIStore } from '@/stores/ui';
 import { useUserStore } from '@/stores/user';
 const uiStore = defaultUIStore();
 const userStore = useUserStore();
+
+// 1. 定义 activeIndex 和 capability 的映射
 const activeIndex = ref(0);
+const tabKeys = ["llm", "tts", "asr", "ocr", "embedding", "image"] as const;
+
+// 使用 computed 动态获取当前 capability
+const capability = computed(() => uiStore.currentTab.modelProvider || "llm");
+
 const menus: UI.MenuItem[] = [
   {
     name: "大模型",
     clickAction: () => {
+      activeIndex.value = 0;
       uiStore.setCurrentModelProvider("llm");
     },
   },
   {
     name: "语音合成",
     clickAction: () => {
+      activeIndex.value = 1;
       uiStore.setCurrentModelProvider("tts");
     },
   },
   {
     name: "语音识别",
     clickAction: () => {
+      activeIndex.value = 2;
       uiStore.setCurrentModelProvider("asr");
     },
   },
   {
-    name: "文字识别",
+    name: "OCR",
     clickAction: () => {
+      activeIndex.value = 3;
       uiStore.setCurrentModelProvider("ocr");
     },
   },
   {
-    name: "向量模型",
+    name: "图像",
     clickAction: () => {
-      uiStore.setCurrentModelProvider("embedding");
-    },
-  },
-  {
-    name: "图像模型",
-    clickAction: () => {
+      activeIndex.value = 4;
       uiStore.setCurrentModelProvider("image");
     },
-  }
-]
+  },
+];
 
-const currentComponent = computed(() => {
-  return componentMap[uiStore.currentTab.modelProvider] || null;
-})
+// 2. KeepAlive 的 include 必须是数组 (且组件内部必须有 defineOptions({ name: 'xxx' }))
+const keepAliveInclude = ['LLM', 'TTS', 'ASR', 'OCR',  'Image'];
 
-// KeepAlive 按组件名匹配；六个入口页均为具名 SFC
-const keepAliveInclude = computed(() => {
-  return ['LLM', 'TTS', 'ASR', 'OCR', 'Embedding', 'Image'].join(',')
-})
+// 3. 监听 tab 切换，同步 activeIndex (如果 v-model 驱动了的话)
+watch(() => uiStore.currentTab.modelProvider, (val) => {
+  const idx = tabKeys.indexOf(val as any);
+  if (idx !== -1) activeIndex.value = idx;
+});
 </script>
 
 <template>
@@ -62,6 +68,7 @@ const keepAliveInclude = computed(() => {
     />
   </header>
   <MenuPage width="100%">
+    <!-- 使用 computed 的 capability 作为 key 进行切页 -->
     <KeepAlive :include="keepAliveInclude" :max="6">
       <ModelPage
         :key="capability"
@@ -70,19 +77,3 @@ const keepAliveInclude = computed(() => {
     </KeepAlive>
   </MenuPage>
 </template>
-
-<style scoped>
-/* ---------- 整体容器 ---------- */
-.model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 20px;
-  max-height: 90%;
-  overflow-y: auto;
-  flex: 1;
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-}
-</style>

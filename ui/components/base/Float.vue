@@ -70,7 +70,10 @@ defineExpose({
     <section
       ref="panelRef"
       class="floating-panel"
-      :class="{ 'is-dragging': isDragging, 'is-collapsed': collapsed }"
+      :class="{ 
+        'is-dragging': isDragging, 
+        'is-collapsed': collapsed
+      }"
       :style="{ width, zIndex }"
       :aria-label="title"
     >

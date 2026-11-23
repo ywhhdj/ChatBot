@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
 from datetime import datetime
@@ -65,9 +66,12 @@ class WebSocketClientManager(base.BaseManager):
         self.is_runing = False
         self.__pending = 0
         self.__closing: Set[str] = set()
+        # 连接标识仍是服务端生成的 client_id；下面三项是「可选增强」的注册索引。
         self.uid_index: Dict[str, Set[str]] = {}
         # uid -> {device: {client_id}}
         self.uid_device_index: Dict[str, Dict[str, Set[str]]] = {}
+        # uid -> {device: 主 client_id}（primary_only 定向用，避免多桌面重复演出）
+        self._primary_by_device: Dict[str, Dict[str, str]] = {}
 
         self._initialized = True
 
@@ -143,10 +147,20 @@ class WebSocketClientManager(base.BaseManager):
             ws = None
             with self.__lock:
                 ws = self.active_connections.pop(client_id, None)
-                self.conn_info.pop(client_id, None)
+                info = self.conn_info.pop(client_id, None)
+                self._unregister_index_locked(client_id, info)
                 tasks = self.client_tasks.pop(client_id, set())
                 self.client_subscriptions.pop(client_id, None)
                 self.request_tasks.pop(client_id, None)
+
+            # 角色表 / 姿态去重窗口同样必须随连接释放（否则重连会无限堆积）
+            try:
+                from ....devices import role_registry, stage_router
+
+                role_registry.unregister(client_id)
+                stage_router.reset_pose(client_id)
+            except Exception:
+                pass
 
             # 取消该连接的所有在途任务（必须在 loop 线程内做）
             loop = self._loop
@@ -254,15 +268,20 @@ class WebSocketClientManager(base.BaseManager):
         ok: bool = True,
         request_id: str = "",
         stream_id: str = "",
+        from_id: Optional[str] = None,
     ) -> bool:
-        """发送 JSON 帧；带 request_id / stream_id 关联，敏感事件按订阅过滤。"""
+        """发送 JSON 帧；带 request_id / stream_id 关联，敏感事件按订阅过滤。
+
+        from_id 表示**真实发送方**；缺省为空。此前误填成接收方 client_id，
+        会让「丢弃自己回灌帧」的客户端把服务端推给自己的帧全部丢掉。
+        """
         request_id = request_id or frame_request_id.get()
         stream_id = stream_id or frame_stream_id.get()
         if not self.__in_web_loop:
             # 跨线程调用：转为投递，绝不在这里 await WebSocket
             self.submit_to_loop(lambda: self.send_json(
                 client_id, type=type, data=data, message=message, ok=ok,
-                request_id=request_id, stream_id=stream_id,
+                request_id=request_id, stream_id=stream_id, from_id=from_id,
             ))
             return True
 
@@ -281,7 +300,7 @@ class WebSocketClientManager(base.BaseManager):
                 ok=ok,
                 message=message,
                 data=data,
-                from_id=client_id,
+                from_id=from_id,
                 request_id=request_id,
                 stream_id=stream_id,
             ).model_dump())
@@ -392,7 +411,233 @@ class WebSocketClientManager(base.BaseManager):
 
             await asyncio.sleep(self.cleanup_interval)
 
-    # ---------- 订阅 / 请求级取消（api.md §4.2 P1） ----------
+    # ---------- 注册维度：uid / device ----------
+
+    def register(
+        self,
+        client_id: str,
+        uid: str,
+        device: str = "unknown",
+        token: str = "",
+    ) -> dict:
+        """处理 REGISTER 帧：绑定 uid / device，建立两级索引。
+
+        注册是**可选增强**：失败或未注册的连接仍可按 client_id 正常收发，
+        只是不能参与 send_to_uid / send_to_device 的定向。
+        """
+        raw_uid = str(uid or "").strip()
+        if not raw_uid or len(raw_uid) > 64 or not _UID_RE.match(raw_uid):
+            return {"ok": False, "message": "uid 非法（1-64 位字母数字 . _ : -）"}
+
+        dev = str(device or "unknown").strip().lower()
+        if dev not in ("mobile", "desktop", "unknown"):
+            dev = "unknown"
+
+        # 有登录体系时可注入 token 解析器，校验通过后覆盖客户端上报的 uid
+        resolved = _resolve_token(token)
+        if resolved:
+            if len(resolved) > 64 or not _UID_RE.match(resolved):
+                return {
+                    "ok": False,
+                    "message": "token 解析出的 uid 非法"
+                }
+            raw_uid = resolved
+
+        with self.__lock:
+            if client_id not in self.active_connections:
+                return {
+                    "ok": False,
+                    "message": "连接已失效"
+                }
+            info = self.conn_info.get(client_id)
+            if info is None:
+                return {
+                    "ok": False,
+                    "message": "连接信息缺失"
+                }
+            # 重复注册（重连后 uid/device 变化）先摘掉旧索引，避免幽灵连接
+            self._unregister_index_locked(client_id, info)
+            info.uid = raw_uid
+            info.device = dev
+            info.registered = True
+            self.uid_index.setdefault(raw_uid, set()).add(client_id)
+            self.uid_device_index.setdefault(raw_uid, {}).setdefault(dev, set()).add(client_id)
+            self._primary_by_device.setdefault(raw_uid, {})[dev] = client_id
+            try:
+                from ....devices import role_registry
+
+                role_registry.set_role(client_id, dev, uid=raw_uid)
+            except Exception:
+                pass
+        return {
+            "ok": True,
+            "uid": raw_uid,
+            "device": dev
+        }
+
+    def _unregister_index_locked(self, client_id: str, info) -> None:
+        """必须在 self.__lock 内调用：按旧值精确摘除索引，空桶立即回收。"""
+        uid = getattr(info, "uid", "") if info is not None else ""
+        dev = getattr(info, "device", "unknown") if info is not None else "unknown"
+        if not uid:
+            return
+        bucket = self.uid_index.get(uid)
+        if bucket is not None:
+            bucket.discard(client_id)
+            if not bucket:
+                self.uid_index.pop(uid, None)
+
+        dev_map = self.uid_device_index.get(uid)
+        if dev_map is not None:
+            conns = dev_map.get(dev)
+            if conns is not None:
+                conns.discard(client_id)
+                if not conns:
+                    dev_map.pop(dev, None)
+            if not dev_map:
+                self.uid_device_index.pop(uid, None)
+
+        primary = self._primary_by_device.get(uid)
+        if primary is not None and primary.get(dev) == client_id:
+            rest = dev_map.get(dev) if dev_map else None
+            if rest:
+                primary[dev] = next(iter(rest))
+            else:
+                primary.pop(dev, None)
+            if not primary:
+                self._primary_by_device.pop(uid, None)
+
+    def uid_of(self, client_id: str) -> str:
+        with self.__lock:
+            info = self.conn_info.get(client_id)
+            return info.uid if info is not None else ""
+
+    def device_of(self, client_id: str) -> str:
+        with self.__lock:
+            info = self.conn_info.get(client_id)
+            return info.device if info is not None else "unknown"
+
+    def device_targets(
+        self,
+        uid: str,
+        device: str,
+        primary_only: bool = False,
+        exclude: str = "",
+    ) -> list:
+        """uid + device 命中连接；primary_only 时只返回该设备的「主连接」。"""
+        if not uid:
+            return []
+        with self.__lock:
+            if primary_only:
+                cid = self._primary_by_device.get(uid, {}).get(device, "")
+                if not cid or cid == exclude or cid not in self.active_connections:
+                    return []
+                return [cid]
+            targets = list(self.uid_device_index.get(uid, {}).get(device, set()))
+        return [c for c in targets if c != exclude and c in self.active_connections]
+
+    async def send_to_uid(
+        self,
+        uid: str,
+        type: str,
+        data: Optional[Any] = None,
+        *,
+        message: str = "ok",
+        ok: bool = True,
+        exclude: str = "",
+        from_id: Optional[str] = None,
+        request_id: str = "",
+        stream_id: str = "",
+    ) -> int:
+        """向同一 uid 的所有连接发送；返回实际送达的连接数。"""
+        with self.__lock:
+            targets = [
+                c for c in self.uid_index.get(uid, set())
+                if c != exclude and c in self.active_connections
+            ]
+        return await self._send_many(
+            targets,
+            type,
+            data,
+            message=message,
+            ok=ok,
+            from_id=from_id,
+            request_id=request_id,
+            stream_id=stream_id
+        )
+
+    async def send_to_device(
+        self,
+        uid: str,
+        device: str,
+        type: str,
+        data: Optional[Any] = None,
+        *,
+        message: str = "ok",
+        ok: bool = True,
+        primary_only: bool = False,
+        exclude: str = "",
+        from_id: Optional[str] = None,
+        request_id: str = "",
+        stream_id: str = "",
+    ) -> int:
+        """向同一 uid 下指定 device 发送（手机 → 电脑 / 电脑 → 手机）。"""
+        targets = self.device_targets(
+            uid, device, primary_only=primary_only, exclude=exclude
+        )
+        return await self._send_many(
+            targets, 
+            type, 
+            data, 
+            message=message, 
+            ok=ok,
+            from_id=from_id,
+            request_id=request_id,
+            stream_id=stream_id
+        )
+
+    async def broadcast_to_device(
+        self,
+        device: str,
+        type: str,
+        data: Optional[Any] = None,
+        *,
+        exclude: str = "",
+        from_id: Optional[str] = None,
+    ) -> int:
+        """跨 uid 向某类设备广播（可选增强，未注册连接不参与）。"""
+        with self.__lock:
+            targets = []
+            for uid, dev_map in self.uid_device_index.items():
+                del uid
+                for cid in dev_map.get(device, set()):
+                    if cid != exclude and cid in self.active_connections:
+                        targets.append(cid)
+        return await self._send_many(targets, type, data, from_id=from_id)
+
+    async def _send_many(
+        self,
+        targets: list,
+        type: str,
+        data: Optional[Any],
+        *,
+        message: str = "ok",
+        ok: bool = True,
+        from_id: Optional[str] = None,
+        request_id: str = "",
+        stream_id: str = "",
+    ) -> int:
+        sent = 0
+        for cid in targets:
+            delivered = await self.send_json(
+                cid, type=type, data=data, message=message, ok=ok,
+                from_id=from_id, request_id=request_id, stream_id=stream_id,
+            )
+            if delivered:
+                sent += 1
+        return sent
+
+    # ---------- 订阅 / 请求级取消（api.md） ----------
 
     def subscribe(self, client_id: str, events: Optional[list] = None) -> list:
         """只接受固定 allowlist，拒绝任意敏感事件订阅。"""
@@ -446,7 +691,7 @@ class WebSocketClientManager(base.BaseManager):
         task.cancel()
         return True
 
-    # ---------- per-client 任务管理（W7） ----------
+    # ---------- per-client 任务管理 ----------
 
     def track_task(self, client_id: str, task: asyncio.Task) -> None:
         with self.__lock:
@@ -486,6 +731,16 @@ class WebSocketClientManager(base.BaseManager):
             client_ids = list(self.active_connections.keys())
             all_tasks = [t for tasks in self.client_tasks.values() for t in tasks]
             self.client_tasks.clear()
+            self.uid_index.clear()
+            self.uid_device_index.clear()
+            self._primary_by_device.clear()
+
+        try:
+            from ....devices import role_registry
+
+            role_registry.clear()
+        except Exception:
+            pass
 
         for cid in client_ids:
             self.disconnect(cid)
@@ -503,6 +758,28 @@ def _consume_future_exception(fut) -> None:
     exc = fut.exception()
     if exc is not None:
         logger.debug(f"[WebSocket] background send failed: {exc}")
+
+
+_UID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+
+# 有登录体系时由应用启动时注入：def resolver(token: str) -> str（返回可信 uid，失败返回 ""）
+_token_resolver: Optional[Callable[[str], str]] = None
+
+
+def set_token_resolver(resolver: Optional[Callable[[str], str]]) -> None:
+    """注册 token → uid 解析器；未注入时 token 字段被安全忽略。"""
+    global _token_resolver
+    _token_resolver = resolver
+
+
+def _resolve_token(token: str) -> str:
+    if not token or _token_resolver is None:
+        return ""
+    try:
+        return str(_token_resolver(str(token)) or "").strip()
+    except Exception as exc:  # noqa: BLE001 - 校验失败不能影响注册
+        logger.debug(f"[WebSocket] token resolver failed: {type(exc).__name__}")
+        return ""
 
 
 _websocket_manager: Optional[WebSocketClientManager] = None

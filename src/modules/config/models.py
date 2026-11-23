@@ -125,8 +125,6 @@ class LLMConfig(_BaseConfig):
     enabled: bool = Field(default=True, description="是否启用 LLM")
     provider: str = Field(default="deepseek", description="LLM 供应商")
     model: str = Field(default="deepseek-v4-flash", description="LLM 模型")
-    api_key: str = Field(default="", description="LLM API key")
-    base_url: str = Field(default="https://api.deepseek.com", description="LLM 服务 URL")
     active_perception: bool = Field(default=False, description="是否启用主动感知")
     wake_word: str = Field(default="ql", description="唤醒词")
     max_tool_calls: int = Field(default=-1, description="最大工具调用次数")

@@ -51,7 +51,7 @@ const menus: UI.MenuItem[] = [
 </script>
 
 <template>
-  <div class="logo"></div>
+  <AppLogo class="logo" />
   <MenuBar
     justify="center"
     class="nav-container"
@@ -82,7 +82,6 @@ const menus: UI.MenuItem[] = [
 .close-container {
   --tw-duration: 300ms;
   transition-duration: 300ms;
-  color: white;
   cursor: pointer;
   display: flex;
   justify-items: center;
@@ -100,7 +99,7 @@ const menus: UI.MenuItem[] = [
   }
 }
 
-@media screen and (max-width: 768px) {
+@media screen and (max-width: 1300px) {
   .logo {
     display: none;
   }

@@ -48,7 +48,7 @@ class BrowserViewManager(BaseManager):
         return self._dispatcher
 
     def _on_main_thread(self, func: Callable[[], Any]) -> Any:
-        """在主线程执行；调用方已经在主线程时直接执行（零开销）"""
+        """在主线程执行；调用方已经在主线程时直接执行"""
         if self.is_main_thread:
             return func()
         dispatch = self._dispatcher_fn()

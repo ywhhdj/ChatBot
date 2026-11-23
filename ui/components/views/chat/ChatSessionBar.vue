@@ -1,15 +1,12 @@
 <script setup lang="ts">
 /**
- * 会话 / 角色切换条 —— FrontendPlan F0-06 / F1-06 / F1-05
- * 每次请求都显式带 session_id / character_id，不依赖隐式全局当前会话。
- * 切换前先 await onBeforeSwitch（父视图取消或 detach 旧流），避免迟到事件覆盖新会话。
+ * 会话 / 角色切换条
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { historyService } from '@/api/services/history';
 import { characterService } from '@/api/services/character';
 import { generationService } from '@/api/services/generation';
 import { errorView, toApiClientError } from '@/api/decoder';
-import AsyncState from '@/components/common/AsyncState.vue';
 
 const props = withDefaults(
   defineProps<{

@@ -51,7 +51,7 @@ def _detect_backend(prefer: Optional[str] = None) -> tuple:
             if backend is WebViewBackend.WEBENGINE:
                 from PyQt6.QtWebEngineWidgets import QWebEngineView  # type: ignore[union-attr]
 
-                return backend, QWebEngineView, None
+                return WebViewBackend.WEBENGINE, QWebEngineView, None
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[BrowserView] backend {backend.value} unavailable: {exc}")
             continue
@@ -81,11 +81,11 @@ class DesktopBrowserWindow(QWidget):
 
     要点
     ────
-    * **惰性加载**（lazyload=True）：窗口立刻可见，网页后台加载，
+    * 惰性加载（lazyload=True）：窗口立刻可见，网页后台加载，
       避免"白屏等 3 秒才看到窗口"。
-    * **页面加载完再推就绪事件**：前端靠 `__onAppReady` 判断可以开始发请求，
+    * 页面加载完再推就绪事件：前端靠 `__onAppReady` 判断可以开始发请求，
       否则会在 Web 服务还没 listen 时打一堆 ConnectionRefused。
-    * **evaluate_js 必须在主线程调用**：wry/Qt 都不允许跨线程操作控件。
+    * evaluate_js 必须在主线程调用：wry/Qt 都不允许跨线程操作控件。
     """
 
     # 页面加载完成 / 失败，供外部（manager、托盘）订阅

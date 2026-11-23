@@ -29,7 +29,8 @@
 .aside-quote {
   margin: 0;
   font-family: 'Maoken Assorted Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 18px;
+  font-size: 20px;
+  font-weight: 400;
   color: #fff;
   opacity: 0.8;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);

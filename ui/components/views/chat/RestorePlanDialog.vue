@@ -1,15 +1,10 @@
 <script setup lang="ts">
 /**
- * 恢复预演与确认 —— FrontendPlan F1-09 / 存档交互状态机 / FX-06
- *
- * 恢复前必须展示 RestorePlan：覆盖范围、缺失资产、迁移、警告与记忆影响。
- * 用户点击「保存/恢复」后不能立刻显示成功，只按服务端返回的状态更新 UI；
- * partial_failure 必须呈现明确警告与操作记录，不当作普通 toast 隐藏。
+ * 恢复预演与确认
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { saveService } from '@/api/services/save';
 import { errorView, toApiClientError } from '@/api/decoder';
-import AsyncState from '@/components/common/AsyncState.vue';
 
 const props = withDefaults(
   defineProps<{

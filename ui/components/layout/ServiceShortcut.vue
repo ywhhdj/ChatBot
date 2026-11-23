@@ -3,6 +3,7 @@ import { serviceService } from '@/api/services/service';
 import { errorView, toApiClientError } from '@/api/decoder';
 import { defaultUIStore } from '@/stores/ui';
 import { serviceStateText, serviceStateTone } from '@/components/configs/serviceConfig';
+import { useRouter } from 'vue-router';
 
 const emit = defineEmits<{
   error: [view: UI.AsyncErrorView];
@@ -69,7 +70,6 @@ defineExpose({ refresh: load });
 
 <template>
   <Float
-    v-show=""
     title="服务状态"
     icon="plugin"
     width="268px"

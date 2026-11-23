@@ -822,7 +822,7 @@
       "handler": "modules.api.controllers.providers:switch",
       "http": {
         "method": "POST",
-        "path": "/providers/adapters/{adapter}/switch",
+        "path": "/providers/{adapter}/switch",
         "status_code": 200,
         "summary": "切换 provider / 模型",
         "deprecated": false

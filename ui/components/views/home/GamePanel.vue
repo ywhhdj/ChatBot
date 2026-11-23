@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { defaultUIStore } from '@/stores/ui';
-import  { GameMenuItem } from './GameMenu.vue'
+import type { GameMenuItem } from './GameMenu.vue'
 
 const router = useRouter();
 const uiStore = defaultUIStore();
@@ -56,7 +57,7 @@ const gameNav: GameMenuItem[] = [
           label="ChatBot"
         />
         <div class="gn-brand-text">
-          <h1>ChatBot</h1>
+          <AppLogo />
           <p>与你相遇的，是第几个故事？</p>
         </div>
       </div>
@@ -137,18 +138,6 @@ const gameNav: GameMenuItem[] = [
 
 .gn-brand-text {
   min-width: 0;
-}
-
-.gn-brand-text h1 {
-  margin: 0;
-  font-family: 'Maoken Assorted Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: clamp(34px, 4.4vw, 58px);
-  font-weight: normal;
-  letter-spacing: 3px;
-  line-height: 1.05;
-  text-shadow:
-    0 3px 0 rgba(0, 0, 0, 0.35),
-    0 0 18px rgba(121, 217, 255, 0.35);
 }
 
 .gn-brand-text p {

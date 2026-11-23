@@ -1,18 +1,4 @@
-"""记忆领域的端口（Protocol）定义。
-
-对应 `OptimizationPlan.md` L1-02："定义端口：ContextStore、Clock、
-AuditSink"，以及 M1-01 的 `MemoryClock`。
-
-**端口属于领域层，不属于适配器层**：它由"领域需要什么"决定，
-不是"某个库能提供什么"。所有实现（Rust / Milvus / SQLite）
-单向依赖这里，绝不反向。
-
-为什么用 `typing.Protocol` 而不是 ABC
-──────────────────────────────────
-适配器来自不同世界：pymilvus 的 MilvusClient、进程内分桶实现、
-Rust 的 PyO3 对象。要求它们继承同一个基类等于强迫改写第三方类型。
-Protocol 做结构化匹配，测试里塞个假实现就能跑全流程。
-"""
+"""记忆领域的端口（Protocol）定义。"""
 
 from __future__ import annotations
 
@@ -28,9 +14,9 @@ from ..domain.layers import MemoryLayer
 
 @runtime_checkable
 class MemoryClock(Protocol):
-    """记忆时间轴。M1-01：三种时钟 wall / active / game。
+    """记忆时间轴。三种时钟 wall / active / game。
 
-    单位约定（**不能混**）：
+    单位约定：
     * `now_seconds()` —— epoch 秒，用于 10 分钟突击窗口判定；
     * `now_day()` —— 自 epoch 起的天数（可含小数），用于 R(Δ,S)。
     """

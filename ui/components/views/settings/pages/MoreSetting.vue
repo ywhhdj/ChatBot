@@ -1,22 +1,11 @@
 <script lang="ts" setup>
+import { computed } from 'vue';
 import { defaultUIStore } from '@/stores/ui';
+import { MORE_PAGE_MAP, MORE_PAGE_NAMES } from '@/components/views/settings/settingsPages';
 
 const uiStore = defaultUIStore();
-const componentMap: Record<UI.MoreTab, Component> = {
-  modelprovider: defineAsyncComponent(() => import('@/components/views/settings/pages/more/pages/ModelProviderSetting.vue')),
-  monitor: defineAsyncComponent(() => import('@/components/views/settings/pages/more/pages/MonitorSetting.vue')),
-  // plugins: defineAsyncComponent(() => import('@/components/views/settings/pages/more/pages/PluginsSetting.vue')),
-  services: defineAsyncComponent(() => import('@/components/views/settings/pages/more/pages/ServicesSetting.vue')),
-  // skills: defineAsyncComponent(() => import('@/components/views/settings/pages/more/Skills.vue')),
-}
-
-const currentComponent = computed(() => {
-  return componentMap[uiStore.currentTab.more] || null
-});
-
-const keepAliveInclude = computed(() => {
-  return Object.keys(componentMap).join(',')
-});
+const currentComponent = computed(() => MORE_PAGE_MAP[uiStore.currentTab.more] || null);
+const keepAliveInclude = MORE_PAGE_NAMES;
 </script>
 
 <template>
@@ -25,7 +14,10 @@ const keepAliveInclude = computed(() => {
       <MoreNav />
     </aside>
     <div class="flex-1">
-      <KeepAlive :include="keepAliveInclude">
+      <KeepAlive
+        :include="keepAliveInclude"
+        :max="6"
+      >
         <component :is="currentComponent" />
       </KeepAlive>
     </div>

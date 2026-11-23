@@ -4,7 +4,6 @@ import { registerEventListeners, unregisterAllEventListeners } from "@/api/webso
 import notification from "@/utils/notification";
 import {
   CAPABILITY_PRESETS,
-  OFFLINE_DESCRIPTIONS,
   READONLY_ENDPOINT_KEYS,
   fieldLabel,
   isMaskedValue,
@@ -137,13 +136,6 @@ function buildFields(
   return out.sort((a, b) => weight(a) - weight(b) || a.key.localeCompare(b.key));
 }
 
-function offlineProvider(
-  capability: Model.Capability,
-  name: string,
-): Model.OfflineProvider | undefined {
-  return OFFLINE_DESCRIPTIONS[capability].providers.find((p) => p.name === name);
-}
-
 function normalizeProviders(
   capability: Model.Capability,
   list: Record<string, any> | null,
@@ -156,28 +148,28 @@ function normalizeProviders(
   for (const item of raw) {
     const name = String(item?.name ?? "");
     if (!name) continue;
-    const fb = offlineProvider(capability, name);
     const ids: string[] = Array.isArray(item.models)
       ? item.models.map((m: any) => (typeof m === "string" ? m : String(m?.id ?? ""))).filter(Boolean)
       : [];
     const models: Model.ModelItem[] = ids.length
       ? ids.map((id) => {
-        const hit = fb?.models.find((m) => m.id === id);
-        return { id, label: hit?.label ?? id, tags: hit?.tags };
+        return {
+          id,
+          label: id,
+          tags: []
+        };
       })
-      : (fb?.models ?? []).map((m) => ({ ...m }));
+      : [{ id: "", label: "unknown" }];
 
     out.push({
       name,
-      label: String(item?.label ?? fb?.label ?? name),
-      deployment: item?.deployment ?? fb?.deployment,
-      tags: fb?.tags ?? [],
+      label: String(item?.label ?? name),
+      deployment: item?.deployment ?? "unknown",
+      tags: [],
       available: item?.available !== false,
       models,
-      meta: fb
-        ? { label: fb.label, tags: fb.tags, deployment: fb.deployment }
-        : undefined,
-      params: Object.fromEntries((fb?.params ?? []).map((key) => [key, { type: "string" }])),
+      meta: undefined,
+      params: Object.fromEntries(([]).map((key) => [key, { type: "string" }])),
     });
   }
   return out;
@@ -238,13 +230,8 @@ export function useModelProvider(capability: Model.Capability) {
     return currentProvider.value?.models ?? [];
   });
 
-  const offlineKeys = computed(() => {
-    const fb = offlineProvider(capability, activeProvider.value);
-    return fb?.params ?? [];
-  });
-
   const fields = computed<Model.ParamSpec[]>(() =>
-    buildFields(detail.value, status.value, activeModel.value, offlineKeys.value),
+    buildFields(detail.value, status.value, activeModel.value, []),
   );
 
   const maskedKeys = computed<string[]>(() => {
@@ -345,7 +332,7 @@ export function useModelProvider(capability: Model.Capability) {
         (d?.models?.[0] as any)?.id ||
         (currentProvider.value?.models?.[0]?.id ?? "");
       activeModel.value = typeof chosen === "string" ? chosen : "";
-      resetDraft(buildFields(d, s, activeModel.value, offlineKeys.value));
+      resetDraft(buildFields(d, s, activeModel.value, []));
     })();
 
     inflight.set(key, task);
@@ -393,25 +380,14 @@ export function useModelProvider(capability: Model.Capability) {
       : null;
 
     if (!items.length) {
-      // 接口未就绪：按 models/*.json 的离线描述铺出骨架，但不开放任何写操作
-      const fb = OFFLINE_DESCRIPTIONS[capability].providers;
-      providers.value = fb.map((p) => ({
-        name: p.name,
-        label: p.label,
-        tags: p.tags,
-        deployment: p.deployment,
-        available: false,
-        models: p.models.map((m) => ({ ...m })),
-        offline: true,
-        params: Object.fromEntries(p.params.map((key) => [key, { type: "string" }])),
-      }));
+      providers.value = []
       offline.value = true;
       detail.value = null;
       status.value = null;
       const preferred = activeProvider.value || fb[0]?.name || "";
       activeProvider.value = preferred;
       activeModel.value = providers.value.find((p) => p.name === preferred)?.models[0]?.id ?? "";
-      resetDraft(buildFields(null, null, activeModel.value, offlineProvider(capability, preferred)?.params ?? []));
+      resetDraft(buildFields(null, null, activeModel.value, []));
       state.value = "empty";
       setNotice("warning", "当前展示离线模型描述；连接后端后可切换与下载");
     } else {

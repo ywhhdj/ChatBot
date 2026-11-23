@@ -316,12 +316,6 @@ class SnapshotRequest(_Base):
 
 # ─────────────────── OpenAI 协议兼容层（Codex CLI / DeepSeek Harness） ───────────────────
 class _CompatBase(_Base):
-    """外部 Agent 客户端会带大量协议字段（store / include / reasoning / …）。
-
-    这些字段 ChatBot 不实现，但**不能**因此 422 或丢掉整次请求；统一用
-    ``extra="allow"`` 接住，翻译层只取自己认识的字段，其余忽略。
-    """
-
     model_config = ConfigDict(extra="allow", protected_namespaces=())
 
 
