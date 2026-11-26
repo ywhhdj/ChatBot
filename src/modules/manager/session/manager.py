@@ -499,6 +499,96 @@ class SessionManager:
         self._flush_one(sid, snapshot)
         return True
 
+    # ------------------------------------------------------------------
+    # 领域快照（PR-2：SessionOriginator 的唯一入口）
+    # ------------------------------------------------------------------
+
+    def export_state(self) -> Dict[str, Any]:
+        """事务读快照：导出全部会话的元信息 + 消息 + current 指针。
+
+        先 flush() 把脏会话落到磁盘，再从磁盘列表 + 内存缓存合并，
+        保证快照水位是"已提交数据"，不把半成品脏页写进 revision。
+        """
+        self.flush()
+        with self._lock:
+            cached = dict(self._sessions)
+            current = self._current_session_id or ""
+
+        items: Dict[str, Dict[str, Any]] = {}
+        for entry in self.list():
+            sid = str(entry.get("id") or "")
+            if not sid:
+                continue
+            sess = cached.get(sid) or self.get(sid)
+            if sess is None:
+                continue
+            items[sid] = {
+                "meta": {
+                    "id": sess.id,
+                    "name": sess.name,
+                    "character_id": sess.character_id,
+                    "created_at": float(sess.created_at),
+                    "updated_at": float(sess.updated_at),
+                    "memory_ids": [str(x) for x in (sess.memory_ids or [])],
+                    "metadata": asdict(sess.metadata),
+                },
+                "messages": [dict(m) for m in (sess.messages or []) if isinstance(m, dict)],
+            }
+        return {"sessions": items, "current_id": current}
+
+    def apply_state(self, data: Dict[str, Any]) -> bool:
+        """原子恢复会话域：全量替换缓存与磁盘文件，重设 current 指针。"""
+        if not isinstance(data, dict):
+            return False
+        raw = data.get("sessions")
+        if not isinstance(raw, dict):
+            return False
+
+        parsed: Dict[str, Session] = {}
+        messages: Dict[str, List[Dict]] = {}
+        for sid, item in raw.items():
+            try:
+                safe = _safe_id(sid)
+            except ValueError:
+                continue
+            if not isinstance(item, dict):
+                continue
+            meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+            body = item.get("messages") if isinstance(item.get("messages"), list) else []
+            msg_list = [dict(m) for m in body if isinstance(m, dict)]
+            try:
+                sess = Session.from_dict({**meta, "id": safe, "messages": msg_list})
+            except Exception:  # noqa: BLE001 - 单条损坏不拖垮整域
+                continue
+            parsed[safe] = sess
+            messages[safe] = msg_list
+
+        # 先全部落盘成功，再替换内存：避免"内存已换、磁盘半写"。
+        for sid, sess in parsed.items():
+            self._write_snapshot(sid, self._meta(sess), messages[sid])
+
+        with self._lock:
+            self._sessions.clear()
+            for sid, sess in parsed.items():
+                self._sessions[sid] = sess
+            self._dirty.clear()
+            self._dirty_since.clear()
+            self._rounds.clear()
+            requested = str(data.get("current_id") or "")
+            self._current_session_id = (
+                requested if requested in self._sessions
+                else next(iter(self._sessions), None)
+            )
+            current = self._current_session_id
+        if current:
+            self._write_pointer(current)
+        else:
+            try:
+                os.unlink(self._pointer_path())
+            except OSError:
+                pass
+        return True
+
     def _atexit_flush(self) -> None:
         try:
             self.flush()

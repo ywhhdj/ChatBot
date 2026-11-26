@@ -16,21 +16,12 @@
 | `memory-clock` | 时钟锚点/活跃天/游戏天 | 恢复后以此为时间起点 |
 | `forgetting-profile` | 角色遗忘画像参数与版本 | 避免恢复后用不同参数重算 |
 
-**不导出向量索引本体**：SQLite 是权威，Milvus collection 可重建。
-只导出 checksum / embedding 版本 / 元数据水位
-（放在已有的 `memory-manifest` section，由存档层负责）。
-
 墓碑优先
 ──────────────────────────
-快照之后用户删除的记忆，恢复后**不得复活**。
+快照之后用户删除的记忆，恢复后不得复活。
 所以 commit 的最后一步是重放墓碑：用 `integrity.filter_resurrected`
 按 `id + 内容摘要` 比对，而不是只按 id（快照恢复重建表后，
 新行完全可能拿到和已删记忆相同的 id，按 id 一查就误删新记忆）。
-
-依赖方向
-────────
-本文件实现 `manager/saves/originators.py` 的契约（结构化匹配）。
-`saves` 侧不 import 本文件，因此没有环；组合根负责注册。
 """
 
 from __future__ import annotations
@@ -306,6 +297,15 @@ class MemoryOriginator:
         for section in sections or []:
             warnings.extend(section.warnings)
 
+        # PR-2：不保留"旧快照缺 section 就回填/沿用当前"的兼容分支。
+        # 缺一段就恢复出一个半新半旧的记忆状态，比明确拒绝更危险。
+        if missing:
+            return self._reject(
+                PrepareReject.MISSING_SECTION,
+                f"记忆域缺少必需 section: {', '.join(missing)}",
+                sections, warnings,
+            )
+
         # ── 1) schema 版本：未知或过高一律拒绝 ──
         for name, expected in (
             (SECTION_STRENGTH, STRENGTH_SCHEMA),
@@ -337,8 +337,6 @@ class MemoryOriginator:
             if err:
                 return self._reject(PrepareReject.INVALID_VALUE, err, sections, warnings)
             state.strength_rows = parsed
-        else:
-            warnings.append("旧快照无 memory-strength，恢复后按层默认 S0 回填")
 
         # ── 3) 解析 clock ──
         clock_section = by_name.get(SECTION_CLOCK)
@@ -347,8 +345,6 @@ class MemoryOriginator:
             if err:
                 return self._reject(PrepareReject.INVALID_VALUE, err, sections, warnings)
             state.clock_state = clock
-        else:
-            warnings.append("旧快照无 memory-clock，恢复后沿用当前时钟")
 
         # ── 4) 解析 profile ──
         profile_section = by_name.get(SECTION_PROFILE)
@@ -360,9 +356,6 @@ class MemoryOriginator:
                 return self._reject(PrepareReject.INVALID_VALUE,
                                     err or "画像不可解析", sections, warnings)
             state.profile = profile
-        else:
-            state.profile = DEFAULT_PROFILE
-            warnings.append("旧快照无 forgetting-profile，使用默认画像")
 
         # ── 5) 时间轴一致性：last_reinforced_day ≤ 时钟当前值 ──
         clock_day = float(
@@ -418,11 +411,8 @@ class MemoryOriginator:
             "will_discard_created_after": created_after,
             "tombstones_to_replay": len(state.tombstones),
             "strength_schema": STRENGTH_SCHEMA,
-            "missing_sections": missing,
+            "missing_sections": [],
         }
-        if missing:
-            warnings.append(f"缺失 section: {', '.join(missing)}（将按回填规则处理）")
-
         return PreparedRestore(
             owner=self.owner, ok=True, code=PrepareReject.OK,
             message="记忆域 Prepare 通过",
@@ -446,7 +436,7 @@ class MemoryOriginator:
             if not isinstance(raw, dict):
                 return [], "强度行不是对象"
             try:
-                mid = int(raw.get("memory_id"))
+                mid = int(raw.get("memory_id")) # type: ignore
                 stability = float(raw.get("stability", 1.0))
                 last = float(raw.get("last_reinforced_day", 0.0))
                 importance = float(raw.get("importance", 0.4))

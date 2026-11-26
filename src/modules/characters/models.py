@@ -1,15 +1,3 @@
-"""
-character_system/models.py — 角色系统数据模型
-
-修复对应清单：C54 C55 C56
-
-C54 同一概念两种类型：`CharacterAttributes.mood` 是情绪名(str)，
-    `CharacterState.mood` 是 int。builder 里拿 int 去查 str 键的
-    mood_modifiers，恒不匹配 -> 角色心情永远不生效（C16 的根源）。
-    这里把分工写死：state.mood 存 int(情绪 id)，attributes.mood 存情绪名(str)。
-C55 CharacterState.messages 与 UserContext 是两套历史，职责在此明确划分。
-C56 to_dict 用 asdict 会把 Enum/datetime 原样留下，json.dump 直接 TypeError。
-"""
 from __future__ import annotations
 import uuid
 import time
@@ -28,6 +16,12 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _coerce_field(value: Any) -> Any:
+    if isinstance(value, (dict, list, str, int, float, bool)) or value is None:
         return value
     return str(value)
 
@@ -89,9 +83,9 @@ class CharacterAttributes:
 class CharacterState:
     """角色运行时状态（切换时保存/恢复）
 
-    C55：与 UserContext 分工明确，避免两套历史各自裁剪导致不一致：
-        - CharacterState.messages —— 该角色的**长期**对话记忆
-        - UserContext.messages   —— 本轮/近期上下文 + 记忆系统注入
+    与 UserContext 分工明确，避免两套历史各自裁剪导致不一致：
+        CharacterState.messages —— 该角色的长期对话记忆
+        UserContext.messages   —— 本轮/近期上下文 + 记忆系统注入
     """
     character_id: str = ""
     status: CharacterStatus = CharacterStatus.IDLE
@@ -122,9 +116,11 @@ class CharacterState:
             "content": content,
             "timestamp": time.time()
         })
-        # 滑动窗口
-        if len(self.messages) > self.max_memory:
-            self.messages = self.messages[-self.max_memory:]
+        # 原地裁剪，避免每次超限都复制整段历史（PR-1 性能优化）。
+        # max_memory 非法值（<=0）时回落到 200，防止 del 把列表清空。
+        limit = self.max_memory if isinstance(self.max_memory, int) and self.max_memory > 0 else 200
+        if len(self.messages) > limit:
+            del self.messages[:-limit]
         self.total_messages += 1
         self.touch()
     
@@ -137,12 +133,15 @@ class CharacterState:
         self.touch()
 
     def get_recent(self, n: int = 20) -> List[Dict[str, str]]:
+        if n <= 0:
+            return []
+        window = self.messages[-n:] if n else []
         return [
             {
-                "role": m["role"], 
-                "content": m["content"],
+                "role": str(m.get("role", "")),
+                "content": str(m.get("content", "")),
             }
-            for m in self.messages[-n:]
+            for m in window if isinstance(m, dict)
         ]
 
 
@@ -170,12 +169,47 @@ class Character:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Character":
-        char = cls(data.get("id", "").strip())
-        char.name = data.get("name", "").strip()
-        char.attributes = CharacterAttributes(**data.get("attributes", {}))
-        char.state = CharacterState(**data.get("state", {}))
-        char.created_at = data.get("created_at", 0.0)
-        char.updated_at = data.get("updated_at", 0.0)
+        """读档恢复：按字段白名单构造，未知字段直接忽略。"""
+        raw = data if isinstance(data, dict) else {}
+        char = cls(str(raw.get("id", "") or "").strip())
+        char.name = str(raw.get("name", "") or "").strip()
+        char.avatar = str(raw.get("avatar", "") or "")
+
+        attr_fields = set(CharacterAttributes.__dataclass_fields__)
+        attr_raw = raw.get("attributes") if isinstance(raw.get("attributes"), dict) else {}
+        char.attributes = CharacterAttributes(
+            **{
+                k: _coerce_field(v) for k, 
+                v in attr_raw.items() 
+                if k in attr_fields
+            }
+        )
+
+        state_fields = set(CharacterState.__dataclass_fields__)
+        state_raw = raw.get("state") if isinstance(raw.get("state"), dict) else {}
+        state_kwargs: Dict[str, Any] = {
+            k: _coerce_field(v) for k, v in state_raw.items() if k in state_fields
+        }
+        status = state_kwargs.pop("status", None)
+        char.state = CharacterState(**state_kwargs)
+        try:
+            raw_status = getattr(status, "value", status)
+            char.state.status = (
+                CharacterStatus(str(raw_status)) if raw_status is not None
+                else CharacterStatus.IDLE
+            )
+        except (ValueError, TypeError):
+            char.state.status = CharacterStatus.IDLE
+        if not char.state.character_id:
+            char.state.character_id = char.id
+
+        try:
+            char.created_at = float(raw.get("created_at", 0.0) or 0.0)
+            char.updated_at = float(raw.get("updated_at", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            char.created_at = char.updated_at = time.time()
+        char.__post_init__()
+        char.sync_mood_name()
         return char
 
     def to_dict(self) -> Dict[str, Any]:
@@ -186,6 +220,7 @@ class Character:
             "state": _jsonable(asdict(self.state)),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "avatar": self.avatar,
         }
 
     def sync_mood_name(self) -> None:

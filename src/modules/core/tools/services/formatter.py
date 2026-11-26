@@ -152,9 +152,29 @@ class CommandParser:
         if first_token == "skill":
             parts = stripped.split(maxsplit=1)
             params = cls._parse_params(parts[1] if len(parts) > 1 else "")
-            # 缺少 --id 也不是合法 skill 命令
+            # PR-3：命令文本只认 --id。原来缺 --id / 误用 --name 时返回
+            # None（被当自然语言静默丢掉），审批链上既看不到错误也无从
+            # 计数。现在统一变成 error 命令，由 validator 记为明确拒绝。
+            if "name" in params and "id" not in params:
+                return CommandData(
+                    service="error",
+                    method="error",
+                    params={
+                        "reason": "skill 命令只接受 --id；--name 不是合法参数"
+                                  "（技能名可重复，id 才唯一）"
+                    },
+                    raw=stripped,
+                )
             if not cls._SKILL_REQUIRED_PARAMS <= set(params.keys()):
-                return None
+                return CommandData(
+                    service="error",
+                    method="error",
+                    params={
+                        "reason": 'skill 命令缺少 --id 参数'
+                                  '（应为: skill --id <id> --des "..."）'
+                    },
+                    raw=stripped,
+                )
             return CommandData(
                 service="skill",
                 method="run",

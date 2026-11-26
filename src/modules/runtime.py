@@ -81,7 +81,9 @@ class StandardPaths:
     
     @classmethod
     def get_template_dir(cls) -> Path:
-        return cls.get_template_dir()
+        # 原实现 return cls.get_template_dir() 无限递归，导致
+        # RuntimePath.get_template_path("roles.yaml") 必 RecursionError。
+        return cls.get_resources_dir() / "templates"
 
     @classmethod
     def get_user_data_dir(cls) -> Path:
@@ -234,6 +236,7 @@ class RuntimeManager:
         self.task_manager = None       # 与 scheduler 同一个对象，供 API 层读取
         self.event_bus = None
         self.save_manager = None
+        self.save_coordinator = None
 
         from .characters.manager import CharacterManager
         from .manager.session.manager import SessionManager
@@ -260,6 +263,39 @@ class RuntimeManager:
         except Exception as e:  # noqa: BLE001
             get_logging().warning(f"[App] save manager init failed: {e}")
             self.save_manager = None
+        # 角色注册表之前从未被加载：get_current() 恒为 None。
+        # 先加载内置模板保证注册表非空，随后 bootstrap 用存档覆盖。
+        try:
+            self.character_manager.load_characters()
+        except Exception as e:  # noqa: BLE001
+            get_logging().warning(f"[App] character manager init failed: {e}")
+
+        # 存档组合根必须由应用层显式装配，不能只在 controller 里
+        # 首次调用时懒构造（那时各域运行态早已偏离存档）。
+        try:
+            import sqlite3
+
+            from .manager.saves.coordinator import get_save_coordinator
+
+            def conn_factory():
+                return sqlite3.connect(
+                    str(RuntimePath.get_memory_db_path()),
+                    timeout=5.0,
+                    check_same_thread=False,
+                )
+
+            self.save_coordinator = get_save_coordinator(
+                save_manager=self.save_manager,
+                conn_factory=conn_factory,
+            )
+            boot = self.save_coordinator.bootstrap()
+            if not boot.get("ok"):
+                get_logging().debug(
+                    f"[App] 无可恢复的当前存档，按新会话启动: "
+                    f"{boot.get('code', '')}"
+                )
+        except Exception as e:  # noqa: BLE001
+            get_logging().warning(f"[App] save coordinator init failed: {e}")
         self._running = True
 
     def _register_all_ops(self):
@@ -292,15 +328,19 @@ class RuntimeManager:
         self.task_manager = self.scheduler
 
     def _save_saves(self):
-        """退出前保存存档。失败只记录，绝不阻塞关机。"""
+        """退出前把全域运行态写进存档。失败只记录，绝不阻塞关机。"""
         log = get_logging()
-        mgr = getattr(self, "save_manager", None)
-        if mgr is None:
-            log.debug("[App] 存档管理器未就绪，跳过退出保存")
+        coord = getattr(self, "save_coordinator", None)
+        if coord is None:
+            log.warning("[App] 存档组合根未装配，跳过退出保存")
             return
         try:
-            mgr.save_slot()
-            log.info("[App] 存档已保存")
+            report = coord.flush()
+            snapshot = report.get("snapshot") or {}
+            log.info(
+                f"[App] 存档已保存: revision={snapshot.get('revision', '')} "
+                f"slot_saved={report.get('slot_saved', False)}"
+            )
         except Exception as e:  # noqa: BLE001
             log.warning(f"[App] save slot error: {e}")
 

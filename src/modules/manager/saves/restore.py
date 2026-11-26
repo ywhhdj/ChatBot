@@ -1,18 +1,11 @@
-"""恢复事务协调器（B1-03 剩余 / S2-03 / S2-05）。
+"""恢复事务协调器
 
-依据 `GameSaveArchitecture.md` §6「Preview → Prepare → Commit → Verify」
-与 `MementoMemoryIntegration.md` §4 / §5 / §8。
-
-前几轮 B1-03 只做了 `preview_restore()`；Prepare/Commit/Rollback
-一直卡在"各 originator 没提供 restore 接口"。`originators.py` 把契约
-定死后，本文件把事务闭环补上。
-
-失败语义（§6 最后一段，最重要的一条）
+失败语义
 ────────────────────────────────────
 * 任一 Prepare 失败 → 运行态**完全不变**，报告 `rejected`；
 * Commit 中途某域失败 → 对已提交域**逆序 rollback**；
 * rollback 也失败 → 必须报 `partial_failure` 并附恢复指引，
-  **绝不回报普通成功**；
+  绝不回报普通成功；
 * Verify 失败同样触发 rollback。
 
 乐观版本检查
@@ -20,18 +13,6 @@
 Prepare 时记下 current revision，Commit 前再读一次。
 并发保存/恢复导致指针变了就拒绝（`conflict`），否则会把
 "A 准备的状态"覆盖到"B 已经推进到"的时间线上。
-
-分支语义（§5）
-──────────────
-从旧 revision 恢复并继续游玩，新保存的 revision 以**被恢复者**
-为 parent，自然形成 DAG；旧 revision 不被覆盖。
-协调器把 `active_revision` 暴露给 `create_snapshot` 的调用方。
-
-恢复期间调度暂停（§8 / S2-05）
-────────────────────────────
-固化、GC、自动存档在事务进行中一律暂停，Verify 通过后才恢复。
-暂停用可重入计数 + finally 释放：嵌套事务、异常退出都不会
-把调度永久关掉。
 """
 
 from __future__ import annotations

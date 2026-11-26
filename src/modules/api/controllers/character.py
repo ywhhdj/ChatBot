@@ -1,10 +1,4 @@
-"""角色接口：列表、当前角色、切换、增删改、运行时状态、预设模板。
-
-对应 api文档.md 第 9 节。
-
-角色对象同时被 Web 线程（API）与主线程（UI）访问，
-管理器内部用 `RLock` 保护，API 层只做读写 + 序列化。
-"""
+"""角色接口：列表、当前角色、切换、增删改、运行时状态、预设模板"""
 
 from __future__ import annotations
 from typing import Any, Dict, List
@@ -109,16 +103,20 @@ async def presets() -> ApiResponse[Dict[str, Any]]:
     from ...characters import presets as _p
 
     names: List[Dict[str, Any]] = []
+    # create_custom 需要参数、create_defaults 返回列表，二者都不是
+    # "无参返回单个 Character" 的预设工厂，不能混进目录（原实现会让
+    # create_defaults() 每调用一次就重读一次角色模板）。
+    skip = {"create_custom", "create_defaults"}
     for attr in dir(_p):
-        if not attr.startswith("create_"):
-            continue
-        if attr in ("create_custom",):
+        if not attr.startswith("create_") or attr in skip:
             continue
         fn = getattr(_p, attr)
         if not callable(fn):
             continue
         try:
             char = fn()
+            if not hasattr(char, "id"):
+                continue
             names.append({"id": char.id, "name": char.name, "factory": attr}) # type: ignore
         except Exception:
             continue

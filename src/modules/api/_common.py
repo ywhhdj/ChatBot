@@ -1,6 +1,6 @@
 """Controller 公共工具。
 
-三条硬约束（沿用前几轮修复的架构）
+三条硬约束
 ──────────────────────────────────
 1. **Web 线程只做转发**。任何耗时操作（LLM 推理、模型加载、文件 IO）
    都要么交给任务调度器（自有 loop），要么走 `asyncio.to_thread` 的线程池。
@@ -60,8 +60,11 @@ async def run_in_scheduler(
         if inspect.iscoroutinefunction(func):
             return await asyncio.wait_for(func(*args, **kwargs), timeout=timeout)
         return await asyncio.wait_for(
-            asyncio.to_thread(func, *args, **kwargs), timeout=timeout
+            asyncio.to_thread(func, *args, **kwargs), 
+            timeout=timeout
         )
+    if task_type == "async" and not inspect.iscoroutinefunction(func):
+        task_type = "sync"
     ref = s.submit(func, *args, task_type=task_type, timeout=timeout, **kwargs)
     return await ref.wait_async(timeout=timeout)
 

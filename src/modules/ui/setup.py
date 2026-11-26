@@ -42,6 +42,30 @@ class UIApp:
         self._ui_mode_resolved: str = ""
         self._resource_dir: str = ""
 
+    # ---------- 可存档的显示偏好（PR-2 UIOriginator 接口） ----------
+
+    def display_state(self) -> dict:
+        """导出显示偏好。只读，不含任何 Qt 对象。"""
+        return {
+            "width": int(self._browser_width),
+            "height": int(self._browser_height),
+            "frameless": bool(self._browser_frameless),
+            "transparent": bool(self._browser_transparent),
+            "ui_mode": str(self._ui_mode or "auto"),
+        }
+
+    def apply_display_state(self, data: dict) -> None:
+        """恢复显示偏好。只改配置字段，不创建/销毁窗口（恢复事务禁止碰 UI）。"""
+        if not isinstance(data, dict):
+            return
+        self._browser_width = int(data.get("width", self._browser_width) or 1100)
+        self._browser_height = int(data.get("height", self._browser_height) or 720)
+        self._browser_frameless = bool(data.get("frameless", self._browser_frameless))
+        self._browser_transparent = bool(data.get("transparent", self._browser_transparent))
+        mode = str(data.get("ui_mode") or "").strip().lower()
+        if mode in ("auto", "desktop", "web"):
+            self._ui_mode = mode
+
     # ---------- 定时器 ----------
 
     def _stop_timers(self) -> None:

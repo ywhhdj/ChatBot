@@ -1,10 +1,4 @@
-"""存档槽接口：列表、新建、切换、保存、加载、分区更新、与会话互同步。
-
-对应 api文档.md 第 8 节。
-
-`sections`：`characters` `ui` `chat_history` `achievements` `story`。
-存档落盘涉及文件 IO，全部走线程池。
-"""
+"""存档槽接口：列表、新建、切换、保存、加载、分区更新、与会话互同步"""
 
 from __future__ import annotations
 
@@ -32,9 +26,9 @@ router = APIRouter(prefix="/api/save", tags=["save"])
 
 
 def _sm():
-    from ...manager.saves.manager import save_slot_manager
+    from ...manager.saves.manager import SaveSlotManager
 
-    return save_slot_manager
+    return SaveSlotManager()
 
 
 def _field(payload: Any, name: str, default: Any = None) -> Any:
@@ -188,10 +182,10 @@ async def sync_from_sessions(
 
 @router.post("/slots/restore", response_model=ApiResponse[Dict[str, Any]])
 async def restore_to_sessions() -> ApiResponse[Dict[str, Any]]:
-    """存档 → 会话：从当前槽恢复会话与消息（只读存档）。"""
+    """存档 → 运行态：按 current revision 恢复全部已注册域（PR-2）。"""
     sm = _sm()
     result = await to_thread(sm.restore_to_sessions)
-    return success(result, message=f"已恢复 {result.get('restored', 0)} 个会话")
+    return success(result, message=f"已恢复 {result.get('restored', 0)} 个领域")
 
 
 # ─────────────────── Snapshot revision（api.md §7 P2） ───────────────────
@@ -204,11 +198,7 @@ def _coordinator():
         from ...runtime import RuntimePath
 
         sm = _sm()
-        root = str(
-            getattr(sm, "root", "")
-            or RuntimePath.get_user_data_path("snapshots")
-        )
-        db = RuntimePath.get_user_data_path("memory") / "memories.db"
+        db = RuntimePath.get_memory_db_path()
 
         def conn_factory():
             return sqlite3.connect(
@@ -216,7 +206,7 @@ def _coordinator():
             )
 
         return get_save_coordinator(
-            save_manager=sm, root=root, conn_factory=conn_factory
+            save_manager=sm, conn_factory=conn_factory
         )
     except Exception:  # noqa: BLE001
         raise ApiError.not_initialized(

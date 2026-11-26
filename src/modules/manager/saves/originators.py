@@ -1,16 +1,6 @@
-"""领域快照 Originator 契约（B1-03 剩余 / S2-01 前置）。
+"""领域快照 Originator 契约
 
-依据 `GameSaveArchitecture.md` §2 / §6 与
-`MementoMemoryIntegration.md` §2.1。
-
-为什么先定契约再写实现
-──────────────────────
-前几轮 B1-03 只做了 `preview_restore()`，Prepare/Commit/Rollback
-一直没动，原因写进了 PLAN.md §6："需各 originator 提供 restore 接口"。
-本文件把那个接口**定死**，让 Caretaker 与领域实现可以并行落地，
-而不是把半成品散在各处。
-
-四阶段语义（§6）
+四阶段语义
 ────────────────
 | 阶段 | 允许做什么 | 禁止做什么 |
 |---|---|---|
@@ -23,12 +13,6 @@
 中途某域失败时，对已提交的域按逆序调 `rollback_restore()`。
 因此每个 originator 的 `prepare_restore()` 必须保存 enough state
 让 rollback 能独立工作 —— 不能依赖"上一个域的暂存对象还在"。
-
-依赖方向
-────────
-本文件只依赖标准库；`memento.py` 的文件层类型通过
-`TYPE_CHECKING` 引用，避免契约层反向依赖文件层。
-具体领域实现（MemoryOriginator 等）单向实现这里的 Protocol。
 """
 
 from __future__ import annotations

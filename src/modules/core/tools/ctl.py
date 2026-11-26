@@ -1,6 +1,7 @@
 """服务编排器：把 LLM 产出的命令文本解析、校验、执行并汇总。"""
 
 from __future__ import annotations
+import asyncio
 import hashlib
 from pathlib import Path
 import threading
@@ -22,7 +23,10 @@ from .services.models import (
     OrchestrationState,
 )
 from .model import OrchestrationConfig
-from .skills.manager import ExternalSkillManager
+from .skills.manager import ExternalSkillManager, cap_skill_result
+
+#: 命令链上的技能执行硬上限（controller 侧另有 30s 封顶）。
+SKILL_EXEC_TIMEOUT = 30.0
 
 
 def _tool_call_id(command: Any) -> str:
@@ -354,8 +358,6 @@ class CLTTool:
             if verdict.allowed:
                 continue
 
-            # B1-08：被拒绝的调用单独发事件。与正常调用分开是为了
-            # 让"被拒"可被计数告警——混在成功事件里就会被淹没。
             self._record_denial(service_name, method_name, verdict.reason_code.value)
 
             logger.warning(
@@ -401,54 +403,82 @@ class CLTTool:
                 f"[Orchestrator] 工具拒绝留痕: {service}.{method} ({reason_code})"
             )
 
+    @staticmethod
+    def _skill_exec_type(skill: Any) -> str:
+        value = getattr(skill, "exec_type", "none")
+        return str(getattr(value, "value", value) or "none")
+
     async def _execute_skill_command(self, command: CommandData) -> CommandResult:
+        """`skill --id <id>` 命令链。与修复后的沙盒返回结构对齐。
+
+        PR-3：原实现把非 dict 返回值当成"成功"（`ok = data is not None`），
+        且没有超时封顶；沙盒修好后失败会带 `ok=False`，这里必须如实映射，
+        不能把错误再包装成成功。
+        """
         started = time.perf_counter()
         params = dict(command.get("params", {}) or {})
         skill_id = str(params.get("id", "") or "").strip()
-        if not skill_id:
-            return CommandResult(
-                ok=False,
-                service="skill",
-                method="run",
-                status=CommandStatus.ERROR.value, data=None,
-                error='skill 命令缺少 --id 参数（应为: skill --id <id> --des "..."）',
-                elapsed_ms=int((time.perf_counter() - started) * 1000),
-                raw=command.get("raw", ""),
-            )
-        try:
-            data = await self._skills.execute_skill(skill_id, params)
-            if isinstance(data, dict):
-                ok = bool(data.get("ok"))
-                error = None if ok else data.get("error")
-            else:
-                ok = data is not None
-                error = None if ok else "技能未返回结果"
-                data = {
-                    "ok": ok,
-                    "data": data
-                }
+        raw = str(command.get("raw", "") or "")
+
+        def _result(ok: bool, data: Any, error: Optional[str]) -> CommandResult:
             return CommandResult(
                 ok=ok,
                 service="skill",
                 method="run",
-                status=CommandStatus.SUCCESS.value if ok else CommandStatus.ERROR.value,
+                status=(
+                    CommandStatus.SUCCESS.value if ok
+                    else CommandStatus.ERROR.value
+                ),
                 data=data,
                 error=error,
                 elapsed_ms=int((time.perf_counter() - started) * 1000),
-                raw=command["raw"],
+                raw=raw,
             )
-        except Exception as exc:
+
+        if not skill_id:
+            reason = 'skill 命令缺少 --id 参数（应为: skill --id <id> --des "..."）'
+            if "name" in params:
+                reason = (
+                    "skill 命令只接受 --id；--name 不是合法参数"
+                    "（技能名可重复，id 才唯一）"
+                )
+            return _result(False, None, reason)
+
+        # shell 明确拒绝：可识别、可见、可启用，但不落到执行。
+        skill = self._skills.get_skill(skill_id)
+        if skill is not None and self._skill_exec_type(skill) == "shell":
+            return _result(
+                False, None,
+                "shell 技能暂不支持执行，请改用 python 沙盒实现",
+            )
+
+        try:
+            data = await asyncio.wait_for(
+                self._skills.execute_skill(skill_id, params),
+                timeout=SKILL_EXEC_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            return _result(
+                False, None,
+                f"技能 {skill_id} 执行超时（>{SKILL_EXEC_TIMEOUT}s）",
+            )
+        except Exception as exc:  # noqa: BLE001
             logger.warning(f"Skill execution failed: {exc}")
-            return CommandResult(
-                ok=False,
-                service="skill",
-                method="run",
-                status=CommandStatus.ERROR.value,
-                data=None,
-                error=str(exc),
-                elapsed_ms=int((time.perf_counter() - started) * 1000),
-                raw=command["raw"],
-            )
+            return _result(False, None, str(exc))
+
+        if not isinstance(data, dict):
+            data = {"ok": False, "error": "技能返回结构非法"}
+        data = cap_skill_result(data)
+        ok = bool(data.get("ok"))
+        error = None if ok else str(data.get("error") or "技能执行失败")
+        # 成功回传结构化结果；失败只回低基数信息，不把 stdout 正文
+        # 带回工具卡片（与审计"不存正文"同一口径）。
+        payload = dict(data) if ok else {
+            "ok": False,
+            "error": error,
+            "truncated": bool(data.get("truncated")),
+        }
+        return _result(ok, payload, error)
 
     # ---------- 审计 ----------
 

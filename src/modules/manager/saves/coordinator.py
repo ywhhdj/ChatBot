@@ -1,18 +1,7 @@
-"""存档域组合根（L1-01 / S2-01 / S2-05）。
+"""存档域组合根
 
 把契约、领域实现、事务协调器、自动存档策略**装配**起来。
 这是唯一允许出现"知道所有具体类型"的地方；其余模块只认端口。
-
-为什么单独一个组合根
-────────────────────
-`MemoryOriginator` 在 `memory/`，`RestoreCoordinator` 在
-`manager/saves/`，`SaveSlotManager` 也在 `manager/saves/`。
-若让它们互相 import 并各自取单例，会出现：
-* 谁先构造谁不确定（时钟锚点、墓碑快照的时机漂移）；
-* 测试无法整体替换成内存库；
-* 恢复事务与自动存档各拿一个 gate，暂停语义失效。
-
-组合根显式注入，所有依赖方向单一，测试可整体替换。
 """
 
 from __future__ import annotations
@@ -68,7 +57,7 @@ class SaveCoordinator:
             memory_probe=self._memory_probe,
         )
 
-        # ── 自动存档（S2-03）──
+        # ── 自动存档──
         self.autosave = AutoSavePolicy(
             create_snapshot=self._create_snapshot,
             list_revisions=lambda sid: self.save_manager.list_snapshots(sid),
@@ -94,7 +83,7 @@ class SaveCoordinator:
         report = self.restore_coordinator.restore(
             slot_id, revision, branch_id=branch_id, label=label
         )
-        # S2-05：事务结束后恢复调度，并让 pre-restore 缓冲期开始计时
+        # 事务结束后恢复调度，并让 pre-restore 缓冲期开始计时
         self.autosave.note_restore_finished(report.ok)
         return report.as_dict()
 
@@ -204,7 +193,7 @@ class SaveCoordinator:
             return False
 
     def _memory_probe(self, manifest: Any) -> Dict[str, Any]:
-        """Preview 用的**只读**运行态探针（S2-04）。
+        """Preview 用的**只读**运行态探针
 
         提供文件层拿不到的三件事：快照之后新增的条数、
         当前生效的墓碑数、当前时钟。绝不写库。
@@ -306,7 +295,7 @@ class SaveCoordinator:
 
     @staticmethod
     def _audit(action: str, data: Dict[str, Any]) -> None:
-        """结构化审计。动作名收敛到稳定低基数（§5），阶段放 metadata。"""
+        """结构化审计。动作名收敛到稳定低基数，阶段放 metadata。"""
         try:
             normalized = (
                 audit.Action.SNAPSHOT_PUBLISH.value

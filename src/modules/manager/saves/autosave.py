@@ -17,12 +17,6 @@
 * **恢复事务进行中暂停**：由 `SchedulerGate` 判定，事务结束后才恢复；
 * **GC 先 dry-run**：本模块只产候选清单，不执行删除。真正删除需要
   单独审批（与 `memory.gc.apply` 一样的纪律）。
-
-为什么"只列不删"
-────────────────
-`GameSaveArchitecture.md` §8 要求 GC 先 dry-run 输出将删除的
-revision、估算字节与引用计数。自动流程若顺手把旧 revision 删了，
-一旦用户刚想回档就发现恢复点没了 —— 这是不可撤销的损失。
 """
 
 from __future__ import annotations
